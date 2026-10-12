@@ -6,11 +6,11 @@ DeepSeek Harness 是这个轻量、社区维护的 Android WebView 薄壳的显�
 
 当前只支持 Android。iOS 客户端仍为未发布的本地开发实验，不进入构建、Release 或支持范围。
 
-当前正式 App 为 **0.6.2**。本版构建号为 78。App 与 npm 插件独立更新；插件的网页或连接修复不要求重新安装 APK。请在原生功能更新或提示版本过旧时安装新的正式签名 APK。旧正式版使用相同签名时可原位升级保留配对；不同签名的 Debug 包不能直接覆盖正式版。
+当前正式 App 为 **0.6.3**。本版构建号为 79。App 与 npm 插件独立更新；插件的网页或连接修复不要求重新安装 APK。请在原生功能更新或提示版本过旧时安装新的正式签名 APK。旧正式版使用相同签名时可原位升级保留配对；不同签名的 Debug 包不能直接覆盖正式版。
 
-## 0.6.3 候选（未发布）
+## 0.6.3 更新
 
-构建 79 改进逐设备恢复指引，允许管理 CA 已过期的设备记录，防止重复提交配对，并对设备状态检测去重，为主动连接保留执行空间；TLS 仍拒绝过期证书。本候选还改善深色主按钮文字对比度，明确排除加密配对及 WebView 会话的云备份和设备迁移，并包含此前的自动恢复归属修正。这些原生改动需要新版 App，上方下载仍指向已发布的 0.6.2 APK。详见 [0.6.4 更新记录](../../CHANGELOG.md#064---2026-10-12)。
+构建 79 改进逐设备恢复指引，允许管理 CA 已过期的设备记录，防止重复提交配对，并对设备状态检测去重，为主动连接保留执行空间；TLS 仍拒绝过期证书。本版还改善深色主按钮文字对比度，明确排除加密配对及 WebView 会话的云备份和设备迁移，并包含此前的自动恢复归属修正。本签名 App 与插件 0.6.4 独立发布。
 
 ## 0.6.2 更新
 
@@ -129,7 +129,7 @@ Set-Location apps/mobile/android
 ./gradlew.bat :app:lintDebug :app:testDebugUnitTest :app:assembleDebug -x :app:lintAnalyzeDebugUnitTest -x :app:lintAnalyzeDebugAndroidTest
 ```
 
-Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。GitHub Release 使用仅保存在仓库 Secrets 中的稳定签名密钥生成已签名 Release APK；签名密钥与密码不会进入源码或构建产物。
+Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。GitHub Release 使用仅保存在仓库 Secrets 中的稳定签名密钥生成已签名 Release APK；签名密钥与密码不会进入源码或构建产物。当前正式签名版本为 [Android 0.6.3](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.3)，SHA-256 为 `167b9447cf5b700b811b6b5279e2935b5aca250e5f1a3b59fa7cf13b1af9e497`。
 
 ## 验收
 

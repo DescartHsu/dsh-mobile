@@ -6,11 +6,11 @@ DeepSeek Harness is the display name of this lightweight, community-maintained A
 
 Android is the only supported native target. The iOS client remains an unpublished local experiment and is outside the build, release, and support scope.
 
-The current stable app is **0.6.2** (build 78). The app and npm plugin update independently; plugin web UI or connection fixes do not require reinstalling the APK. Install a new signed release APK for native updates or when the app reports that its version is too old. Older official APKs with the same signer retain pairing during in-place upgrades; a differently signed Debug build cannot overwrite the official app.
+The current stable app is **0.6.3** (build 79). The app and npm plugin update independently; plugin web UI or connection fixes do not require reinstalling the APK. Install a new signed release APK for native updates or when the app reports that its version is too old. Older official APKs with the same signer retain pairing during in-place upgrades; a differently signed Debug build cannot overwrite the official app.
 
-## 0.6.3 candidate (unreleased)
+## 0.6.3 update
 
-Build 79 adds per-computer recovery guidance, readable expired-CA records, duplicate-pairing protection and deduplicated status checks that leave capacity for an explicit connection. TLS still refuses expired certificates. It also improves dark-mode primary buttons and explicitly excludes encrypted pairings and WebView sessions from cloud backup and device transfer. The earlier automatic-recovery ownership corrections are included in this candidate. These native changes require a new App; the download above remains the published 0.6.2 APK. See the [0.6.4 release notes](../../CHANGELOG.md#064---2026-10-12) for the independent App candidate status.
+Build 79 adds per-computer recovery guidance, readable expired-CA records, duplicate-pairing protection and deduplicated status checks that leave capacity for an explicit connection. TLS still refuses expired certificates. It also improves dark-mode primary buttons and explicitly excludes encrypted pairings and WebView sessions from cloud backup and device transfer. The earlier automatic-recovery ownership corrections are included. This signed App is published independently from plugin 0.6.4.
 
 ## 0.6.2 update
 
@@ -129,7 +129,7 @@ Set-Location apps/mobile/android
 ./gradlew.bat :app:lintDebug :app:testDebugUnitTest :app:assembleDebug -x :app:lintAnalyzeDebugUnitTest -x :app:lintAnalyzeDebugAndroidTest
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub Releases build a signed release APK with a stable signing key stored only in repository secrets; signing keys and passwords never enter the source tree or build artifacts.
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub Releases build a signed release APK with a stable signing key stored only in repository secrets; signing keys and passwords never enter the source tree or build artifacts. The current signed release is [Android 0.6.3](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.3), with SHA-256 `167b9447cf5b700b811b6b5279e2935b5aca250e5f1a3b59fa7cf13b1af9e497`.
 
 ## Acceptance
 

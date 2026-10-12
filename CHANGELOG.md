@@ -4,7 +4,7 @@ Notable changes are recorded here. GitHub Releases provide the downloadable pack
 
 ## 0.6.4 - 2026-10-12
 
-- Release 0.6.4 improves the mobile composer, Windows Desktop startup composition and connection/data reliability. The Android App remains independently versioned; its current candidate is 0.6.3 (build 79), while the public App download remains 0.6.2 (build 78).
+- Release 0.6.4 improves the mobile composer, Windows Desktop startup composition and connection/data reliability. The Android App remains independently versioned; Android 0.6.3 (build 79) is published separately at `android-v0.6.3`.
 - Integrate the focused composer overflow fix from [PR #200](https://github.com/saya-ch/dsh-mobile/pull/200): public-slot wrappers around compact non-switch buttons reserve the mobile 44px touch target without resizing switches, dialogs, menus, nested controls or wide layouts. The packed real-slot smoke covers the new geometry and activation cases; optional third-party services remain outside this presentation check. Thanks @abworks-dev.
 - Detect the Windows Desktop profile service as well as its later runtime marker before enabling the in-page directory picker, avoiding competing picker providers during early Windows Desktop boot while retaining the portable picker on macOS/Linux. This covers an early-boot composition risk relevant to [#199](https://github.com/saya-ch/dsh-mobile/issues/199); the reported community Desktop 2.0.17 failure and remote timeout still require acceptance in that environment.
 - Preserve custom Caddy sites during VPS deployment and cleanup. Recognize the complete stock file rather than matching a few default-site lines or a legacy comment; other configurations require an explicit manual merge.
@@ -22,7 +22,7 @@ Notable changes are recorded here. GitHub Releases provide the downloadable pack
 - Release discarded component-download response bodies before returning a rejection or following a validated redirect, and release reader locks after completion or failure. Keep the original validation error when cleanup fails instead of treating it as a retryable transport fault. Pinned sources, size/hash checks and redirect restrictions are unchanged; this does not establish the original cause of [#114](https://github.com/saya-ch/dsh-mobile/issues/114).
 - Close extension response streams when invalid HTTP metadata or a response-header write fails before pipeline ownership. Preserve normal streaming, HEAD and client-disconnection cleanup.
 - Cancel previous Android automatic-recovery ownership when opening LAN, remote or pairing configuration. Late renewal/cookie callbacks and queued retries cannot replace the user's form or take over a newer retry. This native correction requires a future App update; the already published APK is unchanged. Thanks @sznyhgm for [#96](https://github.com/saya-ch/dsh-mobile/issues/96).
-- Plugin and native App releases remain independent. This release does not replace the public Android App download; the 0.6.3 App candidate requires a separate signed Android release.
+- Plugin and native App releases remain independent. The signed Android 0.6.3 release is available separately and is not required for plugin-only updates.
 
 ## 0.6.3 - 2026-10-10
 

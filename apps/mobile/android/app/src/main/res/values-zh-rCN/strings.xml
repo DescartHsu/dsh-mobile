@@ -70,7 +70,7 @@
     <string name="cancel">取消</string>
     <string name="retry">重试</string>
     <string name="secure_connection_failed">安全连接失败</string>
-    <string name="secure_connection_failed_message">当前证书与已保存的电脑身份不一致。请确认未连错电脑；电脑重装或证书重置后，请清除站点数据并重新配对。</string>
+    <string name="secure_connection_failed_message">证书已过期，或与已保存的电脑身份不一致。请核对电脑及当前配对指纹，再从设备列表选择“添加电脑”扫描新二维码。也可只删除这台电脑的本机记录，无需清除其他配对。</string>
     <string name="page_load_failed">无法加载 DSH</string>
     <string name="webview_renderer_failed">DSH 页面连续停止运行。请更新 Android System WebView，然后重新连接这台电脑。</string>
     <string name="page_load_failed_message">DSH 可能未运行，或防火墙、当前网络阻止了连接。请先用手机浏览器测试电脑端地址；不通时改用手机热点。</string>

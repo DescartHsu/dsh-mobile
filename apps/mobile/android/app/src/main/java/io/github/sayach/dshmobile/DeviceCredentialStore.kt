@@ -59,7 +59,7 @@ internal class DeviceCredentialStore(
     private fun writeCredential(credential: DeviceCredential, allowNewKey: Boolean) {
         require(INSTANCE_ID.matches(credential.instanceId) && TOKEN.matches(credential.deviceToken))
         val encodedCa = credential.caCertificate?.let {
-            require(PairingTrust.validateCertificate(it, credential.instanceId) != null)
+            require(PairingTrust.validateStoredCertificate(it, credential.instanceId) != null)
             Base64.getEncoder().encodeToString(it)
         } ?: PUBLIC_TLS.also { require(slot != "lan") }
         val plaintext = "${credential.instanceId}\n${credential.deviceToken}\n${credential.expiresAt}\n$encodedCa"
@@ -82,7 +82,7 @@ internal class DeviceCredentialStore(
             val ca = fields[3].takeUnless { it == PUBLIC_TLS }?.let { Base64.getDecoder().decode(it) }
             if (slot == "lan" && ca == null) return null
             if (ca == null) DeviceCredential(fields[0], fields[1], expiresAt, null)
-            else PairingTrust.validateCertificate(ca, fields[0])?.let {
+            else PairingTrust.validateStoredCertificate(ca, fields[0])?.let {
                 DeviceCredential(fields[0], fields[1], expiresAt, it)
             }
         } catch (_: Exception) {

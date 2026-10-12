@@ -5,7 +5,7 @@ import {
   randomBytes,
 } from 'node:crypto'
 import { execFileText as execFile } from './exec-file.js'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { generate } from 'selfsigned'
@@ -281,16 +281,84 @@ export async function readManagedCa(setup: ManagedSetup['tls']): Promise<X509Cer
   return assertMatchingCa(certPem, keyPem)
 }
 
-async function atomicWrite(file: string, contents: string | Uint8Array): Promise<void> {
+async function stagePrivateFile(file: string, contents: string | Uint8Array): Promise<string> {
   const directory = dirname(file)
   await mkdir(directory, { recursive: true, mode: 0o700 })
   const temporary = join(directory, `.${basename(file)}.${randomBytes(12).toString('hex')}.tmp`)
   try {
-    await writeFile(temporary, contents, { mode: 0o600, flag: 'wx' })
+    await writeFile(temporary, '', { mode: 0o600, flag: 'wx' })
     await restrictPrivateFile(temporary)
+    await writeFile(temporary, contents)
+    return temporary
+  } catch (error) {
+    await rm(temporary, { force: true })
+    throw error
+  }
+}
+
+async function atomicWrite(file: string, contents: string | Uint8Array): Promise<void> {
+  const temporary = await stagePrivateFile(file, contents)
+  try {
     await rename(temporary, file)
     await restrictPrivateFile(file)
   } finally { await rm(temporary, { force: true }) }
+}
+
+const certificatePublications = new Map<string, Promise<void>>()
+
+/** Stage both files before promotion and retain a private rollback copy until the pair is installed. */
+async function installServerCertificatePair(output: ServerCertificateFiles, cert: string, key: string): Promise<void> {
+  const identity = `${output.certFile}\0${output.keyFile}`
+  const previous = certificatePublications.get(identity) ?? Promise.resolve()
+  const publication = previous.catch(() => undefined).then(async () => {
+    const files = [output.certFile, output.keyFile]
+    const contents = [cert, key]
+    const staged: string[] = []
+    const backups: Array<string | undefined> = []
+    let promoted = 0
+    let restored = true
+    const failures: unknown[] = []
+    try {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index]!
+        staged.push(await stagePrivateFile(file, contents[index]!))
+        let old: Buffer | undefined
+        try {
+          const metadata = await lstat(file)
+          if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('managed TLS output is not a regular file')
+          old = await readFile(file)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+        backups.push(old === undefined ? undefined : await stagePrivateFile(file, old))
+      }
+      for (let index = 0; index < files.length; index += 1) {
+        await rename(staged[index]!, files[index]!)
+        promoted += 1
+      }
+    } catch (error) {
+      failures.push(error)
+      for (let index = promoted - 1; index >= 0; index -= 1) {
+        try {
+          const backup = backups[index]
+          if (backup === undefined) await rm(files[index]!, { force: true })
+          else await rename(backup, files[index]!)
+        } catch (restoreError) { restored = false; failures.push(restoreError) }
+      }
+    } finally {
+      const cleanup = await Promise.allSettled(staged.map(file => rm(file, { force: true })))
+      for (const result of cleanup) if (result.status === 'rejected') failures.push(result.reason)
+      // Failed rollback copies stay private on disk for manual recovery.
+      if (restored) {
+        const backupCleanup = await Promise.allSettled(backups.filter((file): file is string => file !== undefined).map(file => rm(file, { force: true })))
+        for (const result of backupCleanup) if (result.status === 'rejected') failures.push(result.reason)
+      }
+    }
+    if (failures.length > 1) throw new AggregateError(failures, 'managed TLS certificate replacement, rollback or cleanup failed')
+    if (failures.length === 1) throw failures[0]
+  })
+  certificatePublications.set(identity, publication)
+  try { await publication } finally { if (certificatePublications.get(identity) === publication) certificatePublications.delete(identity) }
 }
 
 /** Create a long-lived CA or migrate the legacy self-signed server certificate as that CA. */
@@ -405,10 +473,7 @@ export async function issueServerCertificate(
       { name: 'subjectAltName', altNames },
     ],
   })
-  await Promise.all([
-    atomicWrite(output.certFile, server.cert),
-    atomicWrite(output.keyFile, server.private),
-  ])
+  await installServerCertificatePair(output, server.cert, server.private)
 }
 
 /** Sign and atomically install a server leaf for the interface's current address. */

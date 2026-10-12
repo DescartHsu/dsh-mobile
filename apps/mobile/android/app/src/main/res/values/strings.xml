@@ -71,7 +71,7 @@
     <string name="cancel">Cancel</string>
     <string name="retry">Retry</string>
     <string name="secure_connection_failed">Secure connection failed</string>
-    <string name="secure_connection_failed_message">The certificate does not match the saved computer identity. Confirm that this is the correct computer. If it was reinstalled or its certificate was reset, clear site data and pair again.</string>
+    <string name="secure_connection_failed_message">The certificate is expired or does not match the saved computer identity. Confirm the computer and its current pairing fingerprint, then use Add computer in the device list to scan its new QR code. You can delete only this computer\'s local record; other pairings do not need to be cleared.</string>
     <string name="page_load_failed">DSH could not be loaded</string>
     <string name="webview_renderer_failed">The DSH page stopped repeatedly. Update Android System WebView, then reconnect this computer.</string>
     <string name="page_load_failed_message">DSH may not be running, or a firewall or the current network may block the connection. Test the computer address in the phone browser; if it is unreachable, try a phone hotspot.</string>

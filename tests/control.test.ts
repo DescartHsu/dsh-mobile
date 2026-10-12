@@ -1,6 +1,6 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, win32 } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FollowingMobileAccessRuntime,
@@ -10,10 +10,13 @@ import {
   type MobileAccessControlStore,
   type MobileAccessRuntime,
 } from '../src/control.js'
+import * as privateFiles from '../src/private-file.js'
+import { execFileText } from '../src/exec-file.js'
 
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
 })
 
@@ -73,8 +76,58 @@ describe('mobile-access control state', () => {
   it('persists disabled state when an absent provider would otherwise start by default', async () => {
     const file = await controlFile()
     const store = new JsonMobileAccessControlStore(file, true)
-    await store.disableIfPresent()
+    const prepared = await store.disableIfPresent()
+    expect(prepared).toEqual({ version: 1, enabled: false })
+    expect(Object.isFrozen(prepared)).toBe(true)
     await expect(store.load()).resolves.toEqual({ version: 1, enabled: false })
+  })
+
+  it('prepares an absent already-disabled preference without creating a file', async () => {
+    const file = await controlFile()
+    const store = new JsonMobileAccessControlStore(file, false)
+    const permissions = vi.spyOn(privateFiles, 'restrictPrivateFile')
+    await expect(store.disableIfPresent()).resolves.toEqual({ version: 1, enabled: false })
+    await expect(lstat(file)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(permissions).not.toHaveBeenCalled()
+  })
+
+  it('does not replace an existing preference when private temporary-file preparation fails', async () => {
+    const file = await controlFile()
+    const store = new JsonMobileAccessControlStore(file, false)
+    await store.save({ version: 1, enabled: true })
+    const original = await readFile(file)
+    const failure = new Error('fixture ACL failure')
+    const permissions = vi.spyOn(privateFiles, 'restrictPrivateFile').mockRejectedValueOnce(failure)
+    await expect(store.disableIfPresent()).rejects.toBe(failure)
+    expect(permissions).toHaveBeenCalledWith(expect.stringMatching(/\.control\.json\.[a-f0-9]+\.tmp$/u))
+    expect(await readFile(file)).toEqual(original)
+    expect(await readdir(dirname(file))).toEqual(['control.json'])
+  })
+
+  it('does not expose a new preference when private temporary-file preparation fails', async () => {
+    const file = await controlFile()
+    const store = new JsonMobileAccessControlStore(file, true)
+    const failure = new Error('fixture ACL failure')
+    vi.spyOn(privateFiles, 'restrictPrivateFile').mockRejectedValueOnce(failure)
+    await expect(store.disableIfPresent()).rejects.toBe(failure)
+    await expect(lstat(file)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(dirname(file))).toEqual([])
+  })
+
+  it('retains the temporary file permissions after promotion without another ACL operation', async () => {
+    const file = await controlFile()
+    const store = new JsonMobileAccessControlStore(file, false)
+    const permissions = vi.spyOn(privateFiles, 'restrictPrivateFile')
+    await store.save({ version: 1, enabled: false })
+    expect(permissions).toHaveBeenCalledOnce()
+    expect(permissions).toHaveBeenCalledWith(expect.stringMatching(/\.control\.json\.[a-f0-9]+\.tmp$/u))
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ version: 1, enabled: false })
+    if (process.platform === 'win32') {
+      const systemRoot = process.env.SystemRoot ?? process.env.WINDIR
+      if (systemRoot === undefined || !win32.isAbsolute(systemRoot)) throw new Error('Windows fixture system directory is unavailable')
+      const { stdout } = await execFileText(win32.join(systemRoot, 'System32', 'icacls.exe'), [file], { timeout: 10_000 })
+      expect(/\(I\)|Everyone|Authenticated Users|BUILTIN\\Users|CodexSandboxUsers/iu.test(stdout)).toBe(false)
+    } else expect((await stat(file)).mode & 0o777).toBe(0o600)
   })
 })
 

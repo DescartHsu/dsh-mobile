@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   configuredRemoteProvider,
   JsonRemoteProviderStore,
+  prepareDisabledRemoteProviders,
+  REMOTE_PROVIDERS,
   parseRemoteProviderState,
   RemoteProviderCoordinator,
   settleRemoteResources,
@@ -14,6 +16,7 @@ import {
   type RemoteProviderController,
   type RemoteProviderStatus,
 } from '../src/remote.js'
+import type { MobileAccessControlState } from '../src/control.js'
 
 const temporaryDirectories: string[] = []
 
@@ -40,6 +43,54 @@ class FakeRemoteController implements RemoteProviderController {
 }
 
 describe('remote provider selection', () => {
+  it.each(REMOTE_PROVIDERS)('prepares only the inactive providers when %s is selected', async selected => {
+    const disabled: MobileAccessControlState = Object.freeze({ version: 1, enabled: false })
+    const stores = {
+      tailscale: { disableIfPresent: vi.fn(async () => disabled) },
+      cpolar: { disableIfPresent: vi.fn(async () => disabled) },
+      cloudflared: { disableIfPresent: vi.fn(async () => disabled) },
+      frp: { disableIfPresent: vi.fn(async () => disabled) },
+      origin: { disableIfPresent: vi.fn(async () => disabled) },
+    }
+    const prepared = await prepareDisabledRemoteProviders(selected, stores)
+    expect(prepared.size).toBe(4)
+    expect(prepared.has(selected)).toBe(false)
+    for (const provider of REMOTE_PROVIDERS) {
+      if (provider === selected) expect(stores[provider].disableIfPresent).not.toHaveBeenCalled()
+      else {
+        expect(stores[provider].disableIfPresent).toHaveBeenCalledOnce()
+        expect(prepared.get(provider)).toBe(disabled)
+      }
+    }
+  })
+
+  it('waits for a delayed disabled-state write before reporting another preparation failure', async () => {
+    const disabled: MobileAccessControlState = { version: 1, enabled: false }
+    const failure = new Error('fixture private-file failure')
+    let finishWrite: ((state: MobileAccessControlState) => void) | undefined
+    const delayed = new Promise<MobileAccessControlState>(resolve => { finishWrite = resolve })
+    const stores = {
+      tailscale: { disableIfPresent: vi.fn(async () => disabled) },
+      cpolar: { disableIfPresent: vi.fn(async () => { throw failure }) },
+      cloudflared: { disableIfPresent: vi.fn(async () => disabled) },
+      frp: { disableIfPresent: vi.fn(() => delayed) },
+      origin: { disableIfPresent: vi.fn(async () => disabled) },
+    }
+    let completed = false
+    const preparation = prepareDisabledRemoteProviders('tailscale', stores).catch((error: unknown) => {
+      completed = true
+      return error
+    })
+    try {
+      expect(stores.frp.disableIfPresent).toHaveBeenCalledOnce()
+      // The rejection handlers drain while the explicit write barrier remains held.
+      await new Promise<void>(resolve => { setImmediate(resolve) })
+      expect(completed).toBe(false)
+    } finally { finishWrite?.(disabled) }
+    expect(await preparation).toBe(failure)
+    expect(completed).toBe(true)
+  })
+
   it('accepts only one supported provider and no extra fields', () => {
     expect(parseRemoteProviderState({ version: 1, provider: 'tailscale' })).toEqual({ version: 1, provider: 'tailscale' })
     expect(parseRemoteProviderState({ version: 1, provider: 'cpolar' })).toEqual({ version: 1, provider: 'cpolar' })

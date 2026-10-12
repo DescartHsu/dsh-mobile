@@ -127,6 +127,8 @@ if [[ "$1" == api ]]; then
       policy-malformed) printf '{"protection_rules":{}}';;
       policy-empty) printf '{"protection_rules":[{"type":"required_reviewers","reviewers":[],"prevent_self_review":true}]}';;
       policy-self) printf '{"protection_rules":[{"type":"required_reviewers","reviewers":[{}],"prevent_self_review":false}]}';;
+      policy-bypass) printf '{"can_admins_bypass":true,"protection_rules":[{"type":"required_reviewers","reviewers":[{"type":"User","reviewer":{"id":1}}],"prevent_self_review":true}]}';;
+      policy-bypass-missing) printf '{"protection_rules":[{"type":"required_reviewers","reviewers":[{"type":"User","reviewer":{"id":1}}],"prevent_self_review":true}]}';;
       policy-reviewer-*)
         case "$CASE" in
           policy-reviewer-null) assignments='null';;
@@ -143,8 +145,8 @@ if [[ "$1" == api ]]; then
           policy-reviewer-mixed) assignments='{"type":"User","reviewer":{"id":1}},{}';;
           *) exit 9;;
         esac
-        printf '{"protection_rules":[{"type":"required_reviewers","reviewers":[%s],"prevent_self_review":true}]}' "$assignments";;
-      *) printf '{"protection_rules":[{"type":"required_reviewers","reviewers":[{"type":"User","reviewer":{"id":1}},{"type":"Team","reviewer":{"id":2}}],"prevent_self_review":true}]}';;
+        printf '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","reviewers":[%s],"prevent_self_review":true}]}' "$assignments";;
+      *) printf '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","reviewers":[{"type":"User","reviewer":{"id":1}},{"type":"Team","reviewer":{"id":2}}],"prevent_self_review":true}]}';;
     esac
     exit 0
   fi
@@ -189,7 +191,7 @@ printf '{}' > "$RUNNER_TEMP/caddy-review-catalog.json"
     ['verify-fail', 8], ['valid', 0],
     ['official-valid', 0], ['official-main-identical', 0],
     ...['policy401', 'policy403', 'policy404', 'policy500', 'policy-network', 'policy-json', 'policy-missing',
-      'policy-malformed', 'policy-empty', 'policy-self',
+      'policy-malformed', 'policy-empty', 'policy-self', 'policy-bypass', 'policy-bypass-missing',
       ...['null', 'empty', 'type', 'missing', 'null-object', 'array', 'zero', 'negative', 'fraction', 'unsafe', 'string', 'mixed'].map(value => 'policy-reviewer-' + value),
       'main-ahead', 'main-diverged', 'main-malformed', 'main-error',
       'wrong-tag', 'native-failure', 'no-input', 'double-input', 'wrong-event', 'wrong-repo', 'wrong-ref', 'wrong-component-tag', 'wrong-channel', 'private-repo', 'malformed-private']

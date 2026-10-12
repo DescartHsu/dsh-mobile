@@ -12,7 +12,7 @@ val releaseSigningConfigured = listOf(
     releaseStorePassword,
     releaseKeyAlias,
     releaseKeyPassword,
-).all { it.isPresent }
+).all { it.isPresent && it.get().isNotBlank() }
 
 android {
     namespace = "io.github.sayach.dshmobile"
@@ -22,8 +22,8 @@ android {
         applicationId = "io.github.sayach.dshmobile"
         minSdk = 29
         targetSdk = 36
-        versionCode = 78
-        versionName = "0.6.2"
+        versionCode = 79
+        versionName = "0.6.3"
     }
 
     signingConfigs {

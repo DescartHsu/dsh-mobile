@@ -7,6 +7,7 @@ const helperUrl = new URL('../scripts/mobile-boot-fixture.mjs', import.meta.url)
 const fixture: {
   removeTemporaryRoot: (root: string, prefix?: string) => Promise<void>
   sanitized: (text: string) => string
+  mobileProfilePnpmConfiguration: (options?: { packageStoreDirectory?: string; packageImportMethod?: string }) => string
 } = await import(helperUrl.href)
 const roots: string[] = []
 const prefix = 'dsh-mobile-fixture-test-'
@@ -20,6 +21,16 @@ async function temporaryRoot(): Promise<string> {
 }
 
 describe('owned Mobile development fixture', () => {
+  it('copies package files by default while retaining an explicit import-method probe', () => {
+    const settings = fixture.mobileProfilePnpmConfiguration()
+    expect(settings).toContain('packageImportMethod: "copy"')
+    expect(settings).toContain('nodeLinker: hoisted')
+    expect(settings).not.toContain('storeDir:')
+    const diagnostic = fixture.mobileProfilePnpmConfiguration({ packageImportMethod: 'auto', packageStoreDirectory: 'C:\\owned\\private-store' })
+    expect(diagnostic).toContain('packageImportMethod: "auto"')
+    expect(diagnostic).toContain('storeDir: "C:\\\\owned\\\\private-store"')
+  })
+
   it('removes projected links without deleting their outside target', async () => {
     const root = await temporaryRoot()
     const outside = await temporaryRoot()

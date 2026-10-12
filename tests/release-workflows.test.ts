@@ -42,6 +42,16 @@ describe('independent plugin and Android release workflows', () => {
     expect(publication).not.toContain('dsh-mobile-android-v${GITHUB_REF_NAME#v}.apk')
   })
 
+  it('reconciles immutable npm tarball integrity before continuing to GitHub publication', async () => {
+    const release = await workflow('release')
+    const commands = release.jobs.publish!.steps.map(step => step.run ?? '').join('\n')
+    expect(commands).toContain('node scripts/check-npm-release-integrity.mjs "$package" "$version"')
+    expect(commands).toContain('test "$publication" = "unpublished"')
+    expect(commands).not.toContain('npm view')
+    expect(commands.indexOf('check-npm-release-integrity.mjs')).toBeLessThan(commands.indexOf('npm publish'))
+    expect(release.jobs['github-release']!.needs).toBe('publish')
+  })
+
   it.each(['v0.6.1', 'android-v0.6.1'])('executes the Release note generator using the artifact App version and tag %s', async releaseTag => {
     const release = await workflow('release')
     const command = release.jobs['github-release']!.steps.find(step => step.name === 'Create GitHub release')!.run!

@@ -15,6 +15,7 @@ The native colors below mirror `apps/mobile/android/app/src/main/res/values[-nig
 | Primary text | `#111827` | `#F8FAFC` |
 | Secondary text | `#667085` | `#CBD5E1` |
 | Accent | `#2563EB` | `#60A5FA` |
+| Text on primary button | `#FFFFFF` | `#0F172A` |
 | Border | `#E4E7EC` | `#475569` |
 | Error | `#B91C1C` | `#FCA5A5` |
 

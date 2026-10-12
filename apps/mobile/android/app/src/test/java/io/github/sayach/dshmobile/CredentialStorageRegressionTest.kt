@@ -51,6 +51,57 @@ class CredentialStorageRegressionTest {
         status = PairedDeviceStatus.REACHABLE,
     )
 
+    @Test fun anExpiredPinnedCaKeepsAllEncryptedRowsReadableAndRepairable() {
+        val preferences = MemoryCredentialPreferences()
+        val crypto = JvmCredentialEncryption()
+        val store = PairedDeviceStore(preferences, crypto)
+        val expired = record().copy(
+            instanceId = TestCertificates.instanceIdOf(TestCertificates.expiredCa),
+            mode = AccessMode.LAN,
+            origin = GatewayOrigin.parse("https://192.168.1.20:3443")!!,
+            caCertificate = TestCertificates.expiredCa,
+        )
+        val publicRemote = record('b')
+        store.migrateLegacy(listOf(expired, publicRemote))
+
+        val reopened = PairedDeviceStore(preferences, crypto)
+        assertTrue(reopened.read() is CredentialRead.Loaded)
+        assertEquals(listOf(expired.key, publicRemote.key), reopened.load().map { it.key })
+        assertFalse(reopened.storageUnavailable)
+        reopened.requireReadable()
+        val replacement = expired.copy(deviceToken = "N".repeat(43), displayName = "Repaired computer")
+        reopened.upsert(replacement)
+        assertEquals("N".repeat(43), reopened.load().first().deviceToken)
+        assertTrue(reopened.remove(expired.key))
+        assertEquals(listOf(publicRemote), reopened.load())
+        reopened.upsert(record('c'))
+        assertEquals(listOf(publicRemote.key, record('c').key), reopened.load().map { it.key })
+    }
+
+    @Test fun anExpiredLegacyPinCanMigrateWithoutDiscardingItsDeviceToken() {
+        val preferences = MemoryCredentialPreferences()
+        val legacyPreferences = MemoryCredentialPreferences()
+        val crypto = JvmCredentialEncryption()
+        val old = DeviceCredentialStore(legacyPreferences, crypto, "lan")
+        val credential = DeviceCredential(
+            TestCertificates.instanceIdOf(TestCertificates.expiredCa), "T".repeat(43),
+            9999999999999L, TestCertificates.expiredCa,
+        )
+        old.save(credential)
+        val loaded = old.read()
+        require(loaded is CredentialRead.Loaded)
+        assertEquals(credential.instanceId, loaded.value.instanceId)
+        assertEquals(credential.deviceToken, loaded.value.deviceToken)
+        val store = PairedDeviceStore(preferences, crypto)
+        migrateLegacyPairedDevices(store, listOf(LegacyDeviceSlot(
+            AccessMode.LAN, GatewayOrigin.parse("https://192.168.1.20:3443")!!,
+            loaded, "Old computer", 10L,
+        )), 20L)
+        assertTrue(store.isMigrationComplete())
+        assertEquals(credential.deviceToken, store.load().single().deviceToken)
+        assertTrue(store.remove(store.load().single().key))
+    }
+
     @Test fun absentAndUnreadableAreDifferentAndCiphertextDoesNotExposeTokens() {
         val preferences = MemoryCredentialPreferences(); val crypto = JvmCredentialEncryption(); val store = PairedDeviceStore(preferences, crypto)
         assertEquals(CredentialRead.Absent, store.read())

@@ -1,3 +1,6 @@
+import { sha256 } from '@noble/hashes/sha256'
+import { bytesToHex } from '@noble/hashes/utils'
+
 /** Task-completion notifications for the Android shell.
  *
  * The page cannot know a run "finished" from any single event, so completion
@@ -74,14 +77,14 @@ export interface TaskNotifyOptions {
 
 const MAX_SEEN_QUESTION_KEYS = 20
 
-function sanitizeTagFragment(value: string): string {
-  return value.toLowerCase().replaceAll(/[^a-z0-9-]+/gu, '-').replaceAll(/^-+|-+$/gu, '').slice(0, TASK_NOTIFY_LIMITS.tag)
+/** A bounded native identifier derived from the complete, case-sensitive wire ID. */
+function notificationIdentity(value: string): string {
+  return bytesToHex(sha256(JSON.stringify(value)).subarray(0, 16))
 }
 
 /** Stable per-turn tag so concurrent sessions keep separate notifications. */
 export function taskCompletionTag(sessionId: string, turn: number): string {
-  const suffix = sanitizeTagFragment(`${sessionId}-${String(turn)}`) || 'task'
-  return `dsh-task-done-${suffix}`.slice(0, TASK_NOTIFY_LIMITS.tag)
+  return `dsh-task-done-${notificationIdentity(sessionId)}-${String(turn)}`
 }
 
 /** Decide whether the current snapshot deserves a system notification. */
@@ -188,7 +191,7 @@ export class TaskNotifyTracker {
   private event(kind: TaskNotifyKind, sessionLabel: string, questionKey: string | undefined): TaskNotifyEvent {
     const text = this.format(kind, sessionLabel)
     const tag = kind === 'question' && questionKey !== undefined
-      ? `dsh-task-question-${sanitizeTagFragment(questionKey) || 'pending'}`
+      ? `dsh-task-question-${notificationIdentity(questionKey)}`
       : 'dsh-task-done'
     return Object.freeze({ kind, title: text.title, body: text.body, tag })
   }
@@ -301,7 +304,7 @@ export function parseTaskNotifyPayload(value: unknown): { readonly sessionId: st
   } else return undefined
   if (typeof record.sessionId !== 'string' || record.sessionId.trim() === '') return undefined
   const turn = typeof record.turn === 'number' && Number.isSafeInteger(record.turn) && record.turn >= 0 ? record.turn : 0
-  return Object.freeze({ sessionId: record.sessionId.slice(0, 128), turn })
+  return Object.freeze({ sessionId: record.sessionId, turn })
 }
 
 /** Parse the small authenticated event used when the Host revokes this device. */

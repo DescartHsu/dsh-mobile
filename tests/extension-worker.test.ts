@@ -43,6 +43,46 @@ function captureLogger(): { lines: unknown[][]; logger: { debug: (...args: unkno
 const callerBase = () => ({ signal: new AbortController().signal, deviceId: 'device' })
 
 describe('extension worker rpc bridge', () => {
+  it('honors a longer configured activation budget through loading and explicit recovery', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-worker-activation-budget-')); directories.push(root)
+    const workerModule = await buildExtensionWorkerEntry()
+    await createExtensionDirectory(root, 'slow-init', `
+export default async api => {
+  await new Promise(resolve => setTimeout(resolve, 5500))
+  api.action('ping', { run: () => 'pong' })
+}
+`)
+    const context = new Context(); contexts.push(context)
+    const service = new MobileAccessService(context); services.push(service)
+    await service.startLocal(root, context, { hostExecution: { mode: 'worker', workerModule, activationTimeoutMs: 15_000 } })
+    expect(service.status()).toEqual({ loaded: 1, failed: 0 })
+    const active = service.extension('slow-init') as { readonly worker: ExtensionWorkerHost } | undefined
+    expect(active).toBeDefined()
+    await active!.worker.terminate('controlled-unavailable')
+    expect(service.status()).toEqual({ loaded: 0, failed: 1 })
+    await service.recoverExtension('slow-init')
+    expect(service.status()).toEqual({ loaded: 1, failed: 0 })
+    const reply = await service.invoke('slow-init', 'ping', {}, callerBase())
+    expect(reply).toBeInstanceOf(PreparedJsonResult)
+    expect((reply as PreparedJsonResult).bytes.toString()).toBe('"pong"')
+    await service.stopLocal()
+    expect(service.hostStatus().limits.workers).toBe(0)
+  }, 40_000)
+  it('cancels an in-flight Worker activation when its local service stops', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-worker-activation-stop-')); directories.push(root)
+    const workerModule = await buildExtensionWorkerEntry()
+    await createExtensionDirectory(root, 'pending-init', 'export default () => new Promise(() => {})')
+    const context = new Context(); contexts.push(context)
+    const service = new MobileAccessService(context); services.push(service)
+    const baseline = activeWorkerCount.current
+    const starting = service.startLocal(root, context, { hostExecution: { mode: 'worker', workerModule, activationTimeoutMs: 300_000 } })
+    await expect.poll(() => activeWorkerCount.current, { timeout: 5_000 }).toBe(baseline + 1)
+    await service.stopLocal()
+    await starting
+    expect(activeWorkerCount.current).toBe(baseline)
+    expect(service.hostStatus().limits.workers).toBe(0)
+    expect(service.extension('pending-init')).toBeUndefined()
+  })
   it('activates with metadata-only registration and a logger-only context adapter', async () => {
     const workerModule = await buildExtensionWorkerEntry()
     const directory = await createExtensionDirectory(await mkdtemp(join(tmpdir(), 'dsh-mobile-worker-')), 'demo', `

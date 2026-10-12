@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path'
 import { generate } from 'selfsigned'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Config, parseGatewayConfig, type PluginConfig } from '../src/config.js'
+import { JsonMobileAccessControlStore } from '../src/control.js'
 import { parseCidr, RequestTrustPolicy } from '../src/network.js'
 import * as network from '../src/network.js'
 import { apply, inject, originGatewayConfig, remoteGatewayConfig, settleCleanupSteps, upstreamAuthenticatedUrl } from '../src/plugin.js'
@@ -347,6 +348,14 @@ describe('private HTTP origin gateway configuration', () => {
 })
 
 describe('stock DSH lifecycle', () => {
+  it('loads LAN and the selected remote preference while handing prepared states to inactive providers', async () => {
+    const load = vi.spyOn(JsonMobileAccessControlStore.prototype, 'load')
+    const disable = vi.spyOn(JsonMobileAccessControlStore.prototype, 'disableIfPresent')
+    await mount(false)
+    expect(disable).toHaveBeenCalledTimes(4)
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+
   it('requires the WebServer, commands, and Connection services', () => {
     expect(inject).toEqual(['webServer', 'commands', 'connection'])
   })

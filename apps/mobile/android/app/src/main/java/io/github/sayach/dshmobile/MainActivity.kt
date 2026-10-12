@@ -148,16 +148,23 @@ class MainActivity : Activity() {
     private var pendingScan: (() -> Unit)? = null
     private var nearbyPermissionLimited = false
     private var showingSetup = false
-    @Volatile
-    private var restoreGeneration = 0
-    @Volatile
-    private var pairingGeneration = 0
+    private val restoreAttemptGate = RestoreAttemptGate()
+    private val restoreGeneration: Int get() = restoreAttemptGate.generation
+    private val pairingAttemptGate = PairingAttemptGate()
+    private val pairingGeneration: Int get() = pairingAttemptGate.generation
     private var connectionCenterStatus: TextView? = null
     private var recoveryAttempt = 0
-    private var recoveryScheduled = false
+    private val recoveryScheduled: Boolean get() = restoreAttemptGate.retryPending
     private var restoreEscapeRunnable: Runnable? = null
     private val warnedTailscaleOrigins = mutableSetOf<String>()
-    private var deviceListGeneration = 0
+    private val deviceStatusPoller by lazy {
+        DeviceStatusPoller(
+            executor = restoreExecutor,
+            dispatch = { callback -> runOnUiThread(callback) },
+            probe = ::probeSavedDevice,
+            onResult = { device, result -> applyDeviceStatusResult(device, result) },
+        )
+    }
     private var deviceListRefreshRunnable: Runnable? = null
     private var activeDeviceKey: String? = null
     private val deviceStatusViews = mutableMapOf<String, TextView>()
@@ -656,49 +663,32 @@ class MainActivity : Activity() {
 
     private fun refreshDeviceStatuses(devices: List<PairedDeviceRecord>) {
         deviceListRefreshRunnable?.let(deviceStatusHandler::removeCallbacks)
-        val generation = ++deviceListGeneration
-        devices.forEach { device ->
-            if (device.status == PairedDeviceStatus.REVOKED) return@forEach
-            restoreExecutor.execute {
-                val result = runCatching {
-                    NativeAuthClient.probe(device.origin, device.deviceToken, device.caCertificate, device.instanceId)
-                }.recoverCatching { failure ->
-                    // Older plugins do not expose the session-free probe yet.
-                    // Keep their trusted renewal path as a compatibility fallback.
-                    if ((failure as? NativeAuthFailure)?.kind != NativeAuthFailureKind.INVALID_RESPONSE) throw failure
-                    val session = NativeAuthClient.renew(device.origin, device.deviceToken, device.caCertificate, device.instanceId)
-                    NativeProbe(device.origin, device.instanceId, session.deviceId, device.expiresAt)
-                }
-                val probe = result.getOrNull()
-                runOnUiThread {
-                    if (generation != deviceListGeneration || isFinishing || isDestroyed) return@runOnUiThread
-                    val updated = withCredentialStorage { pairedDeviceStore.update(device.key) { current ->
-                        PairedDeviceStatusPolicy.applyProbe(
-                            current,
-                            device,
-                            probe,
-                            (result.exceptionOrNull() as? NativeAuthFailure)?.kind,
-                            System.currentTimeMillis(),
-                        )
-                    } }
-                    updated?.let { setDeviceStatusText(deviceStatusViews[device.key] ?: return@let, it) }
-                }
-            }
-        }
+        deviceStatusPoller.refresh(devices)
         deviceListRefreshRunnable = Runnable {
             if (!isFinishing && !isDestroyed && deviceListVisible && showingSetup && pairedDeviceStore.load().isNotEmpty()) refreshDeviceStatuses(pairedDeviceStore.load())
         }.also { deviceStatusHandler.postDelayed(it, DEVICE_STATUS_REFRESH_MS) }
     }
 
+    private fun applyDeviceStatusResult(device: PairedDeviceRecord, result: Result<NativeProbe>) {
+        if (!deviceListVisible || !showingSetup || isFinishing || isDestroyed) return
+        val updated = withCredentialStorage { pairedDeviceStore.update(device.key) { current ->
+            PairedDeviceStatusPolicy.applyProbe(
+                current, device, result.getOrNull(),
+                (result.exceptionOrNull() as? NativeAuthFailure)?.kind, System.currentTimeMillis(),
+            )
+        } }
+        updated?.let { setDeviceStatusText(deviceStatusViews[device.key] ?: return@let, it) }
+    }
+
     private fun stopDeviceListRefresh() {
-        deviceListGeneration += 1
+        deviceStatusPoller.stop()
         deviceListRefreshRunnable?.let(deviceStatusHandler::removeCallbacks)
         deviceListRefreshRunnable = null
         deviceStatusViews.clear()
     }
 
     private fun pauseDeviceListRefresh() {
-        deviceListGeneration += 1
+        deviceStatusPoller.stop()
         deviceListRefreshRunnable?.let(deviceStatusHandler::removeCallbacks)
         deviceListRefreshRunnable = null
     }
@@ -1083,6 +1073,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSetup() {
+        cancelRestoreForConfiguration()
         stopDeviceListRefresh()
         invalidatePairingAttempts()
         deviceListVisible = false
@@ -1151,6 +1142,7 @@ class MainActivity : Activity() {
     }
 
     private fun showRemoteSetup() {
+        cancelRestoreForConfiguration()
         stopDeviceListRefresh()
         invalidatePairingAttempts()
         deviceListVisible = false
@@ -1311,7 +1303,7 @@ class MainActivity : Activity() {
     }
 
     private fun showPairing(harness: DiscoveredHarness, prefilledInput: String = "", autoConnect: Boolean = false) {
-        cancelRestoreEscape()
+        cancelRestoreForConfiguration()
         stopDeviceListRefresh()
         invalidatePairingAttempts()
         deviceListVisible = false
@@ -1468,6 +1460,7 @@ class MainActivity : Activity() {
         DiscoveredHarness(deviceName = "DeepSeek Harness", origin = origin, instanceId = "")
 
     private fun connect(harness: DiscoveredHarness, pairing: EditText, status: TextView, button: Button) {
+        if (pairingAttemptGate.busy) return
         if (!prepareCredentialStorage()) {
             status.setText(R.string.device_storage_unavailable)
             status.visibility = View.VISIBLE
@@ -1498,13 +1491,13 @@ class MainActivity : Activity() {
             return
         }
         warnIfTailscale(origin)
+        val generation = beginPairingAttempt() ?: return
         button.isEnabled = false
         status.setTextColor(getColor(R.color.app_secondary))
         status.setText(R.string.pairing_in_progress)
         status.visibility = View.VISIBLE
         val mode = accessMode
         val store = credentialStore(mode)
-        val generation = beginPairingAttempt()
         ioExecutor.execute {
             if (generation != pairingGeneration) return@execute
             val compatibility = runCatching { NativeAuthClient.fetchMetadata(origin) }
@@ -1512,7 +1505,10 @@ class MainActivity : Activity() {
                 ?.let { VersionCompatibility.evaluate(BuildConfig.VERSION_NAME, it) }
             if (compatibility != null) {
                 runOnUiThread {
-                    if (generation == pairingGeneration) showCompatibilityIssue(compatibility, status, button)
+                    if (generation == pairingGeneration) {
+                        pairingAttemptGate.complete(generation)
+                        showCompatibilityIssue(compatibility, status, button)
+                    }
                 }
                 return@execute
             }
@@ -1538,6 +1534,7 @@ class MainActivity : Activity() {
                     if (generation != pairingGeneration) return@runOnUiThread
                     status.setTextColor(getColor(R.color.app_error))
                     status.setText(pairingFailureMessage(trustFailure, origin))
+                    pairingAttemptGate.complete(generation)
                     button.isEnabled = true
                 }
                 return@execute
@@ -1548,11 +1545,13 @@ class MainActivity : Activity() {
                     if (generation != pairingGeneration) return@runOnUiThread
                     status.setTextColor(getColor(R.color.app_error))
                     status.setText(R.string.pairing_tls_failed)
+                    pairingAttemptGate.complete(generation)
                     button.isEnabled = true
                 }
                 return@execute
             }
             val (certificate, expectedInstanceId) = trust
+            if (generation != pairingGeneration) return@execute
             val savedOrigin = GatewayOrigin.parse(
                 preferences.getString(originPreference(mode), "").orEmpty(),
             ) ?: existingRecord?.origin
@@ -1582,27 +1581,34 @@ class MainActivity : Activity() {
                         if (renewed.instanceId != existingCredential.instanceId) {
                             status.setTextColor(getColor(R.color.app_error))
                             status.setText(R.string.pairing_failed)
+                            pairingAttemptGate.complete(generation)
                             button.isEnabled = true
                         } else {
                             if (savePairedDevice(mode, origin, renewed, existingCredential) == null) {
-                                status.setText(R.string.device_storage_unavailable); button.isEnabled = true
+                                status.setText(R.string.device_storage_unavailable)
+                                pairingAttemptGate.complete(generation); button.isEnabled = true
                                 return@runOnUiThread
                             }
                             installNativeSession(
                                 origin = origin,
                                 session = renewed,
                                 isCurrent = { generation == pairingGeneration && accessMode == mode },
-                            ) { showBrowser(origin, existingCredential.caCertificate) }
+                            ) {
+                                pairingAttemptGate.complete(generation)
+                                showBrowser(origin, existingCredential.caCertificate)
+                            }
                         }
                     }
                     return@execute
                 }
                 val renewalFailure = renewal.exceptionOrNull() ?: NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE)
+                if (generation != pairingGeneration) return@execute
                 if (!ConnectionRestorePolicy.mayPairAfterRenewFailure(renewalFailure)) {
                     runOnUiThread {
                         if (generation != pairingGeneration) return@runOnUiThread
                         status.setTextColor(getColor(R.color.app_error))
                         status.setText(pairingFailureMessage(renewalFailure, origin))
+                        pairingAttemptGate.complete(generation)
                         button.isEnabled = true
                     }
                     return@execute
@@ -1614,6 +1620,7 @@ class MainActivity : Activity() {
                         if (generation != pairingGeneration) return@runOnUiThread
                         status.setTextColor(getColor(R.color.app_error))
                         status.setText(R.string.device_storage_unavailable)
+                        pairingAttemptGate.complete(generation)
                         button.isEnabled = true
                     }
                     return@execute
@@ -1629,6 +1636,7 @@ class MainActivity : Activity() {
                         || (expectedInstanceId != null && session.instanceId != expectedInstanceId)) {
                         status.setTextColor(getColor(R.color.app_error))
                         status.setText(R.string.pairing_failed)
+                        pairingAttemptGate.complete(generation)
                         button.isEnabled = true
                     } else if (!runCatching {
                             pairedDeviceStore.requireReadable()
@@ -1638,6 +1646,7 @@ class MainActivity : Activity() {
                         }.isSuccess) {
                         status.setTextColor(getColor(R.color.app_error))
                         status.setText(R.string.device_storage_unavailable)
+                        pairingAttemptGate.complete(generation)
                         button.isEnabled = true
                     } else {
                         val record = savePairedDevice(
@@ -1646,7 +1655,8 @@ class MainActivity : Activity() {
                             session = session,
                             credential = DeviceCredential(session.instanceId, deviceToken, expiresAt, certificate),
                         ) ?: run {
-                            status.setText(R.string.device_storage_unavailable); button.isEnabled = true
+                            status.setText(R.string.device_storage_unavailable)
+                            pairingAttemptGate.complete(generation); button.isEnabled = true
                             return@runOnUiThread
                         }
                         installNativeSession(
@@ -1654,6 +1664,7 @@ class MainActivity : Activity() {
                             session = session,
                             isCurrent = { generation == pairingGeneration && accessMode == mode },
                         ) {
+                            pairingAttemptGate.complete(generation)
                             if (record.displayName == localizedDefaultDeviceName(record.mode)) showPairedDeviceNamePrompt(record) { showBrowser(origin, certificate) }
                             else showBrowser(origin, certificate)
                         }
@@ -1663,6 +1674,7 @@ class MainActivity : Activity() {
                     if (generation != pairingGeneration) return@runOnUiThread
                     status.setTextColor(getColor(R.color.app_error))
                     status.setText(pairingFailureMessage(error, origin))
+                    pairingAttemptGate.complete(generation)
                     button.isEnabled = true
                 } }
         }
@@ -2033,9 +2045,7 @@ class MainActivity : Activity() {
         if (recoveryScheduled) return true
         if (recoveryAttempt >= RECOVERY_DELAYS_MS.size || !canRecoverAutomatically()) return false
         val delay = RECOVERY_DELAYS_MS[recoveryAttempt++]
-        recoveryScheduled = true
-        recoveryHandler.postDelayed({
-            recoveryScheduled = false
+        recoveryHandler.postDelayed(restoreAttemptGate.retryCallback {
             if (!isFinishing && !isDestroyed) recoverAutomatically()
         }, delay)
         return true
@@ -2044,7 +2054,7 @@ class MainActivity : Activity() {
     private fun cancelAutomaticRecovery() {
         recoveryHandler.removeCallbacksAndMessages(null)
         recoveryAttempt = 0
-        recoveryScheduled = false
+        restoreAttemptGate.cancelRetry()
     }
 
     /** A mounted page can retain its retry dialog; an absent or failed page needs the native connection screen. */
@@ -2067,22 +2077,24 @@ class MainActivity : Activity() {
     }
 
     private fun beginRestoreAttempt(): Int {
-        restoreGeneration += 1
-        return restoreGeneration
+        return restoreAttemptGate.begin()
     }
 
     private fun invalidateRestoreAttempts() {
-        restoreGeneration += 1
+        restoreAttemptGate.invalidate()
         connectionCenterStatus?.visibility = View.GONE
     }
 
-    private fun beginPairingAttempt(): Int {
-        pairingGeneration += 1
-        return pairingGeneration
+    private fun cancelRestoreForConfiguration() {
+        cancelRestoreEscape()
+        cancelAutomaticRecovery()
+        invalidateRestoreAttempts()
     }
 
+    private fun beginPairingAttempt(): Int? = pairingAttemptGate.begin()
+
     private fun invalidatePairingAttempts() {
-        pairingGeneration += 1
+        pairingAttemptGate.invalidate()
     }
 
     private fun restoreTrustedDevice(
@@ -2114,6 +2126,7 @@ class MainActivity : Activity() {
         }
         try {
             restoreExecutor.execute {
+                if (!restoreAttemptGate.isCurrent(generation)) return@execute
                 var selectedOrigin = preferredOrigin
                 var lastFailure: Throwable? = null
                 var instanceMismatch = false
@@ -2153,13 +2166,13 @@ class MainActivity : Activity() {
                 val renewed = session
                 val finalDisposition = disposition
                 val failureKind = (lastFailure as? NativeAuthFailure)?.kind
-                runOnUiThread {
-                    if (generation != restoreGeneration) return@runOnUiThread
+                runOnUiThread(restoreAttemptGate.callback(generation) {
+                    if (isFinishing || isDestroyed) return@callback
                     if (deviceKey != null) {
                         val current = pairedDeviceStore.load().firstOrNull { it.key == deviceKey }
                         if (current == null || requestedDevice == null ||
                             !PairedDeviceStatusPolicy.mayApplyResult(current, requestedDevice)
-                        ) return@runOnUiThread
+                        ) return@callback
                     }
                     if (renewed == null) {
                         if (deviceKey != null) {
@@ -2176,18 +2189,18 @@ class MainActivity : Activity() {
                         }
                         onFailure(finalDisposition)
                     } else {
-                        if (!claimSuccess()) return@runOnUiThread
+                        if (!claimSuccess()) return@callback
                         accessMode = mode
                         if (savePairedDevice(mode, selectedOrigin, renewed, credential) == null) {
                             onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
-                            return@runOnUiThread
+                            return@callback
                         }
                         warnIfTailscale(selectedOrigin)
                         cancelAutomaticRecovery()
                         installNativeSession(
                             origin = selectedOrigin,
                             session = renewed,
-                            isCurrent = { generation == restoreGeneration },
+                            isCurrent = { restoreAttemptGate.isCurrent(generation) },
                         ) {
                             if (preserveWebView == null) {
                                 failureDialog?.dismiss()
@@ -2201,7 +2214,7 @@ class MainActivity : Activity() {
                             )
                         }
                     }
-                }
+                })
             }
         } catch (_: RejectedExecutionException) {
             // Activity teardown owns executor shutdown; no UI result is needed afterwards.
@@ -2385,21 +2398,32 @@ class MainActivity : Activity() {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(browser, false)
         }
+        fun ownsBrowser(): Boolean = webView === browser && gatewayOrigin == origin && !isFinishing && !isDestroyed
         val secureClient = SecureWebViewClient(
             origin = origin,
             caCertificate = caCertificate,
-            openExternal = ::openExternal,
-            onBlocked = { toastError(R.string.blocked_navigation) },
-            onFailure = ::showLoadFailure,
-            onRendererGone = { handleRendererGone(browser) },
+            openExternal = { uri ->
+                if (ownsBrowser()) openExternal(uri)
+            },
+            onBlocked = {
+                if (ownsBrowser()) toastError(R.string.blocked_navigation)
+            },
+            onFailure = { failure ->
+                if (ownsBrowser()) showLoadFailure(failure)
+            },
+            onRendererGone = {
+                if (ownsBrowser()) handleRendererGone(browser)
+            },
             onTopLevelUrlChanged = {
-                displayScale.onDocumentStarted()
-                cancelPendingWebBack()
-                pendingAudioPermission = null
-                nativeBridge?.onTopLevelNavigation(it)
+                if (ownsBrowser()) {
+                    displayScale.onDocumentStarted()
+                    cancelPendingWebBack()
+                    pendingAudioPermission = null
+                    nativeBridge?.onTopLevelNavigation(it)
+                }
             },
             onLoaded = {
-                if (webView === browser && gatewayOrigin == origin) {
+                if (ownsBrowser()) {
                     displayScale.onDocumentReady()
                     retryUrl = origin.serialized
                     CookieManager.getInstance().flush()

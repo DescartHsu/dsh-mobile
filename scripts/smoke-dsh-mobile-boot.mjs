@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { packBundle } from './packed-profile.mjs'
+import { completeSmoke, recordSmokeFailure } from './negative-control.mjs'
 import {
   CLIENT_TIMEOUT_MS, createMobileProfile, dismissOnboarding, launchDsh,
   observeWorkspaceStream, openPairing, pairMobilePage, removeTemporaryRoot, sanitized, within,
@@ -25,6 +26,9 @@ const compatibilityPath = '/mobile-access/compat.js'
 const compatibilityError = /AbortSignal\.any|throwIfAborted|AbortSignal getters|Promise\.withResolvers|Iterator.*(?:not defined|not a constructor|not a function)/u
 const excludedClientModules = process.env.DSH_BOOT_SMOKE_EXCLUDED_MODULES?.split(',').map(id => id.trim()).filter(Boolean) ?? []
 const startedAt = Date.now()
+let compatibilityFailureObserved = false
+let companionFailureObserved = false
+const companionFailureMessage = 'Packed bundle is missing embedded component dsh-mobile-question-fixes'
 
 /** Observe the actual Chromium upgrade headers without replacing the browser's WebSocket. */
 async function observeWebSocketCompression(page) {
@@ -60,6 +64,7 @@ async function observeWebSocketCompression(page) {
 async function inspectBrowser(baseUrl, logs) {
   const browser = await chromium.launch({ headless: true })
   let compression
+  const failures = []
   try {
     const desktop = await browser.newPage()
     await desktop.goto(baseUrl, { waitUntil: 'domcontentloaded' })
@@ -149,9 +154,8 @@ async function inspectBrowser(baseUrl, logs) {
       const boot = await phone.locator('[data-dsh-boot]').allTextContents()
       const root = await phone.locator('#root').evaluate(element => ({ text: element.textContent?.slice(0, 500), html: element.innerHTML.slice(0, 500) })).catch(() => undefined)
       const missing = await phone.evaluate(() => globalThis.__DSH_BOOT_SMOKE_MISSING_APIS__).catch(() => undefined)
-      const negativeEvidence = blockedCompatibility && compatibilityIntercepted && errors.some(message => compatibilityError.test(message))
-        ? 'Legacy compatibility negative control detected: missing-API failure after blocking the pre-boot script.\n' : ''
-      throw new Error(`${negativeEvidence}Mobile client did not become ready after pairing: ${String(error)}\nurl=${new URL(phone.url()).pathname}\nmissingAtInit=${JSON.stringify(missing)}\ncompatibilityIntercepted=${String(compatibilityIntercepted)}\nboot=${sanitized(JSON.stringify(boot))}\nroot=${sanitized(JSON.stringify(root))}\nerrors=${sanitized(JSON.stringify(errors))}\nfailedBundles=${sanitized(JSON.stringify(failedBundles))}\nfailedRequests=${sanitized(JSON.stringify(failedRequests))}\nresponses=${sanitized(JSON.stringify(responses))}\n${logs()}`)
+      compatibilityFailureObserved = blockedCompatibility && compatibilityIntercepted && errors.some(message => compatibilityError.test(message))
+      throw new Error(`Mobile client did not become ready after pairing: ${String(error)}\nurl=${new URL(phone.url()).pathname}\nmissingAtInit=${JSON.stringify(missing)}\ncompatibilityIntercepted=${String(compatibilityIntercepted)}\nboot=${sanitized(JSON.stringify(boot))}\nroot=${sanitized(JSON.stringify(root))}\nerrors=${sanitized(JSON.stringify(errors))}\nfailedBundles=${sanitized(JSON.stringify(failedBundles))}\nfailedRequests=${sanitized(JSON.stringify(failedRequests))}\nresponses=${sanitized(JSON.stringify(responses))}\n${logs()}`)
     }
     if (blockedCompatibility) throw new Error(`Compatibility negative control unexpectedly booted: intercepted=${String(compatibilityIntercepted)}`)
     if (legacyWebView) {
@@ -324,9 +328,12 @@ async function inspectBrowser(baseUrl, logs) {
       throw new Error(`Mobile compatibility API failed during interaction: ${sanitized(JSON.stringify(errors))}`)
     }
     console.log(`Mobile client mounted through DSH Loader and read ${String(workspace.workspaces)} Workspaces over /api/remote.mux (${String(plan.entries.length)} plugin entries, ${Date.now() - startedAt} ms)`)
-  } finally {
-    try { await compression?.close() } finally { await browser.close() }
+  } catch (error) { recordSmokeFailure(failures, error) }
+  finally {
+    try { await compression?.close() } catch (error) { recordSmokeFailure(failures, error) }
+    try { await browser.close() } catch (error) { recordSmokeFailure(failures, error) }
   }
+  completeSmoke(failures)
 }
 
 async function main() {
@@ -338,13 +345,22 @@ async function main() {
   try {
     const tarball = process.env.DSH_BOOT_SMOKE_MOBILE_TARBALL === undefined
       ? await packBundle(mobileRoot, root) : resolve(process.env.DSH_BOOT_SMOKE_MOBILE_TARBALL)
-    const home = await createMobileProfile(root, {
-      tarball, dshBin, excludedClientModules, compressedWebSocket, missingCompanion,
-    })
+    let home
+    try {
+      home = await createMobileProfile(root, {
+        tarball, dshBin, excludedClientModules, compressedWebSocket, missingCompanion,
+      })
+    } catch (error) {
+      companionFailureObserved = missingCompanion && error instanceof Error && error.message === companionFailureMessage
+      if (companionFailureObserved) throw new Error('Deliberately removed companion was rejected before launch')
+      throw error
+    }
     dsh = launchDsh(root, home, dshBin)
     await inspectBrowser(await dsh.ready(), dsh.logs)
   } catch (error) {
-    failures.push(new Error(sanitized(error instanceof Error ? error.stack ?? error.message : String(error))))
+    const collected = []
+    recordSmokeFailure(collected, error)
+    failures.push(...collected.map(failure => new Error(sanitized(failure.stack ?? failure.message))))
   } finally {
     if (dsh !== undefined) {
       try {
@@ -352,12 +368,13 @@ async function main() {
         if (result.forced || (result.code !== 0 && result.signal !== 'SIGTERM')) {
           failures.push(new Error(`DSH did not stop quiescently: ${JSON.stringify(result)}\n${dsh.logs()}`))
         }
-      } catch (error) { failures.push(error) }
+      } catch (error) { recordSmokeFailure(failures, error) }
     }
-    try { await removeTemporaryRoot(root) } catch (error) { failures.push(error) }
+    try { await removeTemporaryRoot(root) } catch (error) { recordSmokeFailure(failures, error) }
   }
-  if (failures.length === 1) throw failures[0]
-  if (failures.length > 1) throw new AggregateError(failures, 'Mobile boot smoke and cleanup failed')
+  const marker = blockedCompatibility ? 'Legacy compatibility negative control detected'
+    : missingCompanion ? companionFailureMessage : undefined
+  completeSmoke(failures, marker, blockedCompatibility ? compatibilityFailureObserved : companionFailureObserved)
 }
 
 await main()

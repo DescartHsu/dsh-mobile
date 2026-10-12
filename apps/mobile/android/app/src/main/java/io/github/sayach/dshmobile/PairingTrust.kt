@@ -25,6 +25,15 @@ internal object PairingTrust {
     fun validateCertificate(der: ByteArray, instanceId: String): ByteArray? = runCatching {
         val certificate = certificate(der)
         assertCa(certificate)
+        certificate.checkValidity()
+        require(fingerprint(certificate) == instanceId)
+        certificate.encoded
+    }.getOrNull()
+
+    /** Retain an authentic saved pin after expiry so its device can still be repaired or removed. */
+    fun validateStoredCertificate(der: ByteArray, instanceId: String): ByteArray? = runCatching {
+        val certificate = certificate(der)
+        assertCa(certificate)
         require(fingerprint(certificate) == instanceId)
         certificate.encoded
     }.getOrNull()
@@ -63,7 +72,6 @@ internal object PairingTrust {
         CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(der)) as X509Certificate
 
     private fun assertCa(certificate: X509Certificate) {
-        certificate.checkValidity()
         require(certificate.basicConstraints >= 0)
         require(certificate.subjectX500Principal == certificate.issuerX500Principal)
         certificate.verify(certificate.publicKey)

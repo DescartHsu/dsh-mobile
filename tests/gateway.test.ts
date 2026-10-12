@@ -14,7 +14,7 @@ import { request as requestHttps } from 'node:https'
 import { isAbsolute, join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { connect, Socket, type AddressInfo } from 'node:net'
-import { gunzipSync } from 'node:zlib'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseGatewayConfig } from '../src/config.js'
 import { MobileAccessGateway } from '../src/gateway.js'
@@ -378,11 +378,30 @@ async function upstream(
       return
     }
     if (incoming.url?.startsWith('/plugins/compressible.js') === true) {
+      if (incoming.headers['if-match'] !== undefined && incoming.headers['if-match'] !== '*'
+        && incoming.headers['if-match'] !== '"compressible-script"') {
+        response.writeHead(412, { 'content-type': 'text/plain' })
+        response.end('precondition failed')
+        return
+      }
+      if (incoming.headers['if-none-match'] === '"compressible-script"'
+        || incoming.headers['if-none-match'] === 'W/"compressible-script"') {
+        response.writeHead(304, {
+          etag: '"compressible-script"',
+          'last-modified': 'Tue, 06 Oct 2026 00:00:00 GMT',
+          'content-length': Buffer.byteLength(COMPRESSIBLE_SCRIPT),
+          'accept-ranges': 'bytes',
+          'cache-control': 'public, max-age=31536000, immutable',
+        })
+        response.end()
+        return
+      }
       response.writeHead(200, {
         'content-type': 'text/javascript; charset=utf-8',
         'content-length': Buffer.byteLength(COMPRESSIBLE_SCRIPT),
         'cache-control': 'no-store',
         etag: '"compressible-script"',
+        'last-modified': 'Tue, 06 Oct 2026 00:00:00 GMT',
       })
       response.end(COMPRESSIBLE_SCRIPT)
       return
@@ -667,15 +686,36 @@ describe('HTTP gateway', () => {
     const first = await request(instance.address().port, '/mobile-access/custom.css', { headers })
     expect(first.status).toBe(200)
     expect(first.headers['cache-control']).toBe('no-store')
-    expect(first.headers.etag).toMatch(/^[a-f0-9]{64}$/u)
+    expect(first.headers.etag).toMatch(/^"[a-f0-9]{64}"$/u)
     expect(first.headers['last-modified']).toBeDefined()
     expect(first.body).toContain('--preview: first')
 
     const cached = await request(instance.address().port, '/mobile-access/custom.css', {
-      headers: { ...headers, 'if-none-match': String(first.headers.etag) },
+      method: 'HEAD',
+      headers: { ...headers, 'if-none-match': `"unrelated", W/${String(first.headers.etag)}` },
     })
     expect(cached.status).toBe(304)
     expect(cached.body).toBe('')
+    expect(cached.headers.etag).toBe(first.headers.etag)
+    expect(cached.headers['last-modified']).toBe(first.headers['last-modified'])
+    expect(cached.headers['cache-control']).toBe('no-store')
+    const wildcard = await request(instance.address().port, '/mobile-access/custom.css', {
+      headers: { ...headers, 'if-none-match': '*' },
+    })
+    expect(wildcard.status).toBe(304)
+    const missingAuthorization = await request(instance.address().port, '/mobile-access/custom.css', {
+      headers: { ...browserHeaders(instance), 'if-none-match': '*' },
+    })
+    expect(missingAuthorization.status).toBe(401)
+    const invalidCondition = await request(instance.address().port, '/mobile-access/custom.css', {
+      headers: { ...headers, 'if-none-match': `${String(first.headers.etag)}, invalid` },
+    })
+    expect(invalidCondition.status).toBe(200)
+    const head = await request(instance.address().port, '/mobile-access/custom.css', { method: 'HEAD', headers })
+    expect(head.status).toBe(200)
+    expect(head.body).toBe('')
+    expect(head.headers.etag).toBe(first.headers.etag)
+    expect(head.headers['content-length']).toBe(first.headers['content-length'])
 
     const script = await request(instance.address().port, '/mobile-access/custom.js', { headers })
     expect(script.status).toBe(200)
@@ -713,6 +753,11 @@ describe('HTTP gateway', () => {
     expect(second.status).toBe(200)
     expect(second.body).toContain('--preview: second')
     expect(inner.observations).toHaveLength(0)
+    expect(await instance.access.revokeDevice(paired.deviceId)).toBe(true)
+    const revoked = await request(instance.address().port, '/mobile-access/custom.css', {
+      headers: { ...headers, 'if-none-match': '*' },
+    })
+    expect(revoked.status).toBe(401)
   })
 
   it('protects compatibility assets and refuses missing, oversized, or non-GET requests', async () => {
@@ -734,7 +779,9 @@ describe('HTTP gateway', () => {
       headers: { ...headers, origin: 'https://untrusted.example', 'sec-fetch-site': 'cross-site' },
     })
     expect(crossOrigin.status).toBe(403)
-    const missing = await request(instance.address().port, '/mobile-access/compat.js', { headers })
+    const missing = await request(instance.address().port, '/mobile-access/compat.js', {
+      headers: { ...headers, 'if-none-match': '*' },
+    })
     expect(missing.status).toBe(503)
     expect(JSON.parse(missing.body)).toMatchObject({ error: 'mobile_frontend_unavailable' })
     await writeFile(mobileCompatibilityFile, 'x'.repeat(256 * 1024 + 1), 'utf8')
@@ -897,7 +944,7 @@ describe('HTTP gateway', () => {
     const batch = await request(instance.address().port, path, { headers })
     expect(batch.status).toBe(200)
     expect(batch.headers['content-type']).toBe('text/javascript; charset=utf-8')
-    expect(batch.headers.etag).toMatch(/^[a-f\d]{64}$/u)
+    expect(batch.headers.etag).toMatch(/^"[a-f\d]{64}"$/u)
     expect(batch.body).toContain('/plugins/renderer.js?rev=renderer')
     expect(batch.body).toContain('__dedicatedMobileLayout = true')
     expect(batch.body).toContain('/plugins/feature.js?rev=feature')
@@ -917,7 +964,7 @@ describe('HTTP gateway', () => {
     expect(compressed.status).toBe(200)
     expect(compressed.headers['content-encoding']).toBe('gzip')
     expect(compressed.headers.vary).toBe('Accept-Encoding')
-    expect(compressed.headers.etag).toMatch(/^[a-f\d]{64}-gzip$/u)
+    expect(compressed.headers.etag).toMatch(/^"[a-f\d]{64}-gzip"$/u)
     expect(gunzipSync(compressed.rawBody)).toEqual(batch.rawBody)
     expect(compressed.rawBody.byteLength).toBeLessThan(batch.rawBody.byteLength)
 
@@ -925,17 +972,37 @@ describe('HTTP gateway', () => {
       headers: {
         ...headers,
         'accept-encoding': 'gzip',
-        'if-none-match': String(compressed.headers.etag),
+        'if-none-match': `"other", W/${String(compressed.headers.etag)}`,
       },
     })
     expect(compressedCached.status).toBe(304)
     expect(compressedCached.headers.vary).toBe('Accept-Encoding')
+    expect(compressedCached.headers.etag).toBe(compressed.headers.etag)
+    expect(compressedCached.headers['cache-control']).toBe('private, no-cache')
+    expect(compressedCached.body).toBe('')
 
     const cached = await request(instance.address().port, path, {
       headers: { ...headers, 'if-none-match': String(batch.headers.etag) },
     })
     expect(cached.status).toBe(304)
-    const unauthenticated = await request(instance.address().port, path, { headers: browserHeaders(instance) })
+    const identityWithGzipTag = await request(instance.address().port, path, {
+      headers: { ...headers, 'if-none-match': String(compressed.headers.etag) },
+    })
+    expect(identityWithGzipTag.status).toBe(200)
+    expect(identityWithGzipTag.headers.etag).toBe(batch.headers.etag)
+    const gzipWithIdentityTag = await request(instance.address().port, path, {
+      headers: { ...headers, 'accept-encoding': 'gzip', 'if-none-match': String(batch.headers.etag) },
+    })
+    expect(gzipWithIdentityTag.status).toBe(200)
+    const cachedHead = await request(instance.address().port, path, {
+      method: 'HEAD', headers: { ...headers, 'accept-encoding': 'gzip', 'if-none-match': '*' },
+    })
+    expect(cachedHead.status).toBe(304)
+    expect(cachedHead.body).toBe('')
+    expect(cachedHead.headers.etag).toBe(compressed.headers.etag)
+    const unauthenticated = await request(instance.address().port, path, {
+      headers: { ...browserHeaders(instance), 'if-none-match': '*' },
+    })
     expect(unauthenticated.status).toBe(401)
     expect(inner.observations.map(observation => observation.url)).toContain('/plugins/renderer.js?rev=renderer')
     expect(inner.observations.map(observation => observation.url)).toContain('/plugins/feature.js?rev=feature')
@@ -2111,7 +2178,7 @@ describe('HTTP gateway', () => {
     expect(compressed.status).toBe(200)
     expect(compressed.headers['content-encoding']).toBe('gzip')
     expect(compressed.headers['content-length']).toBeUndefined()
-    expect(compressed.headers.etag).toBeUndefined()
+    expect(compressed.headers.etag).toBe('W/"compressible-script"')
     expect(compressed.headers.vary).toBe('Accept-Encoding')
     expect(gunzipSync(compressed.rawBody).toString('utf8')).toBe(COMPRESSIBLE_SCRIPT)
     expect(compressed.rawBody.length).toBeLessThan(Buffer.byteLength(COMPRESSIBLE_SCRIPT) / 4)
@@ -2122,6 +2189,9 @@ describe('HTTP gateway', () => {
     expect(identity.status).toBe(200)
     expect(identity.headers['content-encoding']).toBeUndefined()
     expect(identity.headers['cache-control']).toBe('no-store')
+    expect(identity.headers.etag).toBe('"compressible-script"')
+    expect(identity.headers.vary).toBe('Accept-Encoding')
+    expect(identity.headers['last-modified']).toBe(compressed.headers['last-modified'])
     expect(identity.body).toBe(COMPRESSIBLE_SCRIPT)
 
     const revisioned = await request(instance.address().port, '/plugins/compressible.js?rev=content_1234', {
@@ -2159,6 +2229,167 @@ describe('HTTP gateway', () => {
     const served = await request(instance.address().port, '/plugins/compressible.js?rev=content_1234', { headers })
     expect(served.status).toBe(200)
     expect(served.headers['cache-control']).toBe('private, max-age=31536000, immutable')
+  })
+
+  it('revalidates gateway-compressed static resources without buffering their bodies', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    const paired = await pair(instance)
+    const headers = { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}`, 'accept-encoding': 'gzip' }
+    const path = '/plugins/compressible.js?rev=content_1234'
+    const initial = await request(instance.address().port, path, { headers })
+    expect(initial.headers.etag).toBe('W/"compressible-script"')
+    expect(initial.headers['content-length']).toBeUndefined()
+    expect(initial.headers['transfer-encoding']).toBe('chunked')
+    expect(gunzipSync(initial.rawBody).toString('utf8')).toBe(COMPRESSIBLE_SCRIPT)
+
+    for (const method of ['GET', 'HEAD']) {
+      const cached = await request(instance.address().port, path, {
+        method, headers: { ...headers, 'if-none-match': String(initial.headers.etag) },
+      })
+      expect(cached.status).toBe(304)
+      expect(cached.body).toBe('')
+      expect(cached.headers.etag).toBe(initial.headers.etag)
+      expect(cached.headers['last-modified']).toBe(initial.headers['last-modified'])
+      expect(cached.headers['cache-control']).toBe('private, max-age=31536000, immutable')
+      expect(cached.headers.vary).toBe('Accept-Encoding')
+      expect(cached.headers['content-length']).toBeUndefined()
+      expect(cached.headers['accept-ranges']).toBeUndefined()
+      expect(inner.observations.at(-1)?.headers['if-none-match']).toBe(initial.headers.etag)
+    }
+    const identity = await request(instance.address().port, path, {
+      headers: { ...headers, 'accept-encoding': 'identity', 'if-none-match': String(initial.headers.etag) },
+    })
+    expect(identity.status).toBe(304)
+    expect(identity.headers.etag).toBe('"compressible-script"')
+    expect(identity.headers['content-encoding']).toBeUndefined()
+    expect(identity.headers.vary).toBe('Accept-Encoding')
+    expect(identity.headers['content-length']).toBe(String(Buffer.byteLength(COMPRESSIBLE_SCRIPT)))
+    expect(identity.headers['accept-ranges']).toBe('bytes')
+    const head = await request(instance.address().port, path, { method: 'HEAD', headers })
+    expect(head.status).toBe(200)
+    expect(head.headers.etag).toBe(initial.headers.etag)
+    expect(head.headers['content-encoding']).toBe('gzip')
+    expect(head.headers.vary).toBe('Accept-Encoding')
+    expect(head.body).toBe('')
+    const changed = await request(instance.address().port, path, {
+      headers: { ...headers, 'if-none-match': 'W/"changed"', 'if-modified-since': 'Mon, 05 Oct 2026 00:00:00 GMT' },
+    })
+    expect(changed.status).toBe(200)
+    expect(inner.observations.at(-1)?.headers['if-modified-since']).toBe('Mon, 05 Oct 2026 00:00:00 GMT')
+    const dynamic = await request(instance.address().port, '/plugins/compressible.js', {
+      headers: { ...headers, 'if-none-match': String(initial.headers.etag) },
+    })
+    expect(dynamic.status).toBe(304)
+    expect(dynamic.headers['cache-control']).toBe('no-store')
+    const beforeAnonymous = inner.observations.length
+    const anonymous = await request(instance.address().port, path, {
+      headers: { ...browserHeaders(instance), 'if-none-match': String(initial.headers.etag) },
+    })
+    expect(anonymous.status).toBe(401)
+    expect(inner.observations).toHaveLength(beforeAnonymous)
+    const strongPrecondition = await request(instance.address().port, path, {
+      headers: { ...headers, 'if-match': String(initial.headers.etag) },
+    })
+    expect(strongPrecondition.status).toBe(412)
+    expect(strongPrecondition.body).toBe('precondition failed')
+    expect(strongPrecondition.headers['cache-control']).toBe('no-store')
+    expect(inner.observations.at(-1)?.headers['if-match']).toBe(initial.headers.etag)
+  })
+
+  it('keeps encoded validators, partial responses and missing validators under their existing policies', async () => {
+    const compressedBody = gzipSync(COMPRESSIBLE_SCRIPT)
+    let partialHeaders: IncomingHttpHeaders | undefined
+    const inner = createServer((incoming, response) => {
+      const path = incoming.url?.split('?', 1)[0]
+      if (path === '/plugins/precompressed.js') {
+        if (incoming.headers['if-none-match'] === '"upstream-gzip"') {
+          response.writeHead(304, {
+            'content-encoding': 'gzip', etag: '"upstream-gzip"', vary: 'Accept-Encoding',
+            'content-length': compressedBody.byteLength, 'accept-ranges': 'bytes',
+          })
+          response.end()
+          return
+        }
+        response.writeHead(200, {
+          'content-type': 'text/javascript', 'content-encoding': 'gzip',
+          'content-length': compressedBody.byteLength, etag: '"upstream-gzip"', vary: 'Accept-Encoding',
+        })
+        response.end(compressedBody)
+      } else if (path === '/plugins/partial.js') {
+        if (incoming.headers['if-match'] !== undefined && incoming.headers['if-match'] !== '"partial"') {
+          response.writeHead(412)
+          response.end()
+          return
+        }
+        partialHeaders = incoming.headers
+        response.writeHead(206, {
+          'content-type': 'text/javascript', 'content-length': 4,
+          'content-range': 'bytes 0-3/10', 'accept-ranges': 'bytes', etag: '"partial"',
+        })
+        response.end('part')
+      } else if (path === '/api/conditional') {
+        response.writeHead(304, { etag: '"api"', 'cache-control': 'public, max-age=31536000, immutable' })
+        response.end()
+      } else if (path === '/plugins/missing.js' || path === '/assets/failure-abcdefgh.js') {
+        response.writeHead(path === '/plugins/missing.js' ? 404 : 503, { 'content-type': 'text/plain' })
+        response.end('unavailable')
+      } else {
+        response.writeHead(200, {
+          'content-type': 'text/javascript',
+          ...(path === '/plugins/invalid-tag.js' ? { etag: 'unquoted' } : {}),
+        })
+        response.end(COMPRESSIBLE_SCRIPT)
+      }
+    })
+    const port = await listen(inner)
+    cleanups.push(() => closeServer(inner))
+    const instance = await gateway(port)
+    const paired = await pair(instance)
+    const headers = { ...browserHeaders(instance), cookie: `${SESSION_COOKIE}=${paired.session}`, 'accept-encoding': 'gzip' }
+    const encoded = await request(instance.address().port, '/plugins/precompressed.js?rev=current', { headers })
+    expect(encoded.headers.etag).toBe('"upstream-gzip"')
+    expect(encoded.rawBody).toEqual(compressedBody)
+    expect(encoded.headers['content-length']).toBe(String(compressedBody.byteLength))
+    const encodedCached = await request(instance.address().port, '/plugins/precompressed.js?rev=current', {
+      headers: { ...headers, 'if-none-match': String(encoded.headers.etag) },
+    })
+    expect(encodedCached.status).toBe(304)
+    expect(encodedCached.headers.etag).toBe(encoded.headers.etag)
+    expect(encodedCached.headers['content-encoding']).toBe('gzip')
+    expect(encodedCached.headers.vary).toBe('Accept-Encoding')
+    expect(encodedCached.headers['content-length']).toBe(String(compressedBody.byteLength))
+    expect(encodedCached.headers['accept-ranges']).toBe('bytes')
+    expect(encodedCached.body).toBe('')
+    const partial = await request(instance.address().port, '/plugins/partial.js?rev=current', {
+      headers: { ...headers, range: 'bytes=0-3', 'if-range': '"partial"', 'if-match': '"partial"' },
+    })
+    expect(partial.status).toBe(206)
+    expect(partial.body).toBe('part')
+    expect(partial.headers.etag).toBe('"partial"')
+    expect(partial.headers['content-encoding']).toBeUndefined()
+    expect(partial.headers['cache-control']).toBe('no-store')
+    expect(partialHeaders?.range).toBe('bytes=0-3')
+    expect(partialHeaders?.['if-range']).toBe('"partial"')
+    expect(partialHeaders?.['if-match']).toBe('"partial"')
+    for (const path of ['/plugins/no-validator.js?rev=current', '/plugins/invalid-tag.js?rev=current']) {
+      const result = await request(instance.address().port, path, { headers: { ...headers, 'if-none-match': '*' } })
+      expect(result.status).toBe(200)
+      expect(result.headers.etag).toBeUndefined()
+      expect(gunzipSync(result.rawBody).toString('utf8')).toBe(COMPRESSIBLE_SCRIPT)
+    }
+    for (const [path, status] of [['/plugins/missing.js?rev=current', 404], ['/assets/failure-abcdefgh.js', 503]] as const) {
+      const result = await request(instance.address().port, path, { headers: { ...headers, 'if-none-match': '*' } })
+      expect(result.status).toBe(status)
+      expect(result.headers['cache-control']).toBe('no-store')
+    }
+    const api = await request(instance.address().port, '/api/conditional?rev=current', {
+      headers: { ...headers, 'if-none-match': '"api"' },
+    })
+    expect(api.status).toBe(304)
+    expect(api.headers.etag).toBe('"api"')
+    expect(api.headers['cache-control']).toBe('no-store')
+    expect(api.headers.vary).toBeUndefined()
   })
 
   it('streams authenticated JSON bodies without rewriting history budgets', async () => {

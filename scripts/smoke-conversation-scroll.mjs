@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { packBundle } from './packed-profile.mjs'
+import { completeSmoke, recordSmokeFailure } from './negative-control.mjs'
 import {
   createMobileProfile, launchDsh, removeTemporaryRoot, openPairing,
   pairMobilePage, dismissOnboarding, CLIENT_TIMEOUT_MS, sanitized,
@@ -20,6 +21,7 @@ const root = await mkdtemp(join(tmpdir(), prefix))
 let dsh
 let browser
 let failure
+let viewportFailureObserved = false
 
 async function rpc(page, method, request) {
   const response = await page.evaluate(async ({ method, request }) => {
@@ -110,8 +112,10 @@ try {
           overflowY: css.overflowY, x: rect.x, y: rect.y, width: rect.width, height: rect.height, ancestors }
       })
       const name = `${viewport.width}x${viewport.height}/${legacyViewport ? 'no-dvh' : 'modern'}`
+      viewportFailureObserved = negativeControl && legacyViewport && removedFallback
+        && !(geometry.shellHeight > 0 && geometry.shellHeight <= geometry.viewportHeight + 1)
       assert(geometry.shellHeight > 0 && geometry.shellHeight <= geometry.viewportHeight + 1,
-        `${negativeControl && legacyViewport ? 'Viewport negative control detected: ' : ''}${name}: shell escaped viewport: ${JSON.stringify(geometry)}`)
+        `${name}: shell escaped viewport: ${JSON.stringify(geometry)}`)
       assert(geometry.clientHeight > 0 && geometry.scrollHeight > geometry.clientHeight + 500,
         `${name}: real conversation has no bounded scroll range: ${JSON.stringify(geometry)}`)
       assert(['auto', 'scroll'].includes(geometry.overflowY), `${name}: actual DSH scrollport is not scrollable`)
@@ -148,16 +152,15 @@ try {
   failure = new Error(`${sanitized(error instanceof Error ? error.stack ?? error.message : String(error))}\n${dsh?.logs() ?? ''}`)
 } finally {
   const failures = failure === undefined ? [] : [failure]
-  if (browser !== undefined) await browser.close().catch(error => { failures.push(error) })
+  if (browser !== undefined) await browser.close().catch(error => { recordSmokeFailure(failures, error) })
   if (dsh !== undefined) {
     try {
       const stopped = await dsh.close()
       if (stopped.forced || (stopped.code !== 0 && stopped.signal !== 'SIGTERM')) {
         throw new Error(`Scroll DSH fixture did not stop quiescently: ${sanitized(JSON.stringify(stopped))}`)
       }
-    } catch (error) { failures.push(error) }
+    } catch (error) { recordSmokeFailure(failures, error) }
   }
-  await removeTemporaryRoot(root, prefix).catch(error => { failures.push(error) })
-  if (failures.length === 1) throw failures[0]
-  if (failures.length > 1) throw new AggregateError(failures, 'Scroll acceptance and cleanup failed')
+  await removeTemporaryRoot(root, prefix).catch(error => { recordSmokeFailure(failures, error) })
+  completeSmoke(failures, negativeControl ? 'Viewport negative control detected' : undefined, viewportFailureObserved)
 }

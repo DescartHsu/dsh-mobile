@@ -34,6 +34,7 @@ import type { ResolvedGatewayConfig } from './config.js'
 import { ClientModulePreferenceStore, parseExcludedClientModules, type ClientModuleEntry, type ClientModulePreferenceView } from './client-module-preferences.js'
 import { renderClientModuleRecoveryPage } from './client-module-recovery.js'
 import { ensureMobileCompatibility, MOBILE_COMPAT_PATH } from './mobile-compat-bootstrap.js'
+import { matchesIfNoneMatch, weakenEntityTag } from './http-cache.js'
 import {
   AUTH_PREFIX,
   assertExternalTrust,
@@ -70,6 +71,7 @@ import { addressAllowed, isLoopbackAddress, type ParsedCidr, RequestTrustPolicy 
 import type { DeviceStore } from './storage.js'
 import { listComputerImages, readComputerImage } from './computer-images.js'
 import {
+  disposeLateExtensionResponse,
   EXTENSION_LIMITS,
   MobileExtensionError,
   type MobileAccessService,
@@ -836,10 +838,10 @@ function sanitizeRequestHeaders(
   }
   if (request.headers.origin !== undefined) headers.origin = upstream.origin
   if (request.headers['sec-fetch-site'] !== undefined) headers['sec-fetch-site'] = 'same-origin'
-  const allowed = [
+  const allowed: readonly string[] = [
     'accept', 'accept-encoding', 'accept-language', 'content-encoding', 'content-length', 'content-type',
-    'if-match', 'if-modified-since', 'if-none-match', 'if-unmodified-since', 'range', 'user-agent',
-  ] as const
+    'if-match', 'if-modified-since', 'if-none-match', 'if-range', 'if-unmodified-since', 'range', 'user-agent',
+  ]
   for (const name of allowed) {
     const value = request.headers[name]
     if (value !== undefined) headers[name] = value
@@ -902,16 +904,15 @@ function isCompressibleContentType(value: string | string[] | undefined): boolea
     || /^(?:application\/(?:javascript|json|xml|x-javascript)|image\/svg\+xml)$/u.test(mediaType)
 }
 
-function shouldCompressResponse(request: IncomingMessage, response: IncomingMessage): boolean {
+function canCompressResponse(request: IncomingMessage, response: IncomingMessage): boolean {
   const pathname = request.url?.split('?', 1)[0] ?? ''
-  const compressibleRequest = request.method === 'GET'
+  const compressibleRequest = (request.method === 'GET' || request.method === 'HEAD')
     && (pathname.startsWith('/plugins/') || pathname.startsWith('/assets/'))
   return compressibleRequest
     && response.statusCode === 200
     && request.headers.range === undefined
     && response.headers['content-range'] === undefined
     && response.headers['content-encoding'] === undefined
-    && acceptsGzip(request.headers['accept-encoding'])
     && isCompressibleContentType(response.headers['content-type'])
 }
 
@@ -920,13 +921,13 @@ function revisionedStaticCacheControl(
   statusCode: number | undefined,
 ): string | undefined {
   if (request.method !== 'GET' && request.method !== 'HEAD') return undefined
-  // Only a delivered artifact is immutable. Upstream DSH revisions identify
-  // successful bundles; a failed fetch for the same URL is not that artifact.
+  // Delivered or successfully revalidated artifacts are immutable. Upstream DSH
+  // revisions identify successful bundles; a failed fetch is not that artifact.
   // Stamping `max-age=31536000, immutable` onto a failure lets the WebView
   // cache the rejection for a year and keep failing until its cache is cleared.
   // Upstream DSH only marks successful responses immutable. Failures carry no
   // cache-control, so the gateway keeps `no-store` from setSecurityHeaders.
-  if (statusCode !== 200) return undefined
+  if (statusCode !== 200 && statusCode !== 304) return undefined
   let target: URL
   try { target = new URL(request.url ?? '/', 'https://dsh-mobile.invalid') } catch { return undefined }
   const revision = target.searchParams.get('rev')
@@ -1795,7 +1796,7 @@ export class MobileAccessGateway {
     const clientModules = target.decodedPathname === `${AUTH_PREFIX}/client-modules`
     const requestedExtension = extensionTarget(target.decodedPathname)
     const requestedMobileBootBatch = mobileBootBatchKey(target.decodedPathname)
-    const customAsset = request.method === 'GET'
+    const customAsset = (request.method === 'GET' || request.method === 'HEAD')
       ? target.decodedPathname === `${AUTH_PREFIX}/custom.css`
         ? {
             file: this.config.customCssFile,
@@ -1912,23 +1913,22 @@ export class MobileAccessGateway {
           body = Buffer.from(customAsset.fallback)
         }
         if (body.byteLength > 256 * 1024) throw new HttpError(413, 'payload_too_large')
-        const etag = createHash('sha256').update(body).digest('hex')
-        const ifNoneMatch = headerValue(request.headers, 'if-none-match')
-        if (ifNoneMatch !== undefined && ifNoneMatch === etag) {
+        const etag = `"${createHash('sha256').update(body).digest('hex')}"`
+        const responseHeaders: Record<string, string | number> = { ETag: etag }
+        if (mtime !== undefined) responseHeaders['Last-Modified'] = mtime.toUTCString()
+        if (matchesIfNoneMatch(headerValue(request.headers, 'if-none-match'), etag)) {
           setSecurityHeaders(response, this.tlsEnabled)
-          response.writeHead(304)
+          response.writeHead(304, responseHeaders)
           response.end()
           return
         }
         setSecurityHeaders(response, this.tlsEnabled)
-        const responseHeaders: Record<string, string | number> = {
+        response.writeHead(200, {
+          ...responseHeaders,
           'Content-Type': customAsset.contentType,
           'Content-Length': body.byteLength,
-          'ETag': etag,
-        }
-        if (mtime !== undefined) responseHeaders['Last-Modified'] = mtime.toUTCString()
-        response.writeHead(200, responseHeaders)
-        response.end(body)
+        })
+        if (request.method === 'HEAD') response.end(); else response.end(body)
         return
       } finally {
         operation.release()
@@ -2016,9 +2016,9 @@ export class MobileAccessGateway {
         }))
         // The ETag must cover extension content, not just the manifest body, so
         // editing mobile.js/css alone invalidates the client's cached manifest.
-        const etag = createHash('sha256').update(body).update(extensions.contentDigest()).digest('hex')
-        if (headerValue(request.headers, 'if-none-match') === etag) {
-          setSecurityHeaders(response, this.tlsEnabled); response.writeHead(304); response.end(); return
+        const etag = `"${createHash('sha256').update(body).update(extensions.contentDigest()).digest('hex')}"`
+        if (matchesIfNoneMatch(headerValue(request.headers, 'if-none-match'), etag)) {
+          setSecurityHeaders(response, this.tlsEnabled); response.writeHead(304, { ETag: etag }); response.end(); return
         }
         setSecurityHeaders(response, this.tlsEnabled)
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.byteLength, ETag: etag })
@@ -2038,14 +2038,15 @@ export class MobileAccessGateway {
           : targetInfo.kind === 'style'
             ? await extensions.readClientFile(targetInfo.id, 'style', operation.signal, generation)
             : await extensions.readAsset(targetInfo.id, targetInfo.path ?? '', operation.signal, generation)
-        if (headerValue(request.headers, 'if-none-match') === file.digest) {
-          setSecurityHeaders(response, this.tlsEnabled); response.writeHead(304); response.end(); return
+        const etag = `"${file.digest}"`
+        if (matchesIfNoneMatch(headerValue(request.headers, 'if-none-match'), etag)) {
+          setSecurityHeaders(response, this.tlsEnabled); response.writeHead(304, { ETag: etag }); response.end(); return
         }
         const contentType = targetInfo.kind === 'script'
           ? 'text/javascript; charset=utf-8'
           : targetInfo.kind === 'style' ? 'text/css; charset=utf-8' : extensionContentType(targetInfo.path ?? '')
         setSecurityHeaders(response, this.tlsEnabled)
-        response.writeHead(200, { 'Content-Type': contentType, 'Content-Length': file.body.byteLength, ETag: file.digest })
+        response.writeHead(200, { 'Content-Type': contentType, 'Content-Length': file.body.byteLength, ETag: etag })
         if (request.method === 'HEAD') response.end(); else response.end(file.body)
         return
       } finally {
@@ -2120,31 +2121,36 @@ export class MobileAccessGateway {
   }
 
   private async sendExtensionResponse(response: ServerResponse, result: MobileRouteResponse, head: boolean): Promise<void> {
-    const status = result.status ?? 200
-    if (!Number.isSafeInteger(status) || status < 200 || status > 599) {
-      throw new MobileExtensionError('invalid_route_response', 'extension returned an invalid HTTP status', 500)
+    try {
+      const status = result.status ?? 200
+      if (!Number.isSafeInteger(status) || status < 200 || status > 599) {
+        throw new MobileExtensionError('invalid_route_response', 'extension returned an invalid HTTP status', 500)
+      }
+      const contentType = result.contentType ?? 'application/octet-stream'
+      if (contentType.length > 1024
+        || !/^[\x20-\x7e]+$/u.test(contentType)
+        || !/^[\w!#$&+.^-]+\/[\w!#$&+.^-]+(?:;[\x20-\x7e]*)?$/u.test(contentType)) {
+        throw new MobileExtensionError('invalid_route_response', 'extension returned an invalid content type', 500)
+      }
+      const safeHeaders: Record<string, string> = {}
+      for (const [name, value] of Object.entries(result.headers ?? {})) {
+        if (!/^(?:content-disposition|cache-control|etag)$/iu.test(name) || /[\r\n]/u.test(value)) continue
+        safeHeaders[name] = value
+      }
+      setSecurityHeaders(response, this.tlsEnabled)
+      if (typeof result.body === 'string' || result.body instanceof Uint8Array) {
+        const body = typeof result.body === 'string' ? Buffer.from(result.body) : Buffer.from(result.body)
+        if (body.byteLength > 4 * 1024 * 1024) throw new MobileExtensionError('extension_result_too_large', 'extension response is too large', 500)
+        response.writeHead(status, { ...safeHeaders, 'Content-Type': contentType, 'Content-Length': body.byteLength })
+        if (head) response.end(); else response.end(body)
+        return
+      }
+      response.writeHead(status, { ...safeHeaders, 'Content-Type': contentType })
+      if (head) { result.body.destroy(); response.end(); return }
+    } catch (error) {
+      disposeLateExtensionResponse(result)
+      throw error
     }
-    const contentType = result.contentType ?? 'application/octet-stream'
-    if (contentType.length > 1024
-      || !/^[\x20-\x7e]+$/u.test(contentType)
-      || !/^[\w!#$&+.^-]+\/[\w!#$&+.^-]+(?:;[\x20-\x7e]*)?$/u.test(contentType)) {
-      throw new MobileExtensionError('invalid_route_response', 'extension returned an invalid content type', 500)
-    }
-    const safeHeaders: Record<string, string> = {}
-    for (const [name, value] of Object.entries(result.headers ?? {})) {
-      if (!/^(?:content-disposition|cache-control|etag)$/iu.test(name) || /[\r\n]/u.test(value)) continue
-      safeHeaders[name] = value
-    }
-    setSecurityHeaders(response, this.tlsEnabled)
-    if (typeof result.body === 'string' || result.body instanceof Uint8Array) {
-      const body = typeof result.body === 'string' ? Buffer.from(result.body) : Buffer.from(result.body)
-      if (body.byteLength > 4 * 1024 * 1024) throw new MobileExtensionError('extension_result_too_large', 'extension response is too large', 500)
-      response.writeHead(status, { ...safeHeaders, 'Content-Type': contentType, 'Content-Length': body.byteLength })
-      if (head) response.end(); else response.end(body)
-      return
-    }
-    response.writeHead(status, { ...safeHeaders, 'Content-Type': contentType })
-    if (head) { result.body.destroy(); response.end(); return }
     await pipeline(result.body, new ByteLimitTransform(4 * 1024 * 1024), response)
   }
 
@@ -2563,7 +2569,7 @@ export class MobileAccessGateway {
       const body = compressed
         ? stored.gzipBody ??= await gzipBuffer(assembled)
         : assembled
-      const etag = compressed ? `${stored.etag}-gzip` : stored.etag
+      const etag = `"${compressed ? `${stored.etag}-gzip` : stored.etag}"`
       const headers: OutgoingHttpHeaders = {
         'Content-Type': 'text/javascript; charset=utf-8',
         'Content-Length': body.byteLength,
@@ -2572,7 +2578,7 @@ export class MobileAccessGateway {
       }
       if (compressed) headers['Content-Encoding'] = 'gzip'
       addVaryAcceptEncoding(headers)
-      if (headerValue(request.headers, 'if-none-match') === etag) {
+      if (matchesIfNoneMatch(headerValue(request.headers, 'if-none-match'), etag)) {
         setSecurityHeaders(response, this.tlsEnabled)
         response.writeHead(304, { ETag: etag, 'Cache-Control': 'private, no-cache', Vary: String(headers.vary) })
         response.end()
@@ -2849,18 +2855,35 @@ export class MobileAccessGateway {
       const statusCode = proxied.statusCode ?? 502
       const cacheControl = revisionedStaticCacheControl(request, statusCode)
       if (cacheControl !== undefined) headers['cache-control'] = cacheControl
-      const compressed = shouldCompressResponse(request, proxied)
+      const compressible = canCompressResponse(request, proxied)
+      const compressed = compressible && acceptsGzip(request.headers['accept-encoding'])
+      if (compressible) addVaryAcceptEncoding(headers)
       if (compressed) {
         delete headers['accept-ranges']
         delete headers['content-length']
-        delete headers.etag
+        const etag = weakenEntityTag(proxied.headers.etag)
+        if (etag === undefined) delete headers.etag
+        else headers.etag = etag
         headers['content-encoding'] = 'gzip'
+      } else if (statusCode === 304 && (request.method === 'GET' || request.method === 'HEAD')
+        && request.headers.range === undefined
+        && (request.url?.split('?', 1)[0]?.startsWith('/plugins/') === true
+          || request.url?.split('?', 1)[0]?.startsWith('/assets/') === true)) {
+        // A 304 has no body or media type to identify gateway gzip eligibility.
+        // Weakening remains valid for unchanged or already encoded upstream bytes.
+        if (proxied.headers['content-encoding'] === undefined && acceptsGzip(request.headers['accept-encoding'])) {
+          delete headers['content-length']
+          delete headers['accept-ranges']
+          const etag = weakenEntityTag(proxied.headers.etag)
+          if (etag === undefined) delete headers.etag
+          else headers.etag = etag
+        }
         addVaryAcceptEncoding(headers)
       }
       response.writeHead(statusCode, headers)
       await Promise.all([
         bodyDone,
-        compressed ? pipeline(proxied, createGzip(), response) : pipeline(proxied, response),
+        compressed && request.method !== 'HEAD' ? pipeline(proxied, createGzip(), response) : pipeline(proxied, response),
       ])
     } catch (error) {
       holder.request?.destroy()

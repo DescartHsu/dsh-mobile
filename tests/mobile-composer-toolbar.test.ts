@@ -34,6 +34,12 @@ describe('stock mobile composer toolbar', () => {
     expect(MOBILE_COMPOSER_TOOLBAR_STYLES).not.toContain('height:32')
   })
 
+  it('reserves icon target space only in direct public-slot wrappers', () => {
+    expect(MOBILE_COMPOSER_TOOLBAR_STYLES).toContain(':is([data-dsh-mobile-composer-tools],[data-dsh-mobile-composer-controls]) > :is([data-slot="conversation.input.left"],[data-slot="conversation.input.right"]) > :where(span,div)')
+    expect(MOBILE_COMPOSER_TOOLBAR_STYLES).toContain(':has(> button:not([role="switch"])) { min-width:44px !important; min-height:44px !important; flex-shrink:0 !important; }')
+    expect(MOBILE_COMPOSER_TOOLBAR_STYLES).not.toContain('data-openai-codex-fast-mode')
+  })
+
   it('leaves menus and dialogs out of intrinsic-width and button rules', () => {
     for (const selector of ['dialog', '[popover]', '[role="dialog"]', '[role="menu"]', '[role="listbox"]', '[data-trigger-menu]']) {
       expect(MOBILE_COMPOSER_TOOLBAR_STYLES).toContain(selector)

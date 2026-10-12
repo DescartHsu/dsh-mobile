@@ -12,6 +12,7 @@ import {
 } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { assertManagedParents, ensureManagedDirectory, removeManagedPaths, removeManagedTree, replaceManagedDirectory } from './managed-files.js'
+import { downloadPinnedArtifact } from './component-download.js'
 
 const FRP_VERSION = '0.70.1'
 const MAX_ARCHIVE_ENTRIES = 128
@@ -167,38 +168,12 @@ async function defaultExtractArtifact(archive: string, destination: string, exec
 }
 
 async function defaultFetchArtifact(artifact: FrpArtifact, signal: AbortSignal): Promise<Uint8Array> {
-  const response = await fetch(artifact.downloadUrl, { redirect: 'follow', signal })
-  if (!response.ok) throw new Error(`frp_download_http_${String(response.status)}`)
-  const finalUrl = new URL(response.url)
-  const officialHost = finalUrl.hostname === 'github.com' || finalUrl.hostname.endsWith('.githubusercontent.com')
-  if (finalUrl.protocol !== 'https:' || !officialHost) throw new Error('frp_download_origin_invalid')
-  const lengthHeader = response.headers.get('content-length')
-  const declaredLength = lengthHeader === null ? undefined : Number(lengthHeader)
-  if (declaredLength !== undefined && (!Number.isFinite(declaredLength) || declaredLength !== artifact.downloadBytes)) {
-    throw new Error('frp_download_size_mismatch')
-  }
-  if (response.body === null) throw new Error('frp_download_empty')
-  const chunks: Uint8Array[] = []
-  let received = 0
-  const reader = response.body.getReader()
-  while (true) {
-    const result = await reader.read()
-    if (result.done) break
-    received += result.value.byteLength
-    if (received > artifact.downloadBytes) {
-      await reader.cancel()
-      throw new Error('frp_download_size_mismatch')
-    }
-    chunks.push(result.value)
-  }
-  if (received !== artifact.downloadBytes) throw new Error('frp_download_size_mismatch')
-  const bytes = new Uint8Array(received)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return bytes
+  return downloadPinnedArtifact({
+    url: artifact.downloadUrl,
+    expectedBytes: artifact.downloadBytes,
+    errorPrefix: 'frp',
+    signal,
+  })
 }
 
 async function defaultInspectExecutable(executable: string): Promise<string> {

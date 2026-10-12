@@ -84,7 +84,7 @@ export async function within(promise, timeoutMs, failure) {
 }
 
 /** Install the actual npm tarball and reject source or unrelated runtime fallbacks. */
-export async function createMobileProfile(root, { tarball, dshBin, excludedClientModules = [], compressedWebSocket = false, missingCompanion = false, extraPatches = [], hostExecution }) {
+export async function createMobileProfile(root, { tarball, dshBin, excludedClientModules = [], compressedWebSocket = false, missingCompanion = false, extraPatches = [], hostExecution, packageStoreDirectory, packageImportMethod }) {
   const home = join(root, 'home')
   const profile = join(home, 'profiles', 'web')
   const mobileState = join(home, 'mobile-access')
@@ -114,7 +114,7 @@ export async function createMobileProfile(root, { tarball, dshBin, excludedClien
       tls: { mode: 'disabled' },
     },
   }, ...extraPatches]) + '\n')
-  await writeFile(join(profile, 'pnpm-workspace.yaml'), 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
+  await writeFile(join(profile, 'pnpm-workspace.yaml'), mobileProfilePnpmConfiguration({ packageStoreDirectory, packageImportMethod }))
   await installPackedBundle(tarball, profile, { dshBin })
   const installed = join(profile, 'node_modules', 'dsh-mobile')
   await assertProfileComponents(installed)
@@ -140,6 +140,17 @@ export async function createMobileProfile(root, { tarball, dshBin, excludedClien
     tls: { mode: 'disabled' },
   }) + '\n')
   return home
+}
+
+/**
+ * Isolate installed file metadata even when independent fixtures share a pnpm store.
+ * @param options - optional owned store and explicit import-method diagnostic override.
+ * @returns pnpm workspace settings; copied files avoid hardlink ctime changes in live HMR inputs.
+ */
+export function mobileProfilePnpmConfiguration({ packageStoreDirectory, packageImportMethod = 'copy' } = {}) {
+  return 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n'
+    + (packageStoreDirectory === undefined ? '' : `storeDir: ${JSON.stringify(packageStoreDirectory)}\n`)
+    + `packageImportMethod: ${JSON.stringify(packageImportMethod)}\n`
 }
 
 /** Launch a supported DSH profile with scrubbed environment and await owned process exit. */

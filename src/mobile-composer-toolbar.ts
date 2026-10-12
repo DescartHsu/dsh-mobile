@@ -16,6 +16,10 @@ export const MOBILE_COMPOSER_TOOLBAR_STYLES = `
 [data-dsh-mobile-composer-controls] button:not(:where(dialog *,[popover] *,[role="dialog"] *,[role="menu"] *,[role="listbox"] *,[data-trigger-menu] *)) { white-space:normal !important; overflow-wrap:anywhere !important; }
 @media (max-width:720px) {
   [data-dsh-mobile-composer-row] button:not([role="switch"]):not(:where(dialog *,[popover] *,[role="dialog"] *,[role="menu"] *,[role="listbox"] *,[data-trigger-menu] *)) { min-width:44px !important; min-height:44px !important; touch-action:manipulation; }
+  /* Public slot icon wrappers must reserve the same space as their enlarged
+     child targets. Keep wrapper and tooltip ownership intact; pure switches,
+     dialogs and wrappers without direct non-switch buttons are not selected. */
+  :is([data-dsh-mobile-composer-tools],[data-dsh-mobile-composer-controls]) > :is([data-slot="conversation.input.left"],[data-slot="conversation.input.right"]) > :where(span,div):not(:where(dialog,[popover],[role="dialog"],[role="menu"],[role="listbox"],[data-trigger-menu])):has(> button:not([role="switch"])) { min-width:44px !important; min-height:44px !important; flex-shrink:0 !important; }
   [data-dsh-mobile-composer-trailing] > button[class*="_primary"] { min-width:44px !important; flex-shrink:0 !important; }
   [data-dsh-mobile-composer-row] { display:flex !important; flex-wrap:wrap !important; align-items:center !important; gap:4px 8px !important; min-width:0 !important; max-width:100% !important; }
   [data-dsh-mobile-composer-tools]:not([hidden]) { display:flex !important; flex:0 1 auto !important; flex-wrap:wrap !important; width:auto !important; min-width:0 !important; max-width:100% !important; gap:6px !important; }

@@ -113,18 +113,20 @@ export function parseMobileAccessControlState(value: unknown): MobileAccessContr
 export class JsonMobileAccessControlStore implements MobileAccessControlStore {
   constructor(private readonly file: string, private readonly initiallyEnabled: boolean) {}
 
-  /** Avoid writing an absent already-disabled state without changing recovery of existing files. */
-  async disableIfPresent(): Promise<void> {
+  /** Disable an existing preference, returning the state only after private-file preparation completes. */
+  async disableIfPresent(): Promise<MobileAccessControlState> {
+    const disabled: MobileAccessControlState = Object.freeze({ version: 1, enabled: false })
     try {
       await lstat(this.file)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        if (this.initiallyEnabled) await this.save({ version: 1, enabled: false })
-        return
+        if (this.initiallyEnabled) await this.save(disabled)
+        return disabled
       }
       throw error
     }
-    await this.save({ version: 1, enabled: false })
+    await this.save(disabled)
+    return disabled
   }
 
   async load(): Promise<MobileAccessControlState> {
@@ -169,8 +171,8 @@ export class JsonMobileAccessControlStore implements MobileAccessControlStore {
         flag: 'wx',
         mode: 0o600,
       })
+      await restrictPrivateFile(temporary)
       await rename(temporary, this.file)
-      await restrictPrivateFile(this.file)
     } catch (error) {
       try {
         await rm(temporary, { force: true })

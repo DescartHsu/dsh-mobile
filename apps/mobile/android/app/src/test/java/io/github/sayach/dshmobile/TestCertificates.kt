@@ -8,9 +8,9 @@ import java.util.Base64
 /**
  * Deterministic X.509 fixtures for the trust tests.
  *
- * The certificates are generated once with OpenSSL (RSA 2048, valid 2026-09-23 .. 2036-09-20) and
- * stored here as base64 DER, so the unit tests stay hermetic and never touch the network or a
- * keystore:
+ * The operational certificates are fixed RSA 2048 fixtures valid 2026-09-23 .. 2036-09-20;
+ * [expiredCa] is valid only in 2000. Base64 DER keeps trust tests independent of the network
+ * and Keystore:
  *
  *  - [ingressCa] plays the role of the self-signed passthrough entry CA whose SHA-256 fingerprint
  *    the pairing key carries;
@@ -22,6 +22,11 @@ import java.util.Base64
  *    fetch that decides pinning runs over an actual handshake.
  */
 internal object TestCertificates {
+    /** Authentic self-signed CA valid only in 2000, retained solely for expiry regressions. */
+    val expiredCa: ByteArray by lazy { decode(
+        "MIIC/DCCAeSgAwIBAgIJfGN/h18u6VDYMA0GCSqGSIb3DQEBCwUAMC4xLDAqBgNVBAMTI0V4cGlyZWQgc3RvcmVkLWRldmljZSBDQSByZWdyZXNzaW9uMB4XDTAwMDEwMTAwMDAwMFoXDTAxMDEwMTAwMDAwMFowLjEsMCoGA1UEAxMjRXhwaXJlZCBzdG9yZWQtZGV2aWNlIENBIHJlZ3Jlc3Npb24wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDRZIuLsRtGIpnUhfIgn7jH72ec536x08VflG9YrA8GYeQYCdIWNabvJreyM9iCrA4TEbeLdbCvkfphGfAqN2zrakK0aHM5TwjCBWlsdtbqty8dBUZuKN6zColxDW8X47AIOT5NxMq+0Tx+JEg6rkSS2eQc+P4zwqh0pijDEABpFtW1ZirKwzB5bKt0q8EbpMpGknwDHFIfW8X/WD5evXXKrHwF2K/rqMYquhxd8wwflPLwaK44FQ5NOazBxn4uvE8M4KmpHO8xNm4k0nmzs+0Twz8lshvSJavKyIhSejAu4395YG0fbb1hhkF3Qa9EFpqwA0vBPVgzNgjbwcIFU20vAgMBAAGjHTAbMAwGA1UdEwQFMAMBAf8wCwYDVR0PBAQDAgEGMA0GCSqGSIb3DQEBCwUAA4IBAQCArU4wt42sXeuWuynByOylYGd1NHRs2O5AZRR/DUV7YyVzJEJwbuaRU6sIkjpoy+CLUGQJAs6AGZ1S3h9Rm8Gwo8AeCBZHvs8GHip3KcvGpDYyfIQP1hjFw05wwgJgRlhpRyGPeGvN/A2Jj9Gmd1qv4B35NAicLnDC/t4sbN4mzSi9cJh6nb//k/Y8xwNCthTHri3sbV7+obDnTkMXeLJu2pubZgefHopsLsXZ5u5C0fgjyhWR+A3WzOewb3T98Mhq2g1x1zt8bzLGKxDJeJY2FQK0AZoHJgqQ+gfL2zgUqunfTA2+oxjOijqyyh4lAuLvbNgyQ6FtvrW2eNd8vExG",
+    ) }
+
     /** Self-signed ingress CA that plays the role of the self-signed passthrough entry CA. */
     private const val INGRESS_CA_BASE64 =
         "MIIDWDCCAkCgAwIBAgIUI8gSHQMI56wrF34jGc1VusuTfq0wDQYJKoZIhvcNAQELBQAwRDEnMCUGA1UEAwweRFNIIE1vYmls" +

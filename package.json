@@ -1,6 +1,6 @@
 {
   "name": "dsh-mobile",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "private": false,
   "description": "DeepSeek Harness 移动端适配与安全访问插件，支持局域网、远程连接、Android App 和手机浏览器。",
   "type": "module",
@@ -90,6 +90,7 @@
     "check:mobile-release": "node ./scripts/check-mobile-release.mjs",
     "check:dsh-compatibility": "node ./scripts/check-dsh-compatibility.mjs",
     "smoke:dsh-boot": "node ./scripts/smoke-dsh-mobile-boot.mjs",
+    "smoke:transport-recovery": "node ./scripts/smoke-mobile-transport-recovery.mjs",
     "smoke:plugin-installation": "node ./scripts/smoke-plugin-installation.mjs",
     "smoke:dsh-composer": "node ./scripts/smoke-dsh-composer.mjs",
     "smoke:mobile-settings": "node ./scripts/smoke-mobile-settings.mjs",
@@ -181,6 +182,7 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
+    "@noble/hashes": "1.8.0",
     "bonjour-service": "1.4.4",
     "qrcode": "^1.5.4",
     "selfsigned": "^5.5.0",

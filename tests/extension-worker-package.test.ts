@@ -15,6 +15,9 @@ const run = promisify(execFile)
 describe('installed default extension worker entry', () => {
   let root: string
   let extracted: string
+  // This fixture builds and installs a real packed package. Under the full
+  // single-worker suite, npm extraction can exceed Vitest's 10 s hook default
+  // even though the isolated test itself is healthy.
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-mobile-worker-pack-'))
     const artifacts = await buildExtensionWorkerArtifacts()
@@ -32,8 +35,8 @@ describe('installed default extension worker entry', () => {
     const installRoot = join(root, 'installed'); await mkdir(installRoot)
     await run(process.execPath, [npmCli, 'install', '--prefix', installRoot, '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false', join(root, filename)])
     extracted = join(installRoot, 'node_modules', 'dsh-mobile')
-  })
-  afterAll(async () => { if (root !== undefined) await rm(root, { recursive: true, force: true }) })
+  }, 30_000)
+  afterAll(async () => { if (root !== undefined) await rm(root, { recursive: true, force: true }) }, 30_000)
 
   it('ships a self-contained runtime and activates a worker through the installed default resolver', async () => {
     const body = await readFile(join(extracted, 'lib', 'extension-worker-runtime.mjs'), 'utf8')

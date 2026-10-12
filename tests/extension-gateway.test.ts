@@ -4,6 +4,7 @@ import type { AddressInfo, Server } from 'node:net'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseGatewayConfig } from '../src/config.js'
 import { MobileAccessService, type MobileRouteResponse } from '../src/extensions.js'
@@ -36,6 +37,31 @@ async function request(port: number, path: string, options: { method?: string; h
 function cookie(headers: Record<string, string | string[] | undefined>, name: string): string {
   const values = headers['set-cookie']; const list = Array.isArray(values) ? values : values === undefined ? [] : [values]
   return list.find(value => value.startsWith(`${name}=`))?.split(';', 1)[0] ?? ''
+}
+
+async function pairedExtensionGateway(service: MobileAccessService): Promise<{ port: number; headers: Record<string, string> }> {
+  const upstream = createServer((_, response) => { response.end('ok') })
+  const upstreamPort = await listen(upstream)
+  cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())) })
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-extension-stream-'))
+  cleanups.push(() => rm(directory, { recursive: true, force: true }))
+  const config = parseGatewayConfig({
+    listenHost: '127.0.0.1', listenPort: 0,
+    upstreamOrigin: `http://127.0.0.1:${String(upstreamPort)}`,
+    publicAuthorities: ['127.0.0.1'], allowedCidrs: ['127.0.0.0/8'],
+    stateFile: join(directory, 'devices.json'), tls: { mode: 'disabled' },
+  })
+  const gateway = new MobileAccessGateway(config, new MemoryDeviceStore(), service)
+  await gateway.start(); cleanups.push(() => gateway.close())
+  const origin = gateway.address().origin
+  const baseHeaders = { host: new URL(origin).host, origin, 'sec-fetch-site': 'same-origin' }
+  const opened = await gateway.access.openPairing()
+  const paired = await request(gateway.address().port, '/mobile-access/auth/pair', {
+    method: 'POST', headers: { ...baseHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({ token: opened.token }),
+  })
+  expect(paired.status).toBe(201)
+  return { port: gateway.address().port, headers: { ...baseHeaders, cookie: cookie(paired.headers, SESSION_COOKIE) } }
 }
 
 function pendingRequest(port: number, path: string, method: string, headers: Record<string, string>): {
@@ -90,6 +116,81 @@ async function openEventStream(port: number, headers: Record<string, string>): P
 }
 
 describe('gateway extension namespace', () => {
+  it.each([
+    ['an invalid status', { status: 99 }, 'invalid_route_response'],
+    ['an invalid content type', { contentType: 'invalid' }, 'invalid_route_response'],
+    ['a header Node cannot write', { headers: { etag: '"invalid\u0000"' } }, 'internal_error'],
+  ] as const)('closes an extension stream rejected for %s before piping', async (_name, fields, error) => {
+    const context = new Context(); cleanups.push(() => context.fiber.dispose())
+    const service = new MobileAccessService(context)
+    const stream = new Readable({ read() {} })
+    const closed = new Promise<void>(resolve => { stream.once('close', resolve) })
+    cleanups.push(async () => { stream.destroy(); await closed })
+    service.registerExtension({
+      schemaVersion: 1, id: 'stream', name: 'Stream', version: '1.0.0',
+      routes: [{ method: 'GET', path: 'rejected', handle: async () => ({ ...fields, body: stream }) }],
+    })
+    const { port, headers } = await pairedExtensionGateway(service)
+    const rejected = await request(port, '/mobile-access/extensions/stream/routes/rejected', { headers })
+    expect(rejected.status).toBe(500)
+    expect(JSON.parse(rejected.body)).toEqual({ error })
+    expect(stream.destroyed).toBe(true)
+    await closed
+    expect(stream.listenerCount('close')).toBe(0)
+    expect(stream.listenerCount('end')).toBe(0)
+    expect(stream.listenerCount('finish')).toBe(0)
+  })
+
+  it.each(['GET', 'HEAD'] as const)('keeps a successful %s extension stream response', async method => {
+    const context = new Context(); cleanups.push(() => context.fiber.dispose())
+    const service = new MobileAccessService(context)
+    let reads = 0
+    const stream = new Readable({ read() { reads++; this.push('stream body'); this.push(null) } })
+    const closed = new Promise<void>(resolve => { stream.once('close', resolve) })
+    cleanups.push(async () => { stream.destroy(); await closed })
+    service.registerExtension({
+      schemaVersion: 1, id: 'stream', name: 'Stream', version: '1.0.0',
+      routes: [{ method, path: 'accepted', handle: async () => ({ contentType: 'text/plain', body: stream }) }],
+    })
+    const { port, headers } = await pairedExtensionGateway(service)
+    const accepted = await request(port, '/mobile-access/extensions/stream/routes/accepted', { method, headers })
+    expect(accepted.status).toBe(200)
+    expect(accepted.body).toBe(method === 'GET' ? 'stream body' : '')
+    expect(accepted.headers['content-type']).toBe('text/plain')
+    await closed
+    expect(stream.destroyed).toBe(true)
+    expect(reads).toBe(method === 'GET' ? 1 : 0)
+  })
+
+  it('closes a piped extension stream when its HTTP caller disconnects', async () => {
+    const context = new Context(); cleanups.push(() => context.fiber.dispose())
+    const service = new MobileAccessService(context)
+    let sent = false
+    const stream = new Readable({ read() { if (!sent) { sent = true; this.push('partial body') } } })
+    const closed = new Promise<void>(resolve => { stream.once('close', resolve) })
+    cleanups.push(async () => { stream.destroy(); await closed })
+    service.registerExtension({
+      schemaVersion: 1, id: 'stream', name: 'Stream', version: '1.0.0',
+      routes: [{ method: 'GET', path: 'cancelled', handle: async () => ({ contentType: 'text/plain', body: stream }) }],
+    })
+    const { port, headers } = await pairedExtensionGateway(service)
+    const response = await new Promise<IncomingMessage>((resolve, reject) => {
+      const outgoing = requestHttp({ host: '127.0.0.1', port, path: '/mobile-access/extensions/stream/routes/cancelled', headers, agent: false }, incoming => {
+        incoming.once('data', () => resolve(incoming))
+        incoming.on('error', reject)
+      })
+      const requestClosed = new Promise<void>(resolveClose => { outgoing.once('close', resolveClose) })
+      cleanups.push(async () => { outgoing.destroy(); await requestClosed })
+      outgoing.once('error', reject)
+      outgoing.end()
+    })
+    expect(response.statusCode).toBe(200)
+    expect(stream.destroyed).toBe(false)
+    response.destroy()
+    await closed
+    expect(stream.destroyed).toBe(true)
+  })
+
   it('authenticates actions and routes while keeping the upstream proxy intact', async () => {
     const upstream = createServer((_, response) => { response.writeHead(200, { 'content-type': 'text/html' }); response.end('<!doctype html><script>window.__DSH_BOOT__ = {"rev":"x","entries":[{"id":"@deepseek-ai/dsh-client-ui-layout","url":"/layout.js","rev":"x","inject":["@deepseek-ai/dsh-client-runtime","@deepseek-ai/dsh-client-ui-theme"]}]};</script>') })
     const upstreamPort = await listen(upstream)
@@ -257,6 +358,54 @@ describe('gateway extension namespace', () => {
     const newAsset = await request(gateway.address().port, `/mobile-access/extensions/demo/assets/value.txt?generation=${second}`, { headers })
     expect(oldAsset.body).toBe('one')
     expect(newAsset.body).toBe('two')
+    expect(oldAsset.headers.etag).toMatch(/^"[a-f\d]{64}"$/u)
+    expect(newAsset.headers.etag).not.toBe(oldAsset.headers.etag)
+    const cachedAsset = await request(gateway.address().port, `/mobile-access/extensions/demo/assets/value.txt?generation=${first}`, {
+      method: 'HEAD', headers: { ...headers, 'if-none-match': `"unrelated", W/${String(oldAsset.headers.etag)}` },
+    })
+    expect(cachedAsset.status).toBe(304)
+    expect(cachedAsset.headers.etag).toBe(oldAsset.headers.etag)
+    expect(cachedAsset.headers['cache-control']).toBe('no-store')
+    expect(cachedAsset.body).toBe('')
+    const newerAsset = await request(gateway.address().port, `/mobile-access/extensions/demo/assets/value.txt?generation=${second}`, {
+      headers: { ...headers, 'if-none-match': String(oldAsset.headers.etag) },
+    })
+    expect(newerAsset.status).toBe(200)
+    const missingAsset = await request(gateway.address().port, '/mobile-access/extensions/demo/assets/missing.txt', {
+      headers: { ...headers, 'if-none-match': '*' },
+    })
+    expect(missingAsset.status).toBe(404)
+    const anonymousAsset = await request(gateway.address().port, '/mobile-access/extensions/demo/assets/value.txt', {
+      headers: { ...headers, cookie: '', 'if-none-match': '*' },
+    })
+    expect(anonymousAsset.status).toBe(401)
+    const script = await request(gateway.address().port, '/mobile-access/extensions/demo/mobile.js', { headers })
+    expect(script.status).toBe(200)
+    expect(script.headers.etag).toMatch(/^"[a-f\d]{64}"$/u)
+    const cachedScript = await request(gateway.address().port, '/mobile-access/extensions/demo/mobile.js', {
+      headers: { ...headers, 'if-none-match': '*' },
+    })
+    expect(cachedScript.status).toBe(304)
+    expect(cachedScript.headers.etag).toBe(script.headers.etag)
+    // Exercise the same Fetch/ETag round trip used by the browser client. The
+    // validator returned by the Gateway is already quoted and must be reused
+    // verbatim; sending only the local digest is not a valid HTTP entity-tag.
+    const scriptUrl = `http://127.0.0.1:${String(gateway.address().port)}/mobile-access/extensions/demo/mobile.js`
+    const browserFirst = await fetch(scriptUrl, { headers })
+    expect(browserFirst.status).toBe(200)
+    const browserEtag = browserFirst.headers.get('etag')
+    expect(browserEtag).toBe(script.headers.etag)
+    expect(browserEtag).toMatch(/^"[a-f\d]{64}"$/u)
+    await browserFirst.arrayBuffer()
+    const browserCached = await fetch(scriptUrl, { headers: { ...headers, 'if-none-match': browserEtag ?? '' } })
+    expect(browserCached.status).toBe(304)
+    expect(browserCached.headers.get('etag')).toBe(browserEtag)
+    await browserCached.arrayBuffer()
+    const bareDigest = browserEtag?.slice(1, -1)
+    const bareDigestResponse = await request(gateway.address().port, '/mobile-access/extensions/demo/mobile.js', {
+      headers: { ...headers, 'if-none-match': bareDigest ?? '' },
+    })
+    expect(bareDigestResponse.status).toBe(200)
     const invalid = await request(gateway.address().port, '/mobile-access/extensions/demo/actions/ping', { method: 'POST', headers: { ...headers, 'x-dsh-mobile-extension-generation': 'stale' }, body: '{}' })
     expect(invalid.status).toBe(400)
     expect(JSON.parse(invalid.body)).toEqual({ error: 'invalid_extension_generation' })
@@ -355,9 +504,18 @@ describe('gateway extension namespace', () => {
       extensions: [{ id: 'hello' }],
       legacy: { scriptRevision: expect.any(String), styleRevision: expect.any(String) },
     })
-    expect(manifest.headers.etag).toBeTruthy()
-    const notModified = await request(gateway.address().port, '/mobile-access/extensions/manifest', { headers: { ...headers, 'if-none-match': String(manifest.headers.etag) } })
+    expect(manifest.headers.etag).toMatch(/^"[a-f\d]{64}"$/u)
+    const notModified = await request(gateway.address().port, '/mobile-access/extensions/manifest', {
+      method: 'HEAD', headers: { ...headers, 'if-none-match': `"other", W/${String(manifest.headers.etag)}` },
+    })
     expect(notModified.status).toBe(304)
+    expect(notModified.body).toBe('')
+    expect(notModified.headers.etag).toBe(manifest.headers.etag)
+    expect(notModified.headers['cache-control']).toBe('no-store')
+    const anonymous = await request(gateway.address().port, '/mobile-access/extensions/manifest', {
+      headers: { ...headers, cookie: '', 'if-none-match': '*' },
+    })
+    expect(anonymous.status).toBe(401)
     await writeFile(join(directory, 'mobile.js'), 'window.dshMobile?.register(() => undefined)\n// changed\n')
     const customized = await request(gateway.address().port, '/mobile-access/extensions/manifest', { headers: { ...headers, 'if-none-match': String(manifest.headers.etag) } })
     expect(customized.status).toBe(200)

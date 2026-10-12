@@ -3921,6 +3921,10 @@ function installCustomAssets(): () => void {
   const activations = new PerIdActivationLifecycle<ActiveExtension>()
   const styleNodes = new Map<string, HTMLStyleElement>()
   const styleEtags = new Map<string, string>()
+  // Keep the HTTP validator separate from the content digest used to decide
+  // whether the script needs evaluating. The Gateway emits quoted ETags while
+  // the local digest is an unquoted SHA-256 value.
+  const scriptEtags = new Map<string, string>()
   const scriptDigests = new Map<string, string>()
   const activeHostGenerations = new Map<string, string | undefined>()
   const activationKeys = new Map<string, { readonly definition: MobileClientDefinition; readonly generation?: string }>()
@@ -4161,10 +4165,10 @@ function installCustomAssets(): () => void {
   let legacyStyleRevision = ''
   const disposeManifestExtension = (id: string): void => {
     activations.remove(id)
-    styleNodes.get(id)?.remove(); styleNodes.delete(id); styleEtags.delete(id); scriptDigests.delete(id); activeHostGenerations.delete(id); activationKeys.delete(id)
+    styleNodes.get(id)?.remove(); styleNodes.delete(id); styleEtags.delete(id); scriptEtags.delete(id); scriptDigests.delete(id); activeHostGenerations.delete(id); activationKeys.delete(id)
     if (managedDefinitionIds.delete(id)) definitions.delete(id)
   }
-  const managedManifestIdSources = (): readonly Iterable<string>[] => [styleNodes.keys(), styleEtags.keys(), scriptDigests.keys(), managedDefinitionIds]
+  const managedManifestIdSources = (): readonly Iterable<string>[] => [styleNodes.keys(), styleEtags.keys(), scriptEtags.keys(), scriptDigests.keys(), managedDefinitionIds]
   const clearManifestExtensions = (): void => {
     publishAuthoritativeExtensionIds(manifestExtensionIds, new Set(), managedManifestIdSources(), disposeManifestExtension)
     manifestEtag = ''
@@ -4245,16 +4249,19 @@ function installCustomAssets(): () => void {
             commitStyle(entry.id, styleChange, pendingCss, pendingStyleEtag)
             activations.remove(entry.id)
             activeHostGenerations.delete(entry.id)
+            scriptEtags.delete(entry.id)
             scriptDigests.delete(entry.id)
             if (managedDefinitionIds.delete(entry.id)) definitions.delete(entry.id)
           } else {
             const scriptHeaders: Record<string, string> = {}
-            const storedDigest = scriptDigests.get(entry.id)
-            if (storedDigest !== undefined) scriptHeaders['if-none-match'] = storedDigest
+            const storedEtag = scriptEtags.get(entry.id)
+            if (storedEtag !== undefined) scriptHeaders['if-none-match'] = storedEtag
             const scriptResponse = await fetch(scriptUrl, { credentials: 'same-origin', cache: 'no-store', headers: scriptHeaders, signal })
             let nextDigest: string | undefined
+            let nextEtag: string | undefined
             if (scriptResponse.status !== 304) {
               if (!scriptResponse.ok) throw new Error('mobile extension script failed to load')
+              nextEtag = scriptResponse.headers.get('etag') ?? undefined
               const source = await scriptResponse.text()
               if (refreshAborted(signal)) return false
               const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
@@ -4289,6 +4296,13 @@ function installCustomAssets(): () => void {
             }
             managedDefinitionIds.add(entry.id)
             if (nextDigest !== undefined) scriptDigests.set(entry.id, nextDigest)
+            // A 304 has no new representation metadata to commit. Keep the
+            // validator that produced it; only a fresh 200 may replace or
+            // clear the stored HTTP ETag.
+            if (scriptResponse.status !== 304) {
+              if (nextEtag === undefined || nextEtag === '') scriptEtags.delete(entry.id)
+              else scriptEtags.set(entry.id, nextEtag)
+            }
           }
         } catch {
           if (evaluatedDefinition) {

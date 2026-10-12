@@ -94,7 +94,7 @@ export default defineConfig([{
   dts: false,
   sourcemap: true,
   clean: false,
-  deps: { neverBundle: ['react'] },
+  deps: { neverBundle: ['react'], alwaysBundle: [/^@noble\/hashes(?:\/|$)/u] },
   outputOptions: {
     entryFileNames: 'client.js',
     banner: 'window.__ModuleLoader__.load({ id: "dsh-mobile", factory: (require) => {',

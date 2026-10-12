@@ -51,10 +51,14 @@ async function withPickerHost(
   desktop: boolean,
   platform: Platform,
   run: (ctx: Context, loader: Loader, providers: Set<string>, surfaces: Set<string>) => Promise<void>,
+  profileMarker = false,
 ): Promise<void> {
   // Scope only the expression evaluator's process.platform, not Node's globals.
   const ctx = new Context().extend({ process: { platform } })
-  if (desktop) ctx.provide('desktopRuntime', { platform })
+  if (desktop) {
+    if (profileMarker) ctx.provide('desktopProfiles', { current: { dir: '/owned/desktop-profile' } })
+    else ctx.provide('desktopRuntime', { platform })
+  }
   await ctx.plugin(Loader).await()
   const loader = ctx.loader
   const providers = new Set<string>()
@@ -123,6 +127,30 @@ describe('directory picker host composition', () => {
       expect(loader.resolve('directory-picker-mobile-surface').disabled).toBe(true)
       expect(loader.resolve('directory-picker').disabled).toBe(true)
     })
+  })
+
+  it('disables the Mobile pair when Windows Desktop exposes only its profile service during early boot', async () => {
+    await withPickerHost(true, 'win32', async (ctx, loader, providers, surfaces) => {
+      await loader.root.update(compose(true, 'win32'))
+      await loader.await()
+      expect(ctx.get('directoryPicker')).toMatchObject({ owner: 'desktop-directory-picker-browse-host' })
+      expect(loader.resolve('directory-picker-mobile-host').disabled).toBe(true)
+      expect(loader.resolve('directory-picker-mobile-surface').disabled).toBe(true)
+      expect([...providers]).toEqual(['desktop-directory-picker-browse-host'])
+      expect([...surfaces]).toEqual(['desktop-directory-picker-browse-surface'])
+    }, true)
+  })
+
+  it.each(['darwin', 'linux'] as const)('retains the Mobile pair when non-Windows Desktop exposes only its profile service on %s', async platform => {
+    await withPickerHost(true, platform, async (ctx, loader, providers, surfaces) => {
+      await loader.root.update(compose(true, platform))
+      await loader.await()
+      expect(ctx.get('directoryPicker')).toMatchObject({ owner: 'directory-picker-mobile-host' })
+      expect(loader.resolve('directory-picker-mobile-host').disabled).toBe(false)
+      expect(loader.resolve('directory-picker-mobile-surface').disabled).toBe(false)
+      expect([...providers]).toEqual(['directory-picker-mobile-host'])
+      expect([...surfaces]).toEqual(['directory-picker-mobile-surface'])
+    }, true)
   })
 
   it.each(['darwin', 'linux'] as const)('retains the Mobile pair on Desktop %s', async platform => {

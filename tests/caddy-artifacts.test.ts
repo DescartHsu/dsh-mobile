@@ -79,7 +79,7 @@ describe('review component artifact binding', () => {
   it('requires every official reviewer assignment to identify a supported User or Team', () => {
     const user = { type: 'User', reviewer: { id: 1 } }
     const team = { type: 'Team', reviewer: { id: 2 } }
-    const policy = (reviewers: unknown[]) => ({ protection_rules: [{ type: 'required_reviewers', reviewers, prevent_self_review: true }] })
+    const policy = (reviewers: unknown[]) => ({ can_admins_bypass: false, protection_rules: [{ type: 'required_reviewers', reviewers, prevent_self_review: true }] })
     for (const reviewers of [[user], [team], [user, team]]) expect(() => helpers.verifyOfficialEnvironment(policy(reviewers))).not.toThrow()
     for (const assignment of [null, {}, [], true, { type: 'Other', reviewer: { id: 1 } }, { type: 'User' },
       { type: 'User', reviewer: null }, { type: 'User', reviewer: [] }, { type: 'Team', reviewer: {} },
@@ -87,6 +87,12 @@ describe('review component artifact binding', () => {
       expect(() => helpers.verifyOfficialEnvironment(policy([assignment]))).toThrow()
       expect(() => helpers.verifyOfficialEnvironment(policy([user, assignment]))).toThrow()
     }
+  })
+  it('accepts official approval only with an explicit administrator-bypass prohibition', () => {
+    const policy = { protection_rules: [{ type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { id: 1 } }], prevent_self_review: true }] }
+    expect(() => helpers.verifyOfficialEnvironment({ ...policy, can_admins_bypass: false })).not.toThrow()
+    expect(() => helpers.verifyOfficialEnvironment({ ...policy, can_admins_bypass: true })).toThrow('administrator')
+    expect(() => helpers.verifyOfficialEnvironment(policy)).toThrow('administrator')
   })
   it('requires exact version-bound review tags that cannot trigger v* plugin releases', () => {
     expect(reviewTag('caddy-component-2.11.6-tencentcloud-0.4.3-review.1')).toContain('-review.1')

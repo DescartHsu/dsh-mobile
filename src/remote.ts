@@ -3,6 +3,7 @@ import type { ChildProcess } from 'node:child_process'
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type { MobileAccessGateway } from './gateway.js'
+import type { MobileAccessControlState } from './control.js'
 import { restrictPrivateFile } from './private-file.js'
 
 /** Remote transports supported by the desktop plugin and Android client. */
@@ -21,7 +22,12 @@ export interface RemoteProviderStatus {
 
 /** Lifecycle shared by selectable remote providers. */
 export interface RemoteProviderController {
-  initialize(): Promise<void>
+  /**
+   * Initialize from the current startup preparation, without retaining a permission-success cache.
+   * @param initialState - Fresh state prepared by this controller's own store; omission reads that store.
+   * @returns Completion of the normal provider initialization and optional startup.
+   */
+  initialize(initialState?: MobileAccessControlState): Promise<void>
   gateway(): MobileAccessGateway | undefined
   status(): RemoteProviderStatus
   setEnabled(enabled: boolean): Promise<RemoteProviderStatus>
@@ -47,6 +53,25 @@ function aggregateErrors(errors: readonly unknown[], message: string): Error | u
   if (errors.length === 0) return undefined
   if (errors.length === 1 && errors[0] instanceof Error) return errors[0]
   return new AggregateError(errors, message)
+}
+
+/**
+ * Prepare each inactive provider's disabled state and settle every write before reporting a failure.
+ * @param selected - Provider whose startup must still read its durable preference.
+ * @param stores - The same stores supplied to the corresponding provider controllers.
+ * @returns Fresh disabled states for this initialization only; no permission-success cache is retained.
+ */
+export async function prepareDisabledRemoteProviders(
+  selected: RemoteProvider,
+  stores: Readonly<Record<RemoteProvider, { disableIfPresent(): Promise<MobileAccessControlState> }>>,
+): Promise<ReadonlyMap<RemoteProvider, MobileAccessControlState>> {
+  const results = await Promise.allSettled(REMOTE_PROVIDERS
+    .filter(provider => provider !== selected)
+    .map(async provider => [provider, await stores[provider].disableIfPresent()] as const))
+  const errors: unknown[] = results.filter(result => result.status === 'rejected').map(result => result.reason)
+  const failure = aggregateErrors(errors, 'remote provider control preparation failed')
+  if (failure !== undefined) throw failure
+  return new Map(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []))
 }
 
 /** Settle independent remote cleanup work before reporting any collected failure. */

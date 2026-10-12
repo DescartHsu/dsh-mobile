@@ -76,9 +76,30 @@ jobs:
       - name: Verify packed Worker execution and explicit recovery
         if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
         run: npm run smoke:extension-workers
+      - name: Verify real mux recovery and cross-client pending questions
+        if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
+        run: npm run smoke:transport-recovery -- --interactions
+      - name: Reject recovery while the real mux remains unavailable
+        if: matrix.dsh == '0.2.1-alpha.2'
+        shell: bash
+        run: |
+          if npm run smoke:transport-recovery -- --negative-control-mux > "$RUNNER_TEMP/mux-recovery-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/mux-recovery-negative.log"
+            exit 1
+          fi
+          node -e "const fs=require('node:fs'); const text=fs.readFileSync(process.env.RUNNER_TEMP+'/mux-recovery-negative.log','utf8'); if(!text.includes('Mux recovery negative control detected')) { console.error(text); process.exit(1); }"
       - name: Verify mobile typography and native page-zoom settings
         if: matrix.dsh == '0.2.1-alpha.2'
         run: npm run smoke:mobile-settings
+      - name: Identify an HTTP-successful client module execution failure
+        if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
+        shell: bash
+        run: |
+          if npm run smoke:transport-recovery -- --negative-control-import > "$RUNNER_TEMP/module-evaluation-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/module-evaluation-negative.log"
+            exit 1
+          fi
+          node -e "const fs=require('node:fs'); const text=fs.readFileSync(process.env.RUNNER_TEMP+'/module-evaluation-negative.log','utf8'); if(!text.includes('Module evaluation negative control detected')) { console.error(text); process.exit(1); }"
       - name: Verify module settings, trusted network and remote form lifetimes
         if: matrix.dsh == '0.2.0-rc.2'
         run: npm run smoke:control-state
@@ -102,7 +123,7 @@ jobs:
             cat "$RUNNER_TEMP/compat-negative.log"
             exit 1
           fi
-          node -e "const fs=require('node:fs'); const text=fs.readFileSync(process.env.RUNNER_TEMP+'/compat-negative.log','utf8'); if(!text.includes('Legacy compatibility negative control detected')) { console.error(text); process.exit(1); }"
+          node scripts/negative-control.mjs "$RUNNER_TEMP/compat-negative.log" "Legacy compatibility negative control detected"
       - name: Verify the stock composer through the packed Mobile profile
         if: matrix.dsh == '0.2.0-rc.2'
         run: npm run smoke:dsh-composer
@@ -117,7 +138,7 @@ jobs:
             cat "$RUNNER_TEMP/scroll-negative.log"
             exit 1
           fi
-          node -e "const fs=require('node:fs'); const text=fs.readFileSync(process.env.RUNNER_TEMP+'/scroll-negative.log','utf8'); if(!text.includes('Viewport negative control detected')) { console.error(text); process.exit(1); }"
+          node scripts/negative-control.mjs "$RUNNER_TEMP/scroll-negative.log" "Viewport negative control detected"
       - name: Capture credential-masked Mobile surfaces
         if: matrix.dsh == '0.2.0-rc.2'
         run: npm run capture:screenshots -- --out "$RUNNER_TEMP/mobile-capture"
@@ -132,7 +153,7 @@ jobs:
             cat "$RUNNER_TEMP/companion-negative.log"
             exit 1
           fi
-          node -e "const fs=require('node:fs'); const text=fs.readFileSync(process.env.RUNNER_TEMP+'/companion-negative.log','utf8'); if(!text.includes('Packed bundle is missing embedded component dsh-mobile-question-fixes')) { console.error(text); process.exit(1); }"
+          node scripts/negative-control.mjs "$RUNNER_TEMP/companion-negative.log" "Packed bundle is missing embedded component dsh-mobile-question-fixes"
 
   gateway:
     name: Gateway (${{ matrix.os }}, Node ${{ matrix.node }})

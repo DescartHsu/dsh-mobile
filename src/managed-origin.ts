@@ -65,12 +65,12 @@ export class ManagedOriginController implements RemoteProviderController {
   status(): ManagedOriginStatus { return Object.freeze({ ...this.controller().status(), enabled: this.enabled, mode: this.selected }) }
   gateway(): MobileAccessGateway | undefined { return this.enabled ? this.controller().gateway() : undefined }
 
-  initialize(): Promise<void> {
+  initialize(initialState?: MobileAccessControlState): Promise<void> {
     return this.enqueue(async () => {
       if (this.initialized) return
       if (this.disposed) throw new Error('origin_controller_unavailable')
       this.selected = (await this.options.modeStore.load()).mode
-      this.enabled = (await this.options.store.load()).enabled
+      this.enabled = (initialState ?? await this.options.store.load()).enabled
       await this.options.external.initialize()
       await this.options.managed.initialize()
       await this.options.external.setEnabled(false)
@@ -106,8 +106,8 @@ export class ManagedOriginController implements RemoteProviderController {
     if (!enabled) this.options.managed.cancelPendingStart?.()
     return this.enqueue(async () => {
       this.assertAvailable()
-      if (!enabled) await this.stopBoth()
       await this.options.store.save({ version: 1, enabled })
+      if (!enabled) await this.stopBoth()
       this.enabled = enabled
       if (enabled && !this.disposed) {
         try { await this.controller().setEnabled(true) } catch (error) { await this.stopBoth(); throw error }
@@ -118,8 +118,8 @@ export class ManagedOriginController implements RemoteProviderController {
     this.options.managed.cancelPendingStart?.()
     return this.enqueue(async () => {
       this.assertAvailable()
-      await this.stopBoth()
       await this.options.store.save({ version: 1, enabled: true })
+      await this.stopBoth()
       this.enabled = true
       if (!this.disposed) {
         try { await this.controller().reconnect() } catch (error) { await this.stopBoth(); throw error }

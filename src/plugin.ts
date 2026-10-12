@@ -84,6 +84,7 @@ import { loadOrCreateInstallationId } from './installation-id.js'
 import {
   configuredRemoteProvider,
   JsonRemoteProviderStore,
+  prepareDisabledRemoteProviders,
   RemoteProviderCoordinator,
   REMOTE_PROVIDERS,
   type RemoteProvider,
@@ -1445,10 +1446,11 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         frp: frpStore,
         origin: originStore,
       }
-      await Promise.all((Object.keys(stores) as RemoteProvider[])
-        .filter(provider => provider !== remoteProviders.selected)
-        .map(provider => stores[provider].disableIfPresent()))
-      for (const provider of REMOTE_PROVIDERS) await remoteControllers[provider].initialize()
+      const prepared = await prepareDisabledRemoteProviders(remoteProviders.selected, stores)
+      for (const provider of REMOTE_PROVIDERS) {
+        if (provider === remoteProviders.selected) await remoteControllers[provider].initialize()
+        else await remoteControllers[provider].initialize(prepared.get(provider))
+      }
       // Broadcast discovery degrades silently when its UDP port cannot be bound, which
       // otherwise leaves "the phone cannot find this computer" with no visible cause.
       const lanDiscovery = lanGateway?.discoveryStatus()

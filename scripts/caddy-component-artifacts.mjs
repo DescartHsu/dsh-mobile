@@ -43,6 +43,9 @@ export function publicationRequest({ event, repository, ref, review = 'false', o
 }
 
 export function verifyOfficialEnvironment(policy) {
+  if (policy?.can_admins_bypass !== false) {
+    throw new Error('Official environment must explicitly prohibit administrator approval bypass')
+  }
   if (!Array.isArray(policy?.protection_rules) || !policy.protection_rules.some(rule => rule?.type === 'required_reviewers'
     && Array.isArray(rule.reviewers) && rule.reviewers.length > 0 && rule.prevent_self_review === true
     && rule.reviewers.every(assignment => assignment !== null && typeof assignment === 'object' && !Array.isArray(assignment)

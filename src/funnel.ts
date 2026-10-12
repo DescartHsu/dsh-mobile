@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { lstat } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { MobileAccessControlStore } from './control.js'
+import type { MobileAccessControlState, MobileAccessControlStore } from './control.js'
 import type { MobileAccessGateway } from './gateway.js'
 import { settleRemoteResources, terminateRemoteProcess, type RemoteProviderController } from './remote.js'
 import { assertManagedParents, ensureManagedDirectory, removeManagedTree } from './managed-files.js'
@@ -125,6 +125,7 @@ export class FunnelController implements RemoteProviderController {
   private buffer = ''
   private latest: FunnelStatus = publicStatus({ enabled: false, state: 'off' })
   private queue: Promise<void> = Promise.resolve()
+  private closeTask: Promise<void> | undefined
   private startTimer: NodeJS.Timeout | undefined
   private readonly ownedRoot: string
 
@@ -137,14 +138,14 @@ export class FunnelController implements RemoteProviderController {
   }
 
   /** Restore the remote switch without coupling it to LAN availability. */
-  async initialize(): Promise<void> {
+  async initialize(initialState?: MobileAccessControlState): Promise<void> {
     try { await this.assertStateParents() } catch (_error) {
       this.enabled = false
       this.initialized = true
       this.publish({ enabled: false, state: 'unavailable', errorCode: 'funnel_state_invalid' })
       return
     }
-    const state = await this.options.store.load()
+    const state = initialState ?? await this.options.store.load()
     this.enabled = state.enabled
     this.initialized = true
     if (this.enabled) await this.start()
@@ -165,17 +166,41 @@ export class FunnelController implements RemoteProviderController {
   async setEnabled(enabled: boolean): Promise<FunnelStatus> {
     if (!this.initialized || this.disposed) throw new Error('Funnel controller is unavailable')
     await this.enqueue(async () => {
-      if (this.enabled === enabled && (enabled === false || this.child !== undefined)) return
-      if (!enabled) await this.stop()
-      try { await this.assertStateParents() } catch (error) {
+      const ownsResources = this.child !== undefined || this.gatewayValue !== undefined
+      if (this.enabled === enabled && (enabled ? this.child !== undefined : !ownsResources && this.latest.state === 'off')) return
+      if (!enabled) {
+        // A damaged state directory must never prevent an already-owned process
+        // or gateway from being stopped. Keep the durable switch untouched when
+        // validation fails, so a repaired directory can be retried safely.
+        try { await this.assertStateParents() } catch (error) {
+          try { await this.stop() } catch (cleanupError) {
+            this.publish({ enabled: this.enabled, state: 'error', errorCode: 'funnel_cleanup_failed' })
+            throw new AggregateError([error, cleanupError], 'Funnel state validation and cleanup failed')
+          }
+          this.publish({ enabled: this.enabled, state: 'unavailable', errorCode: 'funnel_state_invalid' })
+          throw error
+        }
+        // Persist before changing in-memory ownership. A failed write leaves the
+        // working tunnel intact and the same operation remains retryable.
+        await this.options.store.save({ version: 1, enabled: false })
         this.enabled = false
-        this.publish({ enabled: false, state: 'unavailable', errorCode: 'funnel_state_invalid' })
+        try { await this.stop() } catch (error) {
+          this.publish({ enabled: false, state: 'error', errorCode: 'funnel_cleanup_failed' })
+          throw error
+        }
+        this.publish({ enabled: false, state: 'off' })
+        return
+      }
+      try { await this.assertStateParents() } catch (error) {
+        this.publish({ enabled: this.enabled, state: 'unavailable', errorCode: 'funnel_state_invalid' })
         throw error
       }
-      this.enabled = enabled
-      await this.options.store.save({ version: 1, enabled })
-      if (enabled) await this.start()
-      else this.publish({ enabled: false, state: 'off' })
+      await this.options.store.save({ version: 1, enabled: true })
+      this.enabled = true
+      // A previous failed disable may have stopped publishing state while still
+      // retaining a resource whose cleanup failed. Reconcile it before restart.
+      if (ownsResources) await this.stop()
+      await this.start()
     })
     return this.status()
   }
@@ -184,15 +209,15 @@ export class FunnelController implements RemoteProviderController {
   async reconnect(): Promise<FunnelStatus> {
     if (!this.initialized || this.disposed) throw new Error('Funnel controller is unavailable')
     await this.enqueue(async () => {
-      await this.stop()
       try { await this.assertStateParents() } catch (error) {
         this.publish({ enabled: this.enabled, state: 'unavailable', errorCode: 'funnel_state_invalid' })
         throw error
       }
       if (!this.enabled) {
-        this.enabled = true
         await this.options.store.save({ version: 1, enabled: true })
+        this.enabled = true
       }
+      await this.stop()
       await this.start()
     })
     return this.status()
@@ -202,11 +227,26 @@ export class FunnelController implements RemoteProviderController {
   async reset(): Promise<FunnelStatus> {
     if (!this.initialized || this.disposed) throw new Error('Funnel controller is unavailable')
     await this.enqueue(async () => {
-      await this.stop()
+      try {
+        await assertManagedParents(this.ownedRoot, this.options.stateDirectory, 'funnel')
+        const selected = await lstat(this.options.stateDirectory).catch(error => {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          return undefined
+        })
+        if (selected !== undefined && (selected.isSymbolicLink() || !selected.isDirectory())) {
+          await removeManagedTree(this.ownedRoot, this.options.stateDirectory, 'funnel')
+        }
+      } catch (error) {
+        this.publish({ enabled: this.enabled, state: 'off', errorCode: 'funnel_state_invalid' })
+        throw error
+      }
+      await this.options.store.save({ version: 1, enabled: false })
       this.enabled = false
+      await this.stop()
       try {
         await removeManagedTree(this.ownedRoot, this.options.stateDirectory, 'funnel')
         await this.assertStateParents()
+        // A configured control file can belong to the node directory just removed.
         await this.options.store.save({ version: 1, enabled: false })
       } catch (error) {
         this.publish({ enabled: false, state: 'off', errorCode: 'funnel_state_invalid' })
@@ -218,10 +258,15 @@ export class FunnelController implements RemoteProviderController {
   }
 
   /** Stop all remote resources without modifying the remembered switch. */
-  async close(): Promise<void> {
-    if (this.disposed) return
+  close(): Promise<void> {
+    if (this.closeTask !== undefined) return this.closeTask
     this.disposed = true
-    await this.enqueue(() => this.stop())
+    const task = this.enqueue(() => this.stop())
+    this.closeTask = task.catch((error: unknown) => {
+      this.closeTask = undefined
+      throw error
+    })
+    return this.closeTask
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {
@@ -377,15 +422,19 @@ export class FunnelController implements RemoteProviderController {
   private async stopProcessAndGateway(): Promise<void> {
     this.clearStartTimer()
     const child = this.child
-    this.child = undefined
     const gateway = this.gatewayValue
-    this.gatewayValue = undefined
     await settleRemoteResources([
       async () => {
         child?.stdin.end()
         if (child !== undefined && child.exitCode === null) await terminateRemoteProcess(child)
+        if (this.child === child) this.child = undefined
       },
-      () => gateway?.close(),
+      async () => {
+        if (gateway !== undefined) {
+          await gateway.close()
+          if (this.gatewayValue === gateway) this.gatewayValue = undefined
+        }
+      },
     ], 'Funnel resource cleanup failed')
   }
 

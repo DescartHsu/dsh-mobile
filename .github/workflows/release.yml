@@ -69,6 +69,7 @@ jobs:
       id-token: write
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24.x
@@ -84,16 +85,13 @@ jobs:
           package="$(find "$GITHUB_WORKSPACE/release-assets" -maxdepth 1 -type f -name 'dsh-mobile-*.tgz' -print -quit)"
           test -n "$package"
           version="${GITHUB_REF_NAME#v}"
-          published="$(npm view "dsh-mobile@$version" version 2>/dev/null || true)"
-          if [ "$published" = "$version" ]; then
-            echo "dsh-mobile@$version is already published; leaving the immutable npm release unchanged."
+          publication="$(node scripts/check-npm-release-integrity.mjs "$package" "$version")"
+          if [ "$publication" = "published" ]; then
+            echo "dsh-mobile@$version is already published with matching tarball integrity."
             exit 0
           fi
-          if [ -n "$NODE_AUTH_TOKEN" ]; then
-            npm publish "$package" --provenance --access public
-          else
-            npm publish "$package" --provenance --access public
-          fi
+          test "$publication" = "unpublished"
+          npm publish "$package" --provenance --access public
 
   github-release:
     name: GitHub release

@@ -2,7 +2,7 @@
 
 Keep pull requests focused on observable behavior. Explain the change, cover new failure/rejection paths, and update the relevant English and Chinese guides together. Preserve contributor history and keep real credentials out of fixtures.
 
-Agent-assisted maintainers should start with [AGENTS.md](AGENTS.md) and the [DSH Mobile maintenance skill](.agent/skills/dsh-mobile-maintenance/SKILL.md). Its references cover compatibility/packaging, runtime/ADB and collaboration/releases; load only the route needed for the task. Update demonstrated reusable guidance alongside the owning change, without turning transient release state into permanent instructions.
+Agent-assisted maintainers should start with [AGENTS.md](AGENTS.md) and the [DSH Mobile maintenance skill](.agent/skills/dsh-mobile-maintenance/SKILL.md). Its references cover compatibility/packaging, runtime/ADB, test-fixture reliability and collaboration/releases; load only the route needed for the task. Update demonstrated reusable guidance alongside the owning change, without turning transient release state into permanent instructions.
 
 ## Local setup and baseline
 
@@ -29,12 +29,18 @@ Browser checks consume built client files. Run `npm run build` and `npx playwrig
 | Real InputBar with optional left/right/activity controls | `npm run smoke:composer-toolbar` |
 | Dictation lifecycle and focus | `npm run smoke:voice-session` |
 | Browser authentication Cookies | `npm run smoke:browser-auth-cookies` |
+| Real HTTP/mux recovery and retained document/draft | `npm run smoke:transport-recovery` |
+| Real cross-client pending questions and explicit answer retry | `npm run smoke:transport-recovery -- --interactions` |
 | API fallback on older WebViews | `npm run smoke:mobile-compat` |
 | Async access-panel forms | `npm run smoke:control-state` |
 | Module-selection recovery | `npm run smoke:module-recovery` |
 | Local extension Worker execution and explicit recovery | `npm run smoke:extension-workers` |
 
 These fixtures do not submit a model request or read the normal DSH home. Browser evidence does not establish physical Android keyboard, camera or device-lifecycle behavior.
+
+Transport recovery uses the same isolated packed DSH runtime described below and a loopback-only fault proxy. It requires healthy HTTP during an actual mux interruption, a new 101 handshake and fresh Workspace baseline, and an unchanged document/editor/draft. `--interactions` adds a test-only Host question through the real Loader, checks desktop/mobile delivery and reconnection, and rejects one answer request before an explicit retry. It does not simulate an approval audit or establish a reporter's Cloudflare deployment. `--negative-control-mux` deliberately leaves the mux unavailable and must fail with `Mux recovery negative control detected`; another setup error is not a passing negative control.
+
+`--negative-control-import` makes the owned classic-script client fail at its top level before registering its module. The script must download successfully, fail during initial mobile boot, and be identified by its module and resource mapping; only completed cleanup permits the `Module evaluation negative control detected` marker. Both negative controls refuse their marker if diagnostic collection, evidence persistence or cleanup also fails. Startup failures retain bounded boot, response, request-failure and execution evidence under `local/mobile-boot-diagnostics/`. HTTP success alone does not prove that a module executed or registered.
 
 ## Test the packed plugin in DSH
 
@@ -51,6 +57,8 @@ npm run smoke:dsh-composer
 
 The smoke installs the actual npm tarball into an owned temporary profile before pairing. It does not substitute checkout files for bundled components. CI owns the complete version/platform matrix in [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
+The shared mobile-profile fixture imports package files with pnpm's `packageImportMethod: copy`. Independent profile directories otherwise can share a content-store hardlink: another import changes its `ctime` while preserving the client bytes, and DSH's metadata-based HMR can publish a different revision during boot. Copies isolate the installed file identities and metadata; this is a development-fixture setting, not a change to user profiles. `node scripts/probe-pnpm-client-metadata.mjs` requires explicit `DSH_BOOT_SMOKE_BIN` and `DSH_BOOT_SMOKE_MOBILE_TARBALL` files and compares `auto` with `copy` in an owned private store. It records dev/inode/link counts, source hashes and live registry revisions; resource reads use `cache: no-store` so a browser's immutable cache cannot establish a server response.
+
 For installation changes, run `npm run smoke:plugin-installation` against the same isolated DSH runtime, with `pnpm` available on PATH as required by DSH's plugin manager. CI installs the pinned pnpm version explicitly. The smoke uses DSH's live plugin-manager API and real pnpm installation, verifies Host and Client discovery, and toggles the question-card component independently. Set `DSH_BOOT_SMOKE_NODE_LINKER=isolated` to cover pnpm's isolated layout, or `DSH_BOOT_SMOKE_PREVIOUS_MOBILE_TARBALL` to a verified older plugin tarball to test upgrading. The component is embedded in the main tarball and loaded relative to `cordis.patch.yml`; do not publish it separately or restore a nested `file:` dependency.
 
 `npm run smoke:mobile-settings` checks the mounted DSH General settings, local typography and narrow-screen controls. Its native bridge is simulated; physical WebView zoom, keyboard and system-bar behavior require ADB evidence.
@@ -58,6 +66,8 @@ For installation changes, run `npm run smoke:plugin-installation` against the sa
 Compatibility changes also run `npm run smoke:dsh-boot -- --legacy-webview`. The `--negative-control-compat` variation must fail with its expected missing-API marker after the compatibility script is blocked; an installation or fixture failure is not a successful negative control.
 
 The conversation scroll check uses the same isolated runtime and packed plugin. Its `--negative-control-viewport` variation removes the height fallback and must fail with `Viewport negative control detected`; it cannot substitute for testing the reporter's actual WebView.
+
+The compatibility, viewport and missing-companion negative lanes emit a final `DSH_MOBILE_EXPECTED_FAILURE` receipt only after observing the deliberate fault and completing cleanup. CI validates that exact receipt with `scripts/negative-control.mjs`; a matching error message inside an AggregateError is insufficient. Cleanup failures remain test failures.
 
 `npm run capture:screenshots -- --out <directory>` produces credential-masked pairing, conversation, drawer and settings PNGs. `--overwrite` permits replacing existing captures; generated files are not committed automatically.
 
@@ -86,6 +96,8 @@ Release preparation is not publication. Keep the candidate marked unreleased and
 3. After publication is authorized, finalize the CHANGELOG date and plugin stable version in both root READMEs before the final validation. Keep APK links and App manuals on the published App version. `check:release-tag` validates these independently and refuses unfinished plugin release documentation.
 4. Pass relevant local checks and every applicable CI job for that final candidate, including its release-documentation changes, not only checks required by branch protection. Later changes require the checks relevant to their diff; do not use an earlier commit's green checks as the final candidate's evidence. Record device/network coverage without treating local probes as public-route evidence.
 5. Merge the tested candidate, tag that commit with `v<plugin-version>` and let [.github/workflows/release.yml](.github/workflows/release.yml) build and publish the plugin. Verify npm/GitHub package equality and checksums afterward. Link the current App download in the plugin release notes; an unchanged App does not get a new APK.
+
+If npm already contains the tagged version after partial publication, the workflow compares its public `dist.integrity` with the candidate tarball before continuing GitHub publication. Matching bytes permit completion; a mismatch or registry error stops the workflow. Keep the already published package intact and reconcile the completed stages before retrying.
 
 For native changes, increase Android `versionName` and `versionCode`, document the App changes, complete Android validation and use an `android-v<app-version>` tag. [The Android workflow](.github/workflows/android-release.yml) builds and publishes the signed APK independently, without publishing npm or replacing GitHub's latest plugin release. The APK name remains `dsh-mobile-android-v<app-version>.apk`.
 

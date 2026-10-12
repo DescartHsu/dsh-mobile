@@ -36,6 +36,8 @@ Before a real release, verify cleanly scoped changes, original contributor ances
 
 After authorized publication, independently check npm metadata and dist-tag, downloaded npm artifact/integrity, GitHub non-draft release/tag/commit/assets, package byte equality/checksum and any new APK's manifest/signer. A successful workflow dispatch, green job or skipped upload is not proof that users can download/install the intended artifact. An existing version may not be overwritten; reconcile what actually published before any retry.
 
+Before continuing a partially published plugin release, compare the occupied npm version's integrity with the exact candidate tarball using [the reconciliation helper](../../../../scripts/check-npm-release-integrity.mjs). Only a matching artifact permits completion; network/metadata errors are not absence. Optional component approval checks must verify effective environment fields, including disabled administrator bypass, rather than relying on the environment name. Missing policy evidence fails closed and synthetic fixtures do not establish live GitHub settings.
+
 Public npm/plugin releases, signed APKs, optional component binaries and source promotion can complete independently. Report partial success accurately and stop where new authority or a real unresolved failure is required; do not delete a release, unpublish, force-push or activate a component catalog merely to make the process appear complete.
 
 ## Maintain the guidance

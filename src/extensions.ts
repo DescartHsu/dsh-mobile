@@ -35,15 +35,15 @@ export const HOST_OPERATION_TIMEOUT_MS = 30_000
 /** Upper bound for a per-operation `timeoutMs` override. */
 export const HOST_OPERATION_TIMEOUT_MAX_MS = 300_000
 
-async function withActivationTimeout<T>(promise: Promise<T>, id: string, signal: AbortSignal): Promise<T> {
+async function withActivationTimeout<T>(promise: Promise<T>, id: string, signal: AbortSignal, timeoutMs: number | undefined): Promise<T> {
   let timer: NodeJS.Timeout | undefined
   let onAbort: (() => void) | undefined
   try {
     return await Promise.race([
       promise,
-      new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new MobileExtensionError('host_load_timeout', `extension ${id} activation timed out`, 500)), HOST_ACTIVATION_TIMEOUT_MS)
-        }),
+      ...(timeoutMs === undefined ? [] : [new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new MobileExtensionError('host_load_timeout', `extension ${id} activation timed out`, 500)), timeoutMs)
+      })]),
       new Promise<never>((_, reject) => {
         const abort = (): void => { reject(new MobileExtensionError('host_activation_closed', `extension ${id} activation is closed`, 409)) }
         if (signal.aborted) abort()
@@ -735,7 +735,7 @@ export class MobileAccessService extends Service {
       if (candidate.method !== method) return false
       return (candidate.kind ?? 'exact') === 'exact'
         ? candidate.path === pathname
-        : pathname === candidate.path || pathname.startsWith(`${candidate.path}/`)
+        : candidate.path === '/' || pathname === candidate.path || pathname.startsWith(`${candidate.path}/`)
     })
     if (route === undefined) throw new MobileExtensionError('route_not_found', 'route not found', 404)
     // A cancelled request must not execute host code or occupy admission accounting.
@@ -1170,7 +1170,8 @@ async function loadLocalExtension(directory: string, context: Context, known?: L
     let host: MobileExtensionDefinition
     if (worker !== undefined) {
       try {
-        await withActivationTimeout(worker.activate(), manifest.id, controller.signal)
+        // Worker activation owns its configured deadline; this wait only observes cancellation.
+        await withActivationTimeout(worker.activate(), manifest.id, controller.signal, undefined)
       } catch (error) {
         // A failed activation must not leak a live worker thread (the watcher
         // retries every interval).
@@ -1212,7 +1213,7 @@ async function loadLocalExtension(directory: string, context: Context, known?: L
         }
         await Promise.all(pendingEffects)
       }
-      await withActivationTimeout(activate(), manifest.id, controller.signal)
+      await withActivationTimeout(activate(), manifest.id, controller.signal, HOST_ACTIVATION_TIMEOUT_MS)
       host = validateDefinition({ ...manifest, actions, routes })
     }
     activationOpen = false

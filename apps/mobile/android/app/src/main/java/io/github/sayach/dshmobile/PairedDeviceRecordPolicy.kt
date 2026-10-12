@@ -9,7 +9,8 @@ package io.github.sayach.dshmobile
  */
 internal object PairedDeviceRecordPolicy {
     /**
-     * Whether the trust anchor stored with a row is acceptable for its access mode.
+     * Whether a saved row binds an authentic CA to its instance. Expiry is checked by TLS,
+     * not while decoding encrypted records; expired rows remain available for repair/removal.
      *
      * @param mode the transport the row was paired over.
      * @param caCertificate the pinned CA, or `null` when the row uses the platform trust store.
@@ -17,7 +18,7 @@ internal object PairedDeviceRecordPolicy {
      */
     fun acceptsTrustAnchor(mode: AccessMode, caCertificate: ByteArray?, instanceId: String): Boolean =
         when (mode) {
-            AccessMode.LAN -> caCertificate?.let { PairingTrust.validateCertificate(it, instanceId) != null } == true
-            AccessMode.REMOTE -> caCertificate?.let { PairingTrust.validateCertificate(it, instanceId) != null } ?: true
+            AccessMode.LAN -> caCertificate?.let { PairingTrust.validateStoredCertificate(it, instanceId) != null } == true
+            AccessMode.REMOTE -> caCertificate?.let { PairingTrust.validateStoredCertificate(it, instanceId) != null } ?: true
         }
 }

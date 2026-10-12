@@ -509,17 +509,6 @@ else
     printf '%s\n' "$caddy_import" > /etc/caddy/Caddyfile
     chmod 0644 /etc/caddy/Caddyfile
     caddyfile_ready=true
-  elif grep -q '^# Managed by DSH Mobile$' /etc/caddy/Caddyfile; then
-    # Legacy whole-file layout: the entire file is ours by construction.
-    printf '%s\n' "$caddy_import" > /etc/caddy/Caddyfile
-    chmod 0644 /etc/caddy/Caddyfile
-    caddyfile_ready=true
-  elif grep -q '^:80[[:space:]]*{' /etc/caddy/Caddyfile \
-    && grep -q 'root [*] /usr/share/caddy' /etc/caddy/Caddyfile \
-    && grep -q '^[[:space:]]*file_server[[:space:]]*$' /etc/caddy/Caddyfile; then
-    printf '%s\n' "$caddy_import" > /etc/caddy/Caddyfile
-    chmod 0644 /etc/caddy/Caddyfile
-    caddyfile_ready=true
   fi
 fi
 if [ "$caddyfile_ready" != true ]; then
@@ -870,13 +859,8 @@ if grep -Eq '^[[:space:]]*import[[:space:]]+/etc/caddy/dsh-mobile-dsh\.caddy([[:
   fi
   check caddy ok "已移除 DSH Mobile 站点引入；其余 Caddy 配置保持原样。"
 elif [ -f /etc/caddy/Caddyfile ] && grep -q '^# Managed by DSH Mobile$' /etc/caddy/Caddyfile; then
-  # Legacy whole-file layout (pre-snippet releases): the entire file is ours.
-  printf '# DSH Mobile removed its site. Restore your own Caddyfile or reinstall the Caddy defaults.\\n' > /etc/caddy/Caddyfile
-  chmod 0644 /etc/caddy/Caddyfile
-  if command -v caddy >/dev/null 2>&1; then
-    caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy.service || systemctl restart caddy.service || true
-  fi
-  check caddy ok "已清空旧版 DSH Mobile 管理的 Caddy 站点；请按需恢复自己的配置。"
+  # A legacy marker does not establish ownership of subsequently added sites.
+  check caddy warning "已保留旧版 Caddyfile；请手动移除 DSH Mobile 站点，不要删除其他站点。"
 else
   check caddy ok "Caddyfile 非 DSH Mobile 管理，保持原样。"
 fi

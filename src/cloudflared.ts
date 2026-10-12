@@ -3,7 +3,7 @@ import { lstat } from 'node:fs/promises'
 import { createServer, type Server } from 'node:net'
 import { isAbsolute } from 'node:path'
 import type { CloudflaredTunnelMode, CloudflaredTunnelSettings } from './cloudflared-tunnel.js'
-import type { MobileAccessControlStore } from './control.js'
+import type { MobileAccessControlState, MobileAccessControlStore } from './control.js'
 import type { MobileAccessGateway } from './gateway.js'
 import { settleRemoteResources, terminateRemoteProcess, type RemoteProviderController } from './remote.js'
 
@@ -207,8 +207,8 @@ export class CloudflaredController implements RemoteProviderController {
   }
 
   /** Restore the remembered cloudflared switch independently from LAN and other providers. */
-  async initialize(): Promise<void> {
-    const state = await this.options.store.load()
+  async initialize(initialState?: MobileAccessControlState): Promise<void> {
+    const state = initialState ?? await this.options.store.load()
     this.enabled = state.enabled
     this.initialized = true
     if (this.enabled) await this.start()
@@ -230,9 +230,9 @@ export class CloudflaredController implements RemoteProviderController {
     if (!this.initialized || this.disposed) throw new Error('cloudflared controller is unavailable')
     await this.enqueue(async () => {
       if (this.enabled === enabled && (enabled === false || this.child !== undefined)) return
-      if (!enabled) await this.stop()
-      this.enabled = enabled
       await this.options.store.save({ version: 1, enabled })
+      this.enabled = enabled
+      if (!enabled) await this.stop()
       if (enabled) await this.start()
       else this.publish({ enabled: false, state: 'off' })
     })
@@ -244,8 +244,8 @@ export class CloudflaredController implements RemoteProviderController {
     if (!this.initialized || this.disposed) throw new Error('cloudflared controller is unavailable')
     await this.enqueue(async () => {
       if (!this.enabled) {
-        this.enabled = true
         await this.options.store.save({ version: 1, enabled: true })
+        this.enabled = true
       }
       await this.stop()
       await this.start()
@@ -257,9 +257,9 @@ export class CloudflaredController implements RemoteProviderController {
   async reset(): Promise<CloudflaredStatus> {
     if (!this.initialized || this.disposed) throw new Error('cloudflared controller is unavailable')
     await this.enqueue(async () => {
-      await this.stop()
-      this.enabled = false
       await this.options.store.save({ version: 1, enabled: false })
+      this.enabled = false
+      await this.stop()
       this.publish({ enabled: false, state: 'off' })
     })
     return this.status()

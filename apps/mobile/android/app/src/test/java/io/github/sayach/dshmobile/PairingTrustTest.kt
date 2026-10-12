@@ -3,6 +3,7 @@ package io.github.sayach.dshmobile
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -10,6 +11,18 @@ class PairingTrustTest {
     private val instanceId = TestCertificates.instanceIdOf(TestCertificates.ingressCa)
     private val publicKey = PairingKey(instanceId, "B".repeat(43))
     private val caRequiredKey = publicKey.copy(requiresCa = true)
+
+    @Test
+    fun expiredAuthenticPinsRemainReadableButCannotAuthorizeANewTlsConnection() {
+        val expired = TestCertificates.expiredCa
+        val fingerprint = TestCertificates.instanceIdOf(expired)
+        assertArrayEquals(expired, PairingTrust.validateStoredCertificate(expired, fingerprint))
+        assertNull(PairingTrust.validateStoredCertificate(expired, "b".repeat(64)))
+        assertNull(PairingTrust.validateCertificate(expired, fingerprint))
+        assertNull(PairingTrust.selectTrustAnchor(AccessMode.LAN, PairingKey(fingerprint, "T".repeat(43))) { expired })
+        assertThrows(javax.net.ssl.SSLException::class.java) { PinnedTls.socketFactory(expired) }
+        assertNotNull(PinnedTls.socketFactory(TestCertificates.ingressCa))
+    }
 
     @Test
     fun parsesFingerprintBoundPairingKey() {

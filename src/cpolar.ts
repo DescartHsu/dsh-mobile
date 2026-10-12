@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { lstat } from 'node:fs/promises'
 import { createServer, type Server } from 'node:net'
 import { isAbsolute, resolve } from 'node:path'
-import type { MobileAccessControlStore } from './control.js'
+import type { MobileAccessControlState, MobileAccessControlStore } from './control.js'
 import type { MobileAccessGateway } from './gateway.js'
 import { settleRemoteResources, terminateRemoteProcess, type RemoteProviderController } from './remote.js'
 
@@ -134,8 +134,8 @@ export class CpolarController implements RemoteProviderController {
   }
 
   /** Restore the remembered cpolar switch independently from LAN and Funnel state. */
-  async initialize(): Promise<void> {
-    const state = await this.options.store.load()
+  async initialize(initialState?: MobileAccessControlState): Promise<void> {
+    const state = initialState ?? await this.options.store.load()
     this.enabled = state.enabled
     this.initialized = true
     if (this.enabled) await this.start()
@@ -157,9 +157,9 @@ export class CpolarController implements RemoteProviderController {
     if (!this.initialized || this.disposed) throw new Error('cpolar controller is unavailable')
     await this.enqueue(async () => {
       if (this.enabled === enabled && (enabled === false || this.child !== undefined)) return
-      if (!enabled) await this.stop()
-      this.enabled = enabled
       await this.options.store.save({ version: 1, enabled })
+      this.enabled = enabled
+      if (!enabled) await this.stop()
       if (enabled) await this.start()
       else this.publish({ enabled: false, state: 'off' })
     })
@@ -171,8 +171,8 @@ export class CpolarController implements RemoteProviderController {
     if (!this.initialized || this.disposed) throw new Error('cpolar controller is unavailable')
     await this.enqueue(async () => {
       if (!this.enabled) {
-        this.enabled = true
         await this.options.store.save({ version: 1, enabled: true })
+        this.enabled = true
       }
       await this.stop()
       await this.start()
@@ -184,9 +184,9 @@ export class CpolarController implements RemoteProviderController {
   async reset(): Promise<CpolarStatus> {
     if (!this.initialized || this.disposed) throw new Error('cpolar controller is unavailable')
     await this.enqueue(async () => {
-      await this.stop()
-      this.enabled = false
       await this.options.store.save({ version: 1, enabled: false })
+      this.enabled = false
+      await this.stop()
       this.publish({ enabled: false, state: 'off' })
     })
     return this.status()

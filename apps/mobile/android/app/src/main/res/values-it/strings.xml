@@ -72,7 +72,7 @@
     <string name="cancel">Annulla</string>
     <string name="retry">Riprova</string>
     <string name="secure_connection_failed">Connessione sicura non riuscita</string>
-    <string name="secure_connection_failed_message">Il certificato non corrisponde all\'identità del computer salvata. Verifica che sia il computer corretto. Se è stato reinstallato o il certificato è stato reimpostato, cancella i dati del sito e ripeti l\'abbinamento.</string>
+    <string name="secure_connection_failed_message">Il certificato è scaduto o non corrisponde all\'identità salvata. Verifica il computer e l\'impronta del nuovo abbinamento, poi usa Aggiungi computer nell\'elenco dispositivi per scansionare il nuovo QR. Puoi eliminare solo il record locale di questo computer, senza cancellare gli altri abbinamenti.</string>
     <string name="page_load_failed">Impossibile caricare DSH</string>
     <string name="webview_renderer_failed">La pagina DSH si è arrestata più volte. Aggiorna Android System WebView, poi riconnetti questo computer.</string>
     <string name="page_load_failed_message">DSH potrebbe non essere in esecuzione oppure un firewall o la rete corrente potrebbero bloccare la connessione. Prova l\'indirizzo del computer nel browser del telefono; se non è raggiungibile, usa l\'hotspot del telefono.</string>

@@ -7,12 +7,18 @@ import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.SSLException
 import javax.net.ssl.TrustManagerFactory
 
 /** App-private TLS trust anchored to the CA fingerprint carried by the pairing key. */
 internal object PinnedTls {
     fun socketFactory(caDer: ByteArray): SSLSocketFactory {
         val ca = certificate(caDer)
+        try {
+            ca.checkValidity()
+        } catch (failure: java.security.cert.CertificateException) {
+            throw SSLException("Pinned CA is outside its validity period", failure)
+        }
         val store = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
             load(null)
             setCertificateEntry("dsh-mobile", ca)

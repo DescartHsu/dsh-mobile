@@ -1,4 +1,4 @@
-import { X509Certificate } from 'node:crypto'
+import { X509Certificate, createPrivateKey } from 'node:crypto'
 import { lstat, readFile, rmdir, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { readCertificateRenewal, type CertRenewalStatus } from './cert-renewal.js'
@@ -170,12 +170,16 @@ export async function ensureFrpIngressCertificate(
   if (previousFingerprint === undefined) await writeIngressIdentity(paths.statusFile, caFingerprint, ownedRoot)
   const publicHost = new URL(settings.publicOrigin).hostname
   let leaf: X509Certificate | undefined
+  let matchingKey = false
   try {
     leaf = new X509Certificate(await readFile(paths.certFile))
-  } catch {
-    leaf = undefined
+    if (leafKeyExists) matchingKey = leaf.checkPrivateKey(createPrivateKey(await readFile(paths.keyFile)))
+  } catch (_error) {
+    // Missing or damaged leaf material is repaired under the unchanged pairing CA.
   }
   const reusable = leaf !== undefined
+    && matchingKey
+    && Date.parse(leaf.validFrom) <= now
     && Date.parse(leaf.validTo) > now + 24 * 60 * 60_000
     && coversPublicIp(leaf, publicHost)
     && leaf.verify(ca.publicKey)

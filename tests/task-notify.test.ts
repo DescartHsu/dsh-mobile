@@ -72,7 +72,7 @@ describe('task completion tracker', () => {
     const { tracker } = trackerAt()
     const first = tracker.evaluate(hiddenSnapshot({ pendingQuestion: true, questionKey: 'q-1' }))
     expect(first?.kind).toBe('question')
-    expect(first?.tag).toBe('dsh-task-question-q-1')
+    expect(first?.tag).toMatch(/^dsh-task-question-[a-f0-9]{32}$/u)
     expect(tracker.evaluate(hiddenSnapshot({ pendingQuestion: true, questionKey: 'q-1' }))).toBeUndefined()
     expect(tracker.evaluate(hiddenSnapshot({ pendingQuestion: true, questionKey: 'q-2' }))?.kind).toBe('question')
   })
@@ -231,14 +231,28 @@ describe('task completion tracker', () => {
   it('uses safe bounded tags for arbitrary question keys', () => {
     const { tracker } = trackerAt()
     const event = tracker.evaluate(hiddenSnapshot({ pendingQuestion: true, questionKey: 'Q 1/2: pick!' }))
-    expect(event?.tag).toBe('dsh-task-question-q-1-2-pick')
+    expect(event?.tag).toMatch(/^dsh-task-question-[a-f0-9]{32}$/u)
     expect(event?.tag.length).toBeLessThanOrEqual(TASK_NOTIFY_LIMITS.tag)
+    const different = tracker.evaluate(hiddenSnapshot({ pendingQuestion: true, questionKey: 'Q-1-2-pick' }))
+    expect(different?.tag).not.toBe(event?.tag)
   })
 
   it('keeps completed turns separate with bounded native tags', () => {
-    expect(taskCompletionTag('session-a', 1)).toBe('dsh-task-done-session-a-1')
+    expect(taskCompletionTag('session-a', 1)).toMatch(/^dsh-task-done-[a-f0-9]{32}-1$/u)
     expect(taskCompletionTag('session-a', 2)).not.toBe(taskCompletionTag('session-a', 1))
-    expect(taskCompletionTag('x'.repeat(200), 3).length).toBeLessThanOrEqual(TASK_NOTIFY_LIMITS.tag)
+    const sharedPrefix = 'x'.repeat(200)
+    const first = parseTaskNotifyPayload({ sessionId: `${sharedPrefix}-one`, turn: Number.MAX_SAFE_INTEGER })!
+    const second = parseTaskNotifyPayload({ sessionId: `${sharedPrefix}-two`, turn: Number.MAX_SAFE_INTEGER })!
+    expect(first.sessionId).toBe(`${sharedPrefix}-one`)
+    const firstTag = taskCompletionTag(first.sessionId, first.turn)
+    expect(firstTag.length).toBeLessThanOrEqual(TASK_NOTIFY_LIMITS.tag)
+    expect(firstTag.endsWith(`-${String(Number.MAX_SAFE_INTEGER)}`)).toBe(true)
+    expect(taskCompletionTag(second.sessionId, second.turn)).not.toBe(firstTag)
+    expect(taskCompletionTag(first.sessionId, 1)).not.toBe(taskCompletionTag(first.sessionId, 2))
+    expect(taskCompletionTag('任务甲', 1)).not.toBe(taskCompletionTag('任务乙', 1))
+    expect(taskCompletionTag('Session-A', 1)).not.toBe(taskCompletionTag('session-a', 1))
+    expect(taskCompletionTag('\ud800', 1)).not.toBe(taskCompletionTag('\ud801', 1))
+    expect(taskCompletionTag(first.sessionId, first.turn)).toBe(firstTag)
   })
 })
 

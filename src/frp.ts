@@ -5,7 +5,7 @@ import type { ClientRequest, IncomingMessage } from 'node:http'
 import { connect } from 'node:net'
 import { isAbsolute } from 'node:path'
 import { Readable } from 'node:stream'
-import type { MobileAccessControlStore } from './control.js'
+import type { MobileAccessControlState, MobileAccessControlStore } from './control.js'
 import type { FrpConfigStore, FrpSettings } from './frp-config.js'
 import { frpEntryOrigin, isFrpSelfSignedIngress, resolveFrpVhostHttpPort } from './frp-config.js'
 import type { MobileAccessGateway } from './gateway.js'
@@ -352,8 +352,8 @@ export class FrpController implements RemoteProviderController {
   }
 
   /** Restore the remembered FRP switch without changing LAN or other providers. */
-  async initialize(): Promise<void> {
-    const state = await this.options.store.load()
+  async initialize(initialState?: MobileAccessControlState): Promise<void> {
+    const state = initialState ?? await this.options.store.load()
     this.enabled = state.enabled
     this.initialized = true
     if (this.enabled) await this.start()
@@ -375,9 +375,9 @@ export class FrpController implements RemoteProviderController {
     if (!this.initialized || this.disposed) throw new Error('FRP controller is unavailable')
     await this.enqueue(async () => {
       if (this.enabled === enabled && (enabled === false || this.child !== undefined)) return
-      if (!enabled) await this.stop()
-      this.enabled = enabled
       await this.options.store.save({ version: 1, enabled })
+      this.enabled = enabled
+      if (!enabled) await this.stop()
       if (enabled) await this.start()
       else this.publish({ enabled: false, state: 'off' })
     })
@@ -389,8 +389,8 @@ export class FrpController implements RemoteProviderController {
     if (!this.initialized || this.disposed) throw new Error('FRP controller is unavailable')
     await this.enqueue(async () => {
       if (!this.enabled) {
-        this.enabled = true
         await this.options.store.save({ version: 1, enabled: true })
+        this.enabled = true
       }
       await this.stop()
       await this.start()
@@ -402,9 +402,9 @@ export class FrpController implements RemoteProviderController {
   async reset(): Promise<FrpStatus> {
     if (!this.initialized || this.disposed) throw new Error('FRP controller is unavailable')
     await this.enqueue(async () => {
-      await this.stop()
-      this.enabled = false
       await this.options.store.save({ version: 1, enabled: false })
+      this.enabled = false
+      await this.stop()
       this.publish({ enabled: false, state: 'off' })
     })
     return this.status()

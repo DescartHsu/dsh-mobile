@@ -26,20 +26,30 @@ export interface PinnedDownloadRequest {
   readonly redirectHosts?: readonly string[]
 }
 
+/** Release an unused body without replacing a download or validation failure. */
+async function discardBody(body: { cancel(): Promise<void> } | null): Promise<void> {
+  if (body === null) return
+  try { await body.cancel() } catch (_error) {
+    // Cancellation can reject after a transport failure; the download verdict remains authoritative.
+  }
+}
+
 /** Follow one redirect hop after checking its scheme and host. A second hop is refused. */
 async function followValidatedRedirect(response: Response, request: PinnedDownloadRequest): Promise<Response> {
-  const location = response.headers.get('location')
-  if (location === null) throw new Error(`${request.errorPrefix}_download_redirect_missing`)
   let target: URL
   try {
-    target = new URL(location, request.url)
-  } catch {
-    throw new Error(`${request.errorPrefix}_download_redirect_invalid`)
-  }
-  const hosts = request.redirectHosts ?? RELEASE_ASSET_HOSTS
-  if (target.protocol !== 'https:' || !hosts.includes(target.hostname)) {
-    throw new Error(`${request.errorPrefix}_download_redirect_rejected`)
-  }
+    const location = response.headers.get('location')
+    if (location === null) throw new Error(`${request.errorPrefix}_download_redirect_missing`)
+    try {
+      target = new URL(location, request.url)
+    } catch {
+      throw new Error(`${request.errorPrefix}_download_redirect_invalid`)
+    }
+    const hosts = request.redirectHosts ?? RELEASE_ASSET_HOSTS
+    if (target.protocol !== 'https:' || !hosts.includes(target.hostname)) {
+      throw new Error(`${request.errorPrefix}_download_redirect_rejected`)
+    }
+  } finally { await discardBody(response.body) }
   return fetch(target, { redirect: 'error', signal: request.signal })
 }
 
@@ -65,27 +75,35 @@ async function attemptDownload(request: PinnedDownloadRequest): Promise<Uint8Arr
   const first = await fetch(request.url, { redirect: 'manual', signal: request.signal })
   const redirected = first.status >= 300 && first.status < 400
   const response = redirected ? await followValidatedRedirect(first, request) : first
-  if (!response.ok) throw new Error(`${request.errorPrefix}_download_http_${String(response.status)}`)
-  const contentLength = response.headers.get('content-length')
-  if (contentLength !== null && (!/^\d+$/u.test(contentLength) || Number(contentLength) !== request.expectedBytes)) {
-    throw new Error(`${request.errorPrefix}_download_size_mismatch`)
-  }
-  if (response.body === null) throw new Error(`${request.errorPrefix}_download_size_mismatch`)
-  const bytes = new Uint8Array(request.expectedBytes)
-  const reader = response.body.getReader()
-  let received = 0
-  while (true) {
-    const chunk = await reader.read()
-    if (chunk.done) break
-    if (chunk.value.byteLength > bytes.byteLength - received) {
-      await reader.cancel()
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+  let ended = false
+  try {
+    if (!response.ok) throw new Error(`${request.errorPrefix}_download_http_${String(response.status)}`)
+    const contentLength = response.headers.get('content-length')
+    if (contentLength !== null && (!/^\d+$/u.test(contentLength) || Number(contentLength) !== request.expectedBytes)) {
       throw new Error(`${request.errorPrefix}_download_size_mismatch`)
     }
-    bytes.set(chunk.value, received)
-    received += chunk.value.byteLength
+    if (response.body === null) throw new Error(`${request.errorPrefix}_download_size_mismatch`)
+    const bytes = new Uint8Array(request.expectedBytes)
+    reader = response.body.getReader()
+    let received = 0
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) { ended = true; break }
+      if (chunk.value.byteLength > bytes.byteLength - received) {
+        throw new Error(`${request.errorPrefix}_download_size_mismatch`)
+      }
+      bytes.set(chunk.value, received)
+      received += chunk.value.byteLength
+    }
+    if (received !== request.expectedBytes) throw new Error(`${request.errorPrefix}_download_size_mismatch`)
+    return bytes
+  } finally {
+    if (reader === undefined) await discardBody(response.body)
+    else {
+      try { if (!ended) await discardBody(reader) } finally { reader.releaseLock() }
+    }
   }
-  if (received !== request.expectedBytes) throw new Error(`${request.errorPrefix}_download_size_mismatch`)
-  return bytes
 }
 
 /**

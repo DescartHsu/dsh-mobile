@@ -18,6 +18,8 @@ Read `src/plugin.ts`, `cordis.patch.yml`, `src/gateway.ts`, `src/client.ts` and 
 
 Identify the missing feature's owner before deciding that the App needs updating. Ordinary web UI, a separately switchable client component and a new native capability have different loading requirements. The gateway's `/mobile-access/metadata` helps identify the running plugin; `/mobile-access/discovery` helps identify the computer instance and Origin. Compare the relevant fields with listener/profile ownership, without dumping complete pairing payloads. Neither route proves the target client code loaded.
 
+For failed plugin imports, capture the actual entry/batch mapping, the first failed script's HTTP status and content type, and execution or module-registration errors. HTTP 200 does not establish that a script executed or registered; many dependent failures can repeat one underlying resource failure. Use the [boot diagnostics helper](../../../../scripts/mobile-boot-diagnostics.mjs) and [existing behavior-check guidance](../../../../CONTRIBUTING.md#select-behavior-checks) for redacted evidence and negative-control acceptance, including evidence and cleanup failures.
+
 ## Adapt to upstream behavior
 
 Inspect the official release/channel and the exact source or published packages corresponding to it. An npm `latest`, an alpha tag and a source branch may name different releases. Do not upgrade a dirty user checkout with an unconditional pull or replace a running Desktop profile as a diagnostic shortcut.
@@ -31,6 +33,8 @@ Keep changes within the plugin when possible. Prefer an existing optional capabi
 ## Source, package and live installation are separate
 
 `npm ci` workspace links can hide a distribution defect. Test `npm pack` output installed into an owned profile, and verify the actual Host and Client selected by DSH. Preserve the question-card component's identity and independent off/on behavior; disabling it must dispose listeners/styles rather than leave hidden state behind.
+
+Node can resolve an installed npm dependency that the browser's DSH module loader cannot supply. Bundle browser-used runtime libraries explicitly, keep DSH-supplied peers external, and inspect the final imports. [The client bundle gate](../../../../scripts/check-client-bundle.mjs) rejects unbundled runtime imports; a source unit test alone cannot validate module registration in the packed browser.
 
 The embedded `packages/question-fixes` component is private and belongs to the main plugin artifact. The relative file entry in `cordis.patch.yml` is anchored by DSH to the installed bundle directory. Keep the component manifest, Host, Client and license inside the tarball. Do not restore a private `file:` dependency plus nested `bundledDependencies` that depends on pnpm's linker layout, or assume a public package subpath is discoverable as a DSH client module.
 

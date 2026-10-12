@@ -21,9 +21,12 @@ Use [CONTRIBUTING.md](../../../CONTRIBUTING.md) for commands and [package.json](
 | --- | --- |
 | DSH upgrade, startup failure, installation or client discovery | [Compatibility and packaging](references/compatibility-and-packaging.md) |
 | Mobile layout, reconnection, remote providers, Android or ADB | [Runtime, UI and Android](references/runtime-ui-android.md) |
+| Test isolation, asynchronous races, fixture teardown or flaky checks | [Test and fixture reliability](references/testing-and-fixtures.md) |
 | PR/issue integration, documentation, versioning or publication | [Collaboration and releases](references/collaboration-and-releases.md) |
 
 Read multiple references only when the change crosses those systems. Prefer existing repository scripts and test fixtures to rebuilding an alternative maintenance toolchain.
+
+This skill has no required external-skill dependency; its references and repository guides provide the maintenance instructions. Relevant skills supplied by an Agent's environment may assist UI, test-reliability or skill-authoring work, but their absence does not block ordinary maintenance. Work in DSH core follows that repository's own instructions and available skills, not an implicit prerequisite for plugin-only changes.
 
 ## Cross-layer decisions
 

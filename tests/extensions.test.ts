@@ -27,6 +27,25 @@ async function createExtension(root: string, host: string, script = 'window.dshM
 }
 
 describe('mobile extension registry', () => {
+  it('matches a root prefix while keeping other prefixes within their path segments', async () => {
+    const context = new Context(); contexts.push(context)
+    const service = new MobileAccessService(context)
+    service.registerExtension({ schemaVersion: 1, id: 'root-route', name: 'Root', version: '1', routes: [
+      { method: 'GET', path: '/', kind: 'prefix', handle: request => ({ body: request.pathname }) },
+    ] })
+    service.registerExtension({ schemaVersion: 1, id: 'files-route', name: 'Files', version: '1', routes: [
+      { method: 'GET', path: '/files', kind: 'prefix', handle: request => ({ body: request.pathname }) },
+    ] })
+    const request = (pathname: string) => ({ method: 'GET', pathname, query: new URLSearchParams(), headers: {}, body: new Uint8Array(), deviceId: 'device', signal: new AbortController().signal })
+    for (const pathname of ['/', '/child', '/child/nested']) {
+      await expect(service.route('root-route', 'GET', pathname, request(pathname))).resolves.toEqual({ body: pathname })
+    }
+    for (const pathname of ['/files', '/files/child']) {
+      await expect(service.route('files-route', 'GET', pathname, request(pathname))).resolves.toEqual({ body: pathname })
+    }
+    await expect(service.route('files-route', 'GET', '/files-other', request('/files-other'))).rejects.toMatchObject({ code: 'route_not_found' })
+    await expect(service.route('root-route', 'POST', '/child', { ...request('/child'), method: 'POST' })).rejects.toMatchObject({ code: 'route_not_found' })
+  })
   it('snapshots operation budgets without changing class-based host method receivers', async () => {
     vi.useFakeTimers()
     class Action {

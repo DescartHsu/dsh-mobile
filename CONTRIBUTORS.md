@@ -4,11 +4,11 @@ GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/co
 
 GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-12. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
-## 0.6.4 候选贡献 / Contributions to the 0.6.4 candidate
+## 0.6.4 代码贡献 / Code contributions in 0.6.4
 
-[@abworks-dev](https://github.com/abworks-dev) 的 [#200](https://github.com/saya-ch/dsh-mobile/pull/200) 提供窄屏输入栏包装层与按钮点击区域的尺寸修正及回归测试，已纳入本地候选，尚未合并至默认分支或发布。
+[@abworks-dev](https://github.com/abworks-dev) 的 [#200](https://github.com/saya-ch/dsh-mobile/pull/200) 提供窄屏输入栏包装层与按钮点击区域的尺寸修正及回归测试，代码已随 0.6.4 发布；随后以合并提交 [`71754e5`](https://github.com/saya-ch/dsh-mobile/commit/71754e5191d3e9eadfedad16982e144491272f26) 保留原作者提交 [`03604ae`](https://github.com/saya-ch/dsh-mobile/commit/03604ae7623ceb42090ff4c4ed0e84d4aff7144a)。这次历史补全不改变已发布的功能或标签。
 
-[@abworks-dev](https://github.com/abworks-dev)'s [#200](https://github.com/saya-ch/dsh-mobile/pull/200) supplies the narrow-screen composer wrapper sizing fix and regression checks. It is included in the local candidate, not yet merged into the default branch or released.
+[@abworks-dev](https://github.com/abworks-dev)'s [#200](https://github.com/saya-ch/dsh-mobile/pull/200) supplies the narrow-screen composer wrapper sizing fix and regression checks shipped in 0.6.4. The subsequent merge [`71754e5`](https://github.com/saya-ch/dsh-mobile/commit/71754e5191d3e9eadfedad16982e144491272f26) retains the original author commit [`03604ae`](https://github.com/saya-ch/dsh-mobile/commit/03604ae7623ceb42090ff4c4ed0e84d4aff7144a) without changing the released functionality or tags.
 
 ## 0.6.3 代码贡献 / Code contributions in 0.6.3
 
@@ -21,7 +21,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | 社区成员 / Community member | 已合并 PR / Merged PRs |
 | --- | --- |
 | [@1624318455](https://github.com/1624318455) | [#93](https://github.com/saya-ch/dsh-mobile/pull/93) |
-| [@abworks-dev](https://github.com/abworks-dev) | [#91](https://github.com/saya-ch/dsh-mobile/pull/91), [#98](https://github.com/saya-ch/dsh-mobile/pull/98), [#99](https://github.com/saya-ch/dsh-mobile/pull/99), [#152](https://github.com/saya-ch/dsh-mobile/pull/152), [#184](https://github.com/saya-ch/dsh-mobile/pull/184), [#185](https://github.com/saya-ch/dsh-mobile/pull/185) |
+| [@abworks-dev](https://github.com/abworks-dev) | [#91](https://github.com/saya-ch/dsh-mobile/pull/91), [#98](https://github.com/saya-ch/dsh-mobile/pull/98), [#99](https://github.com/saya-ch/dsh-mobile/pull/99), [#152](https://github.com/saya-ch/dsh-mobile/pull/152), [#184](https://github.com/saya-ch/dsh-mobile/pull/184), [#185](https://github.com/saya-ch/dsh-mobile/pull/185), [#200](https://github.com/saya-ch/dsh-mobile/pull/200) |
 | [@ayiejosh](https://github.com/ayiejosh) | [#109](https://github.com/saya-ch/dsh-mobile/pull/109), [#110](https://github.com/saya-ch/dsh-mobile/pull/110), [#116](https://github.com/saya-ch/dsh-mobile/pull/116), [#117](https://github.com/saya-ch/dsh-mobile/pull/117), [#119](https://github.com/saya-ch/dsh-mobile/pull/119), [#124](https://github.com/saya-ch/dsh-mobile/pull/124), [#125](https://github.com/saya-ch/dsh-mobile/pull/125), [#133](https://github.com/saya-ch/dsh-mobile/pull/133), [#136](https://github.com/saya-ch/dsh-mobile/pull/136) |
 | [@chintoleung](https://github.com/chintoleung) | [#104](https://github.com/saya-ch/dsh-mobile/pull/104), [#147](https://github.com/saya-ch/dsh-mobile/pull/147), [#148](https://github.com/saya-ch/dsh-mobile/pull/148), [#158](https://github.com/saya-ch/dsh-mobile/pull/158), [#161](https://github.com/saya-ch/dsh-mobile/pull/161), [#162](https://github.com/saya-ch/dsh-mobile/pull/162), [#167](https://github.com/saya-ch/dsh-mobile/pull/167) |
 | [@cjxh21](https://github.com/cjxh21) | [#154](https://github.com/saya-ch/dsh-mobile/pull/154), [#155](https://github.com/saya-ch/dsh-mobile/pull/155) |

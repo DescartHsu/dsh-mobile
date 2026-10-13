@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { inspect } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cpolarWindowsExtractionStep, cpolarWindowsSystemTool, extractWindowsMsiBinary, runCpolarWindowsTool } from '../src/windows-msi-extract.js'
+import { cpolarWindowsExtractionStep, cpolarWindowsSystemTool, extractWindowsMsiArchive, extractWindowsMsiBinary, runCpolarWindowsTool } from '../src/windows-msi-extract.js'
 
 const commands = vi.hoisted(() => ({ run: vi.fn(), stat: vi.fn() }))
 vi.mock('../src/exec-file.js', () => ({ execFileText: commands.run }))
@@ -45,6 +45,139 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.unstubAllGlobals()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+})
+
+describe('Unicode-safe Windows MSI ZIP extraction', () => {
+  it('passes Unicode and quoted paths only as environment data to one fixed system reader', async () => {
+    const { root } = await fixture()
+    const destination = await mkdtemp(join(root, "中文 路径 '单引号'; $(not-command)-"))
+    const archive = join(destination, "官方下载 '组件'.zip")
+    await writeFile(archive, 'pinned ZIP fixture')
+    commands.run.mockImplementationOnce(async (_file, _args, options) => {
+      await writeFile(options.env.DSH_MSI_OUTPUT, 'MSI fixture', { flag: 'wx' })
+      return { stdout: 'DSH_MSI_ZIP_READY\r\n', stderr: '' }
+    })
+    const msi = await extractWindowsMsiArchive(archive, destination)
+    expect(msi).toBe(join(destination, 'installer.msi'))
+    expect(await readFile(msi, 'utf8')).toBe('MSI fixture')
+    expect(await readFile(archive, 'utf8')).toBe('pinned ZIP fixture')
+    expect(commands.run).toHaveBeenCalledTimes(1)
+    const [tool, args, options] = commands.run.mock.calls[0]!
+    expect(tool).toBe(nativePowerShell)
+    expect(args.slice(0, 4)).toEqual(['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand'])
+    expect(options).toMatchObject({ windowsHide: true, timeout: 120_000, maxBuffer: 16_384,
+      env: { DSH_MSI_ZIP: archive, DSH_MSI_OUTPUT: msi } })
+    const source = Buffer.from(args[4] as string, 'base64').toString('utf16le')
+    expect(source).toContain('ZipFile]::OpenRead($env:DSH_MSI_ZIP)')
+    expect(source).toContain('[System.IO.FileMode]::CreateNew')
+    expect(source).toContain('$env:DSH_MSI_OUTPUT')
+    expect(source).toContain('$zip.Entries.Count -gt 128')
+    expect(source).toContain('33554432')
+    expect(source).toContain('$entry.ExternalAttributes')
+    expect(source).toContain('ZIP_PATH_INVALID')
+    expect(source).toContain('ZIP_LINK_INVALID')
+    expect(source).toContain('ZIP_MSI_INVALID')
+    expect(source).toContain('ZIP_STREAM_OVERFLOW')
+    expect(source).toContain('ZIP_STREAM_TRUNCATED')
+    expect(source).toContain('$zipMsiOutput.Dispose()')
+    expect(source).toContain('$zipEntryStream.Dispose()')
+    expect(source).toContain('$zip.Dispose()')
+    expect(source).not.toContain(archive)
+    expect(source).not.toContain(destination)
+    expect(source).not.toMatch(/MsiInstallProduct|MsiDoAction|msiexec|AdminExecuteSequence|InstallExecuteSequence|ExtractToDirectory/u)
+  })
+
+  it.each(['', 'DSH_MSI_ZIP_FAILED', 'banner\nDSH_MSI_ZIP_READY', 'DSH_MSI_ZIP_READY\nextra', '{}'])('rejects non-terminal marker output %j', async stdout => {
+    const { root, msi } = await fixture()
+    commands.run.mockResolvedValueOnce({ stdout, stderr: '' })
+    await expect(extractWindowsMsiArchive(msi, root)).rejects.toMatchObject({ message: 'cpolar_extract_archive_failed', stage: 'archive' })
+    expect(commands.run).toHaveBeenCalledTimes(1)
+    expect(commands.stat.mock.calls.some(([path]) => path === join(root, 'installer.msi'))).toBe(false)
+    expect(await readdir(root)).toEqual(['fixture.msi'])
+  })
+
+  it.each([
+    { size: 0, regular: true, linked: false },
+    { size: 33_554_433, regular: true, linked: false },
+    { size: 16, regular: false, linked: false },
+    { size: 16, regular: true, linked: true },
+  ])('rejects an invalid written MSI $size / regular=$regular / linked=$linked', async info => {
+    const { root, msi } = await fixture()
+    commands.run.mockResolvedValueOnce({ stdout: 'DSH_MSI_ZIP_READY', stderr: '' })
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    commands.stat.mockImplementation(async path => path === join(root, 'installer.msi')
+      ? { size: info.size, isFile: () => info.regular, isSymbolicLink: () => info.linked }
+      : actual.lstat(path))
+    await expect(extractWindowsMsiArchive(msi, root)).rejects.toMatchObject({ message: 'cpolar_extract_archive_failed', stage: 'archive' })
+    expect(commands.stat.mock.calls.filter(([path]) => path === join(root, 'installer.msi'))).toEqual([[join(root, 'installer.msi')]])
+    expect(commands.run).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a ready marker without a created MSI instead of falling back to another extractor', async () => {
+    const { root, msi } = await fixture()
+    commands.run.mockResolvedValueOnce({ stdout: 'DSH_MSI_ZIP_READY', stderr: '' })
+    await expect(extractWindowsMsiArchive(msi, root)).rejects.toMatchObject({ stage: 'archive', nativeCode: 'ENOENT' })
+    expect(commands.run).toHaveBeenCalledTimes(1)
+    expect(await readdir(root)).toEqual(['fixture.msi'])
+  })
+
+  it('does not overwrite a preexisting MSI when the fixed reader refuses CreateNew', async () => {
+    const { root, msi } = await fixture()
+    const output = join(root, 'installer.msi')
+    await writeFile(output, 'existing owned data')
+    commands.run.mockImplementationOnce(async (_file, _args, options) => {
+      await writeFile(options.env.DSH_MSI_OUTPUT, 'replacement', { flag: 'wx' })
+      return { stdout: 'DSH_MSI_ZIP_READY', stderr: '' }
+    })
+    await expect(extractWindowsMsiArchive(msi, root)).rejects.toMatchObject({ stage: 'archive', nativeCode: 'EEXIST' })
+    expect(await readFile(output, 'utf8')).toBe('existing owned data')
+    expect(commands.run).toHaveBeenCalledTimes(1)
+  })
+
+  it('redacts an archive process error while retaining safe timeout fields', async () => {
+    const { root, msi } = await fixture()
+    const secret = 'private-中文-path-and-account-token'
+    commands.run.mockRejectedValueOnce(Object.assign(new Error(`powershell.exe ${secret}`), {
+      code: null, signal: 'SIGTERM', killed: true, stdout: secret, stderr: secret, path: secret,
+    }))
+    try {
+      await extractWindowsMsiArchive(msi, root)
+      throw new Error('fixture must reject')
+    } catch (error) {
+      expect(error).toMatchObject({ stage: 'archive', nativeCode: null, signal: 'SIGTERM', killed: true, deadlineMs: 120_000 })
+      expect(inspect(error)).not.toContain(secret)
+    }
+    expect(commands.run).toHaveBeenCalledTimes(1)
+    expect(commands.stat.mock.calls.some(([path]) => path === join(root, 'installer.msi'))).toBe(false)
+  })
+
+  it('reports a missing system PowerShell as tools failure with no PATH or tar fallback', async () => {
+    const { root, msi } = await fixture()
+    commands.run.mockRejectedValueOnce(Object.assign(new Error('missing private system path'), { code: 'ENOENT' }))
+    await expect(extractWindowsMsiArchive(msi, root)).rejects.toMatchObject({ stage: 'tools', nativeCode: 'ENOENT', deadlineMs: 120_000 })
+    expect(commands.run).toHaveBeenCalledTimes(1)
+    expect(commands.run.mock.calls[0]![0]).toBe(nativePowerShell)
+  })
+
+  it.each([
+    { directory: false, linked: false },
+    { directory: true, linked: true },
+  ])('rejects an invalid destination before starting the reader: directory=$directory linked=$linked', async info => {
+    const { root, msi } = await fixture()
+    commands.stat.mockResolvedValueOnce({ isDirectory: () => info.directory, isSymbolicLink: () => info.linked })
+    await expect(extractWindowsMsiArchive(msi, root)).rejects.toMatchObject({ stage: 'archive' })
+    expect(commands.run).not.toHaveBeenCalled()
+    expect(await readdir(root)).toEqual(['fixture.msi'])
+  })
+
+  it('rejects nonabsolute inputs and other platforms before invoking an extraction process', async () => {
+    const { root, msi } = await fixture()
+    await expect(extractWindowsMsiArchive('relative.zip', root)).rejects.toMatchObject({ stage: 'archive' })
+    await expect(extractWindowsMsiArchive(msi, 'relative-target')).rejects.toMatchObject({ stage: 'archive' })
+    vi.stubGlobal('process', { ...process, platform: 'linux' })
+    await expect(extractWindowsMsiArchive(msi, root)).rejects.toMatchObject({ stage: 'archive' })
+    expect(commands.run).not.toHaveBeenCalled()
+  })
 })
 
 describe('read-only Windows MSI binary extraction', () => {

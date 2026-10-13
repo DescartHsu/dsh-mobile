@@ -187,6 +187,52 @@ public static class DshReadOnlyMsi {
 }
 `
 
+const READ_MSI_ZIP = String.raw`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+try {
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($env:DSH_MSI_ZIP)
+  try {
+    if ($zip.Entries.Count -lt 1 -or $zip.Entries.Count -gt 128) { throw 'ZIP_ENTRIES_LIMIT' }
+    $selected = $null
+    [long]$total = 0
+    foreach ($entry in $zip.Entries) {
+      $name = $entry.FullName.Replace('\', '/')
+      $segments = $name.TrimEnd('/').Split('/')
+      if ($name.StartsWith('/') -or $name.Contains(':') -or $segments -contains '..' -or $segments -contains '.' -or $segments -contains '') { throw 'ZIP_PATH_INVALID' }
+      if (($entry.ExternalAttributes -band 0x400) -ne 0 -or (($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) { throw 'ZIP_LINK_INVALID' }
+      if ($entry.Length -lt 0 -or $entry.Length -gt (33554432 - $total)) { throw 'ZIP_SIZE_LIMIT' }
+      $total += $entry.Length
+      if (-not $name.EndsWith('/') -and $name.EndsWith('.msi', [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($null -ne $selected -or $entry.Length -lt 1) { throw 'ZIP_MSI_INVALID' }
+        $selected = $entry
+      }
+    }
+    if ($null -eq $selected) { throw 'ZIP_MSI_MISSING' }
+    if (([System.IO.File]::GetAttributes([System.IO.Path]::GetDirectoryName($env:DSH_MSI_OUTPUT)) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'ZIP_PARENT_INVALID' }
+    $zipEntryStream = $selected.Open()
+    try {
+      $zipMsiOutput = [System.IO.File]::Open($env:DSH_MSI_OUTPUT, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+      try {
+        $buffer = New-Object byte[] 65536
+        [long]$written = 0
+        while (($count = $zipEntryStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+          $written += $count
+          if ($written -gt $selected.Length -or $written -gt 33554432) { throw 'ZIP_STREAM_OVERFLOW' }
+          $zipMsiOutput.Write($buffer, 0, $count)
+        }
+        if ($written -ne $selected.Length) { throw 'ZIP_STREAM_TRUNCATED' }
+      } finally { $zipMsiOutput.Dispose() }
+    } finally { $zipEntryStream.Dispose() }
+  } finally { $zip.Dispose() }
+  [Console]::WriteLine('DSH_MSI_ZIP_READY')
+} catch {
+  [Console]::Error.WriteLine('DSH_MSI_ZIP_FAILED')
+  exit 1
+}
+`
+
 /** Resolve Windows built-in tools without inheriting a PATH-selected replacement. */
 export function cpolarWindowsSystemTool(name: 'powershell.exe' | 'expand.exe' | 'tar.exe'): string {
   const root = process.env.SystemRoot ?? process.env.WINDIR
@@ -239,6 +285,28 @@ export async function cpolarWindowsExtractionStep<T>(name: WindowsMsiExtractionS
     const details = safeCommandDetails(error)
     throw new WindowsMsiExtractionError(name, Math.max(0, Math.round(performance.now() - started)), details.code, details)
   }
+}
+
+/**
+ * Read the verified Windows ZIP into a fixed MSI file using Unicode-aware .NET paths, without installer actions.
+ * @param archive - Absolute path to the pinned, size/hash-verified ZIP.
+ * @param destination - Owned, non-linked staging directory for a new installer.msi.
+ * @returns Absolute path to the extracted ordinary MSI file.
+ */
+export async function extractWindowsMsiArchive(archive: string, destination: string): Promise<string> {
+  return cpolarWindowsExtractionStep('archive', async () => {
+    if (process.platform !== 'win32' || !isAbsolute(archive) || !isAbsolute(destination)) throw new Error('invalid ZIP input')
+    const parent = await lstat(destination)
+    if (!parent.isDirectory() || parent.isSymbolicLink()) throw new Error('invalid ZIP destination')
+    const msi = join(destination, 'installer.msi')
+    const { stdout } = await runCpolarWindowsTool('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(READ_MSI_ZIP, 'utf16le').toString('base64'),
+    ], { ...process.env, DSH_MSI_ZIP: archive, DSH_MSI_OUTPUT: msi })
+    if (stdout.trim() !== 'DSH_MSI_ZIP_READY') throw new Error('invalid ZIP reader output')
+    const info = await lstat(msi)
+    if (!info.isFile() || info.isSymbolicLink() || info.size < 1 || info.size > 33_554_432) throw new Error('invalid extracted MSI')
+    return msi
+  })
 }
 
 /** Read one executable from an embedded MSI cabinet; never execute installer actions or alter system installation state. */

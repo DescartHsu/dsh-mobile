@@ -168,6 +168,13 @@ jobs:
             exit 1
           fi
           node scripts/negative-control.mjs "$RUNNER_TEMP/companion-negative.log" "Packed bundle is missing embedded component dsh-mobile-question-fixes"
+      - name: Preserve module settings failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: module-settings-diagnostics-${{ matrix.dsh }}
+          path: local/client-module-settings-smoke/
+          if-no-files-found: ignore
 
   gateway:
     name: Gateway (${{ matrix.os }}, Node ${{ matrix.node }})

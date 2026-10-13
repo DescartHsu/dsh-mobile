@@ -13,7 +13,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { downloadPinnedArtifact } from './component-download.js'
 import { restrictPrivateFile } from './private-file.js'
-import { cpolarWindowsExtractionStep, cpolarWindowsSystemTool, extractWindowsMsiBinary, runCpolarWindowsTool } from './windows-msi-extract.js'
+import { cpolarWindowsExtractionStep, cpolarWindowsSystemTool, extractWindowsMsiArchive, extractWindowsMsiBinary } from './windows-msi-extract.js'
 import { assertManagedParents, ensureManagedDirectory, removeManagedPaths, removeManagedTree, renameManagedPath, writeManagedPrivateFile } from './managed-files.js'
 
 /** Pinned cpolar components fetched only after an explicit user action. */
@@ -271,16 +271,8 @@ async function defaultFetchArtifact(
 async function extractWindowsMsi(archive: string, destination: string, executableName: string, expectedBytes: number): Promise<void> {
   if (process.platform !== 'win32') throw new Error('cpolar_component_unsupported')
   const unpacked = join(destination, 'archive')
-  const msi = await cpolarWindowsExtractionStep('archive', async () => {
-    await mkdir(unpacked, { recursive: true, mode: 0o700 })
-    await runCpolarWindowsTool('tar.exe', ['-xf', archive, '-C', unpacked])
-    const archiveEntries = await readdir(unpacked, { recursive: true })
-    const installers = archiveEntries.filter(entry => entry.toLowerCase().endsWith('.msi'))
-    const msiRelative = installers[0]
-    if (installers.length !== 1 || msiRelative === undefined || !inside(unpacked, join(unpacked, msiRelative))
-      || !await regularFile(join(unpacked, msiRelative))) throw new Error('cpolar_installer_missing')
-    return join(unpacked, msiRelative)
-  })
+  await cpolarWindowsExtractionStep('archive', () => mkdir(unpacked, { mode: 0o700 }))
+  const msi = await extractWindowsMsiArchive(archive, unpacked)
   await extractWindowsMsiBinary(msi, destination, executableName, expectedBytes)
 }
 

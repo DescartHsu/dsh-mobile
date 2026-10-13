@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { packBundle, runPackagingCommand } from './packed-profile.mjs'
+import { observeMobileBootDiagnostics, summarizeMobileBootDiagnostics } from './mobile-boot-diagnostics.mjs'
 import { CLIENT_TIMEOUT_MS, createMobileProfile, dismissOnboarding, launchDsh, openPairing,
   pairMobilePage, removeTemporaryRoot, sanitized } from './mobile-boot-fixture.mjs'
 
@@ -29,6 +30,43 @@ let dsh
 let browser
 let phone
 let failure
+let bootDiagnostics
+let stage = 'profile-installation'
+
+async function createWorkspace(desktop, path) {
+  const result = await desktop.evaluate(async path => {
+    const response = await fetch('/api/workspace/create', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'module-settings-workspace', method: 'workspace/create', payload: { args: { request: { path } } } }),
+      signal: AbortSignal.timeout(60_000),
+    })
+    return { status: response.status, body: await response.json() }
+  }, path)
+  assert.equal(result.status, 200, 'Owned workspace creation HTTP failure')
+  assert.equal(result.body.result?.ok, true, `Owned workspace creation failed: ${sanitized(JSON.stringify(result.body))}`)
+  assert.equal(typeof result.body.result.value.workspace?.workspaceId, 'string')
+  return result.body.result.value.workspace.workspaceId
+}
+
+async function openOwnedSession(workspaceId) {
+  const drawer = phone.locator('.dshm-drawer')
+  if (await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
+  const row = drawer.locator(`[role="treeitem"][data-row-key="workspace:${workspaceId}"]`)
+  await row.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
+  const [created] = await Promise.all([
+    phone.waitForResponse(response => new URL(response.url()).pathname === '/api/session/create'
+      && response.request().postDataJSON()?.payload?.args?.request?.workspaceId === workspaceId, { timeout: CLIENT_TIMEOUT_MS }),
+    row.getByRole('button').last().click(),
+  ])
+  assert.equal(created.status(), 200, 'Owned Session creation HTTP failure')
+  const result = await created.json()
+  assert.equal(result.result?.ok, true, `Owned Session creation failed: ${sanitized(JSON.stringify(result))}`)
+  const sessionId = result.result.value.sessionId
+  assert.equal(typeof sessionId, 'string')
+  await phone.waitForFunction(id => document.querySelector('[data-conversation-session]')?.getAttribute('data-conversation-session') === id, sessionId, { timeout: CLIENT_TIMEOUT_MS })
+  if (await drawer.getAttribute('data-open') === 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
+  return sessionId
+}
 
 const frames = page => page.evaluate(() => new Promise(resolveFrame => requestAnimationFrame(() => requestAnimationFrame(resolveFrame))))
 const dialog = () => phone.locator('.dsh-module-dialog[open]')
@@ -177,9 +215,16 @@ async function geometry({ width, height, scheme, largeText = false, skinLoaded =
 
 try {
   await mkdir(evidence, { recursive: true })
+  const workspacePath = join(root, 'owned-workspace')
+  await mkdir(workspacePath)
   const tarball = process.env.DSH_BOOT_SMOKE_MOBILE_TARBALL === undefined ? await packBundle(mobileRoot, root) : resolve(process.env.DSH_BOOT_SMOKE_MOBILE_TARBALL)
   record.tarballSha256 = createHash('sha256').update(await readFile(tarball)).digest('hex')
-  const home = await createMobileProfile(root, { tarball, dshBin, packageStoreDirectory: join(root, 'pnpm-store') })
+  const home = await createMobileProfile(root, { tarball, dshBin, packageStoreDirectory: join(root, 'pnpm-store'),
+    extraPatches: [{ id: 'llm-deepseek', config: {
+      // Declarative metadata keeps this draft-only fixture independent of provider credentials.
+      models: [{ id: 'module-settings-model', name: 'Owned module settings model', contextWindow: 128000, inputModalities: ['text'] }],
+    } }],
+  })
   const profile = join(home, 'profiles/web')
   await runPackagingCommand(process.execPath, [dshBin, 'plugin', '--profile', 'web', 'add', `${skinId}@${skinVersion}`, '--ignore-scripts'], profile,
     { DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', NPM_CONFIG_CACHE: join(root, 'npm-cache') })
@@ -188,23 +233,33 @@ try {
   assert.equal(createHash('sha256').update(await readFile(join(skinRoot, 'lib/client.js'))).digest('hex'), skinSha256,
     'The installed published skin client differs from the reviewed npm artifact')
   record.pluginVersion = JSON.parse(await readFile(join(profile, 'node_modules/dsh-mobile/package.json'), 'utf8')).version
+  stage = 'dsh-startup'
   dsh = launchDsh(root, home, dshBin)
   browser = await chromium.launch({ headless: true })
   const desktop = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: 'en-US' })
   const pairing = await openPairing(desktop, await dsh.ready(), dsh.logs)
   await desktop.locator('body[data-dsh-maid-atelier]').waitFor({ state: 'attached', timeout: CLIENT_TIMEOUT_MS })
+  stage = 'owned-workspace-create'
+  const workspaceId = await createWorkspace(desktop, workspacePath)
   phone = await browser.newPage({ viewport: { width: 375, height: 812 }, locale: 'en-US', isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
+  bootDiagnostics = observeMobileBootDiagnostics(phone)
   phone.on('pageerror', error => record.pageErrors.push(error.message))
   phone.on('request', request => { if (new URL(request.url()).pathname === modulePath) record.requests.push({ method: request.method() }) })
   await phone.route('**/api/session/prompt', async route => { record.prompts++; await route.abort('blockedbyclient') })
-  await pairMobilePage(phone, pairing, dsh.logs)
+  stage = 'mobile-pairing'
+  const baseline = await pairMobilePage(phone, pairing, dsh.logs)
+  assert(baseline.value.items.some(workspace => workspace.workspaceId === workspaceId), 'The actual Workspace baseline omitted the owned fixture')
   await dismissOnboarding(phone)
   await phone.locator('body[data-dsh-maid-atelier]').waitFor({ state: 'attached', timeout: CLIENT_TIMEOUT_MS })
+  stage = 'owned-session-navigation'
+  record.ownedSessionId = await openOwnedSession(workspaceId)
+  stage = 'owned-session-editor'
   const editor = phone.locator('[data-composer-input][contenteditable="true"]').first()
   await editor.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
   await editor.fill('Owned module-settings draft; never submitted to a model.')
   await phone.evaluate(() => { window.__moduleSettingsRetainedDocument = 'Owned module-settings document identity' })
   const before = await retained()
+  stage = 'module-selection-behavior'
   await openSettings()
   let failGet = 1, failPost = 0
   await phone.route(`**${modulePath}`, async route => {
@@ -267,6 +322,7 @@ try {
   assert.equal(await phone.locator('body[data-dsh-maid-atelier]').count(), 1, 'Saving immediately removed the live skin')
   assert.equal(await desktop.locator('body[data-dsh-maid-atelier]').count(), 1, 'Device save removed the desktop skin')
   record.checks.push('catalog retry; grouping, search/filter, detail semantics, dirty close/native Back/Escape, required protection, skin save and draft retention')
+  stage = 'manual-skin-reopen'
   await reopen(false)
   assert.equal(await desktop.locator('body[data-dsh-maid-atelier]').count(), 1)
   await openSettings(); await openManager()
@@ -276,6 +332,7 @@ try {
   await reopen(true)
   record.checks.push('manual reopening omits the real skin; desktop retained; explicit defaults reset and manual reopening restores the skin')
 
+  stage = 'module-save-failure-recovery'
   await openSettings(); await openManager(); await dialog().getByRole('searchbox').fill(skinId)
   await skinRow().getByRole('checkbox').uncheck()
   const postsBefore = record.requests.filter(item => item.method === 'POST').length
@@ -291,6 +348,7 @@ try {
   record.checks.push('injected single POST 503 retains choices, no automatic replay, explicit retry succeeds')
   await reopen(false)
   await openSettings()
+  stage = 'native-theme-layout-matrix'
   for (const scheme of ['light', 'dark']) {
     const theme = phone.getByRole('button', { name: scheme === 'light' ? /^(?:Light|浅色)$/u : /^(?:Dark|深色)$/u })
     await theme.click()
@@ -301,6 +359,7 @@ try {
     await close().click(); await dialog().waitFor({ state: 'detached' })
   }
   record.checks.push('native DSH light/dark themes, 288/375/844 widths, large-text controlled fixture, action hit targets, no horizontal overflow and internal list scrolling')
+  stage = 'outdated-selection-recovery'
   const existing = await phone.evaluate(async path => {
     const response = await fetch(path)
     return { status: response.status, body: await response.json() }
@@ -346,16 +405,24 @@ try {
   record.checks.push('controlled old-selection catalog fields: missing/now-required exclusions visible as literal IDs, explicit cleanup is draft-only, required remains protected, actual device save succeeds')
   assert.equal(record.prompts, 0, 'The acceptance test attempted a model submission')
   assert.deepEqual(record.pageErrors, [], 'Module settings emitted a page error')
+  stage = 'completed'
   record.completed = true
 } catch (error) {
   failure = error
+  record.failureStage = stage
   record.failure = sanitized(error instanceof Error ? error.stack ?? error.message : String(error))
   if (phone !== undefined) {
+    record.failurePage = new URL(phone.url()).pathname
+    record.bootDiagnostics = await bootDiagnostics?.snapshot().catch(cause => ({ unavailable: sanitized(String(cause)) }))
+    if (record.bootDiagnostics !== undefined && !('unavailable' in record.bootDiagnostics)) record.bootSummary = summarizeMobileBootDiagnostics(record.bootDiagnostics)
     record.failureDom = await phone.evaluate(() => ({ active: { tag: document.activeElement?.tagName, className: document.activeElement?.className }, settings: document.querySelector('.dsh-module-row')?.textContent, moduleDialogOpen: document.querySelector('.dsh-module-dialog')?.open })).catch(() => undefined)
-    await phone.screenshot({ path: join(evidence, 'failure.png') }).catch(() => {})
+    await phone.screenshot({ path: join(evidence, 'failure.png'), mask: [phone.locator('#pair-token'), phone.locator('input[type="password"]')], maskColor: '#e2e8f0' }).catch(_error => {
+      // A diagnostic screenshot must not replace the original failure.
+    })
   }
 } finally {
   const failures = failure === undefined ? [] : [failure]
+  bootDiagnostics?.dispose()
   if (browser !== undefined) await browser.close().catch(error => failures.push(error))
   if (dsh !== undefined) {
     try {
@@ -368,7 +435,8 @@ try {
   else process.env.NPM_CONFIG_CACHE = originalCache
   record.cleanup = failures.length === (failure === undefined ? 0 : 1) ? 'completed' : 'failed'
   await writeFile(join(evidence, 'evidence.json'), JSON.stringify(record, null, 2) + '\n')
-  console.log(JSON.stringify({ completed: record.completed ?? false, geometryCases: record.geometry.length, evidence, hostExit: record.hostExit, failure: record.failure,
+  console.log(JSON.stringify({ completed: record.completed ?? false, geometryCases: record.geometry.length, evidence, hostExit: record.hostExit, failure: record.failure, failureStage: record.failureStage,
+    pageErrors: record.pageErrors, bootSummary: record.bootSummary,
     scope: 'actual DSH and published skin; owned profile and loopback browser, not physical Android or public tunnel' }))
   if (failures.length === 1) throw failures[0]
   if (failures.length > 1) throw new AggregateError(failures, 'Module settings acceptance and cleanup failed')

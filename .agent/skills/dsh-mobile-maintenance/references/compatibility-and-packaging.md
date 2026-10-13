@@ -28,6 +28,8 @@ Use `scripts/check-dsh-compatibility.mjs` as a source-contract check, then exerc
 
 Inspect the actual frontend package for DOM ownership, slots, keyboard/menu behavior, theme tokens and settings writes. Client slots can be absent in a new or old release; do not remove a working fallback before verifying the replacement exists. Trace preferences to the renderer: Markdown and code fonts can be CSS-driven while xterm reads a ThemeRuntime snapshot. A control that changes only storage is not a completed adaptation.
 
+For skin conflicts, inspect the attached images as well as the installed package bytes: a missing background, unreadable drawer, shadowed header and blank trace are separate observations. A fix in the skin repository does not establish that the same-version npm package includes it. Reproduce the reported artifact before widening compatibility claims; [skin guidance](../../../../docs/SKIN_COMPATIBILITY.en.md) distinguishes existing semantic markers and per-device module selection from recreating a skin's private layout.
+
 Keep changes within the plugin when possible. Prefer an existing optional capability or version-independent feature detection to a brittle version allowlist. When the documented DSH seam cannot provide the requested behavior, explain the limitation and defer or explicitly propose the upstream change.
 
 ## Source, package and live installation are separate

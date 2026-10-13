@@ -26,6 +26,12 @@ function fakeRoot(elements: readonly HTMLElement[], dialogs: readonly HTMLElemen
 }
 
 describe('native mobile presentation', () => {
+  it('reserves the full settings close target inside its padded header', () => {
+    const shared = NATIVE_MOBILE_STYLES.slice(0, NATIVE_MOBILE_STYLES.indexOf('@media'))
+    expect(shared).toContain('html.dsh-native-mobile-active [data-dsh-mobile-settings-header] { box-sizing:border-box !important; height:56px !important; min-height:56px !important; padding:4px 12px !important; }')
+    expect(shared).toContain('html.dsh-native-mobile-active [data-dsh-mobile-settings-header] [class*="_close"] { box-sizing:border-box !important; flex:none !important; width:48px !important; min-width:48px !important; height:48px !important; min-height:48px !important; }')
+  })
+
   it('collapses the unfocused viewport and retains stock touch actions', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[data-composer-card]:not(:focus-within) > [data-input-scroll] { max-height:72px !important; overflow-y:auto !important; }')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] button:not([role="switch"]):not(:where(')

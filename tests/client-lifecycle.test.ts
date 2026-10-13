@@ -473,6 +473,25 @@ describe('mobile-control localization', () => {
     }
   })
 
+  it('distinguishes cpolar extraction stages in all supported locales', () => {
+    const stages = [
+      ['tools', 'cpolarExtractToolsFailed'],
+      ['archive', 'cpolarExtractArchiveFailed'],
+      ['database', 'cpolarExtractDatabaseFailed'],
+      ['cabinet', 'cpolarExtractCabinetFailed'],
+      ['file', 'cpolarExtractFileFailed'],
+    ] as const
+    for (const locale of ['en', 'it', 'zh'] as const) {
+      const catalog = MOBILE_CONTROL_MESSAGES[locale] as Record<string, string>
+      for (const [stage, key] of stages) {
+        expect(catalog[key]).toBeTruthy()
+        expect(diagnosticControllerAction(`cpolar_extract_${stage}_failed`, locale, 'fallback')).toBe(catalog[key])
+      }
+    }
+    expect((MOBILE_CONTROL_MESSAGES.zh as Record<string, string>).cpolarExtractDatabaseFailed).toContain('不要')
+    expect((MOBILE_CONTROL_MESSAGES.en as Record<string, string>).cpolarExtractToolsFailed).toContain('no administrator')
+  })
+
   it('uses DSH theme layers for remote cards while preserving a scannable QR background', () => {
     expect(CONTROL_STYLES).toContain('dsh-mobile-control__provider{')
     expect(CONTROL_STYLES).toContain('background:var(--dsw-alias-bg-layer-2,#fff)')
@@ -753,6 +772,7 @@ describe('mobile-control localization', () => {
     // then a deliberate edit rather than a silent typo.
     const allowed = new Set([
       '--dsw-radius-panel', '--dsw-font-family',
+      '--dsw-font-markdown-base', '--dsw-font-markdown-code-block',
       '--dsw-alias-bg-base', '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3',
       '--dsw-alias-bg-module-platform',
       '--dsw-alias-border-l2', '--dsw-alias-border-l3', '--dsw-alias-border-l4',
@@ -966,7 +986,7 @@ describe('mobile-control localization', () => {
     expect(source).toContain("settings.general.item")
     expect(source).toContain("dsh-mobile-switch-computer")
     expect(source).toContain("mobile.switch-computer")
-    expect(source).toContain("capabilities.includes('mobile.switch-computer')")
+    expect(source).toContain("useMobileNativeSettingsAction('mobile.switch-computer')")
     expect(source).toContain("dsh-mobile-native-ready")
     expect(source).toContain("if (!desktopAdmin) {")
     expect(source).toContain("t('httpFrameWarning')")
@@ -977,8 +997,8 @@ describe('mobile-control localization', () => {
     const bridge = readFileSync(new URL('../apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/NativeBridge.kt', import.meta.url), 'utf8')
     const activity = readFileSync(new URL('../apps/mobile/android/app/src/main/java/io/github/sayach/dshmobile/MainActivity.kt', import.meta.url), 'utf8')
     expect(source).toContain("id: 'dsh-mobile-task-notifications'")
-    expect(source).toContain("capabilities.includes('notification.settings')")
-    expect(source).toContain("bridge.invoke('notification.settings', {})")
+    expect(source).toContain("useMobileNativeSettingsAction('notification.settings')")
+    expect(source).toContain('onClick: invoke')
     expect(source).toContain('请在系统提示或设置中确认任务通知权限。')
     expect(source).toContain('Confirm notification access in the system prompt or settings.')
     expect(source).toContain('Conferma il permesso nella richiesta o nelle impostazioni di sistema.')

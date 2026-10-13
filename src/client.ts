@@ -1,4 +1,4 @@
-import { createElement, useEffect, useState } from 'react'
+import { createElement, useEffect, useState, useSyncExternalStore } from 'react'
 import {
   DIAGNOSTIC_REASON_MESSAGES,
   LOCALIZED_DIAGNOSTIC_COPY,
@@ -12,6 +12,7 @@ import { installNativeMobileSurface, NATIVE_MOBILE_STYLES, resolveNativeMobileLa
 import { installVoiceSession } from './voice-session.js'
 import { installMobileFontPreference, MobileFontSizeRow } from './mobile-font.js'
 import { MobileDisplayScaleRow } from './mobile-display-scale.js'
+import { MobileNativeSettingsActionController, type MobileNativeSettingsAction } from './mobile-native-settings-action.js'
 import { CLIENT_MODULE_STYLES, ClientModuleSettingsRow, closeClientModuleDialog, disposeClientModuleDialogs } from './client-module-ui.js'
 import { isDesktopAdminSurface, localAdminRequestHeaders } from './local-admin-host.js'
 import { fireDeviceRevoked, fireTaskNotifyEvent, isDeviceRevokedPayload, parseTaskNotifyPayload, taskCompletionTag } from './task-notify.js'
@@ -369,42 +370,28 @@ function mobileSwitchComputerCopy(locale: MobileControlLocale): MobileSwitchComp
   }
 }
 
+function useMobileNativeSettingsAction(action: MobileNativeSettingsAction) {
+  const [controller] = useState(() => new MobileNativeSettingsActionController(action, () => window.__DSH_MOBILE_NATIVE__))
+  const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
+  useEffect(() => {
+    controller.start()
+    window.addEventListener('dsh-mobile-native-ready', controller.refresh)
+    return () => {
+      window.removeEventListener('dsh-mobile-native-ready', controller.refresh)
+      controller.stop()
+    }
+  }, [controller])
+  return { ...snapshot, invoke: controller.invoke }
+}
+
 /** Render the native-app-only action in DSH's General settings row style. */
 function MobileSwitchComputerRow(): unknown {
-  const [nativeReady, setNativeReady] = useState(false)
-  const [state, setState] = useState<'idle' | 'busy' | 'error'>('idle')
-  useEffect(() => {
-    let disposed = false
-    const checkNativeAction = (): void => {
-      const bridge = window.__DSH_MOBILE_NATIVE__
-      if (bridge === undefined) {
-        setNativeReady(false)
-        return
-      }
-      void Promise.resolve().then(() => bridge.capabilities()).then(capabilities => {
-        if (!disposed) setNativeReady(capabilities.includes('mobile.switch-computer'))
-      }, () => {
-        if (!disposed) setNativeReady(false)
-      })
-    }
-    checkNativeAction()
-    window.addEventListener('dsh-mobile-native-ready', checkNativeAction)
-    return () => {
-      disposed = true
-      window.removeEventListener('dsh-mobile-native-ready', checkNativeAction)
-    }
-  }, [])
-  if (!nativeReady) return null
+  const { supported, state, invoke } = useMobileNativeSettingsAction('mobile.switch-computer')
+  if (!supported) return null
   const locale = selectedMobileControlLocale()
   const copy = mobileSwitchComputerCopy(locale)
-  const invoke = (): void => {
-    const bridge = window.__DSH_MOBILE_NATIVE__
-    if (bridge === undefined || state === 'busy') return
-    setState('busy')
-    // The native action normally replaces this WebView immediately; only a
-    // rejected request needs to remain visible in the settings row.
-    void bridge.invoke('mobile.switch-computer', {}).catch(() => { setState('error') })
-  }
+  // Native navigation owns the successful WebView replacement.
+  const busy = state === 'busy' || state === 'success'
   return createElement('div', { className: 'dsh-mobile-settings_row', lang: locale },
     createElement('div', { className: 'dsh-mobile-settings_rowText' },
       createElement('div', { className: 'dsh-mobile-settings_title' }, copy.title),
@@ -413,10 +400,10 @@ function MobileSwitchComputerRow(): unknown {
     createElement('button', {
       type: 'button',
       className: 'dsh-mobile-settings_selector',
-      disabled: state === 'busy',
-      'aria-busy': state === 'busy' ? 'true' : undefined,
+      disabled: busy,
+      'aria-busy': busy ? 'true' : undefined,
       onClick: invoke,
-    }, state === 'busy' ? copy.busy : state === 'error' ? copy.retry : copy.action),
+    }, busy ? copy.busy : state === 'error' ? copy.retry : copy.action),
   )
 }
 
@@ -466,41 +453,10 @@ function mobileTaskNotificationCopy(locale: MobileControlLocale): MobileTaskNoti
 
 /** Render the Android-only notification permission entry in DSH General settings. */
 function MobileTaskNotificationRow(): unknown {
-  const [nativeReady, setNativeReady] = useState(false)
-  const [state, setState] = useState<'idle' | 'busy' | 'success' | 'error'>('idle')
-  useEffect(() => {
-    let disposed = false
-    const checkNativeAction = (): void => {
-      const bridge = window.__DSH_MOBILE_NATIVE__
-      if (bridge === undefined) {
-        setNativeReady(false)
-        return
-      }
-      void Promise.resolve().then(() => bridge.capabilities()).then(capabilities => {
-        if (!disposed) setNativeReady(capabilities.includes('notification.settings'))
-      }, () => {
-        if (!disposed) setNativeReady(false)
-      })
-    }
-    checkNativeAction()
-    window.addEventListener('dsh-mobile-native-ready', checkNativeAction)
-    return () => {
-      disposed = true
-      window.removeEventListener('dsh-mobile-native-ready', checkNativeAction)
-    }
-  }, [])
-  if (!nativeReady) return null
+  const { supported, state, invoke } = useMobileNativeSettingsAction('notification.settings')
+  if (!supported) return null
   const locale = selectedMobileControlLocale()
   const copy = mobileTaskNotificationCopy(locale)
-  const invoke = (): void => {
-    const bridge = window.__DSH_MOBILE_NATIVE__
-    if (bridge === undefined || state === 'busy') return
-    setState('busy')
-    void bridge.invoke('notification.settings', {}).then(
-      () => { setState('success') },
-      () => { setState('error') },
-    )
-  }
   return createElement('div', { className: 'dsh-mobile-settings_row', lang: locale },
     createElement('div', { className: 'dsh-mobile-settings_rowText' },
       createElement('div', { className: 'dsh-mobile-settings_title' }, copy.title),
@@ -737,6 +693,11 @@ const REMOTE_ERROR_MESSAGE_KEYS: Readonly<Record<string, string>> = {
   cpolar_installer_missing: 'cpolarExtractFailed',
   cpolar_executable_missing: 'cpolarExtractFailed',
   cpolar_extract_failed: 'cpolarExtractFailed',
+  cpolar_extract_tools_failed: 'cpolarExtractToolsFailed',
+  cpolar_extract_archive_failed: 'cpolarExtractArchiveFailed',
+  cpolar_extract_database_failed: 'cpolarExtractDatabaseFailed',
+  cpolar_extract_cabinet_failed: 'cpolarExtractCabinetFailed',
+  cpolar_extract_file_failed: 'cpolarExtractFileFailed',
   cpolar_storage_failed: 'cpolarStorageFailed',
   cpolar_config_missing: 'cpolarConfigMissing',
   cpolar_config_invalid: 'cpolarConfigInvalid',
@@ -812,6 +773,8 @@ const DIAGNOSTIC_CONTROLLER_ACTION_CODES: ReadonlySet<string> = new Set([
   'funnel_permission_required', 'funnel_https_required', 'funnel_start_failed', 'funnel_start_timeout',
   'tailscale_dns_missing', 'control_channel_failed', 'gateway_start_failed',
   'cpolar_component_missing', 'cpolar_component_invalid', 'cpolar_config_missing', 'cpolar_config_invalid',
+  'cpolar_extract_tools_failed', 'cpolar_extract_archive_failed', 'cpolar_extract_database_failed',
+  'cpolar_extract_cabinet_failed', 'cpolar_extract_file_failed',
   'funnel_state_invalid',
   'cpolar_start_timeout', 'cpolar_stopped', 'cpolar_exited',
   'cloudflared_component_missing', 'cloudflared_component_invalid', 'cloudflared_component_unsupported',
@@ -2976,7 +2939,7 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       .finally(() => { setCaddyFormBusy(false); loadRemote() })
   })
 
-  originConfigure.addEventListener('click', () => {
+  originConfigure.addEventListener('click', () => {
     if (remoteProviderBusy || remoteProvider !== 'origin') return
     clearOriginValidation()
     for (const input of [originPublic, originHost, originPort, originCidrs]) {

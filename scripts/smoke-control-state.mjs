@@ -255,7 +255,7 @@ async function withControl(browser, name, options, run) {
     await waitUntil(() => page.locator('.dsh-mobile-control__provider.is-origin').getAttribute('aria-pressed'), value => value === 'true', `${name}: initial remote render`)
     if (!options.layoutFixture) {
       assert.equal(await page.locator('#fixture-settings .dsh-module-title').textContent(), 'Mobile page modules', `${name}: missing General settings registration`)
-      assert.equal(await page.locator('#fixture-settings .dsh-module-description').textContent(), 'Choose default modules for mobile access without uninstalling computer plugins.', `${name}: General settings did not use computer scope`)
+      assert.equal(await page.locator('#fixture-settings .dsh-module-description').textContent(), 'Mobile defaults for this computer. Desktop plugins are unchanged.', `${name}: General settings did not use computer scope`)
     }
     await page.locator('.dsh-mobile-control__trigger').click()
     const ui = {

@@ -580,7 +580,7 @@ describe('dedicated mobile layout boot', () => {
 
   it('adapts stable DSH question surfaces for touch screens', () => {
     const narrowStart = MOBILE_LAYOUT_STYLES.indexOf('@media(max-width:600px){')
-    const wideStart = MOBILE_LAYOUT_STYLES.indexOf('@media(min-width:900px){')
+    const wideStart = MOBILE_LAYOUT_STYLES.indexOf('@media(min-width:900px){\n.dshm-shell{grid-template-columns:')
     expect(narrowStart).toBeGreaterThan(0)
     expect(wideStart).toBeGreaterThan(narrowStart)
     const shared = MOBILE_LAYOUT_STYLES.slice(0, narrowStart)
@@ -689,6 +689,14 @@ describe('dedicated mobile layout boot', () => {
     // A pre-dvh parser drops the enhancement; the root still bounds the scrollport.
     const legacyShell = shell?.replace(/height:100dvh;/u, '')
     expect(legacyShell).toContain('height:100%;')
+  })
+
+  it('owns only the mobile root grid geometry against unlayered skin overrides', () => {
+    const ownership = MOBILE_LAYOUT_STYLES.slice(MOBILE_LAYOUT_STYLES.indexOf('@layer dsh-mobile-layout{'),
+      MOBILE_LAYOUT_STYLES.indexOf('.dshm-main{'))
+    expect(ownership).toContain('.dshm-shell{display:grid!important;grid-template-rows:minmax(0,1fr)!important;grid-template-columns:minmax(0,1fr)!important}')
+    expect(ownership).toContain('@media(min-width:900px){.dshm-shell{grid-template-columns:auto minmax(0,1fr)!important}}')
+    expect(ownership).not.toMatch(/color|background|shadow|sidebar-collapsed|centerCol/u)
   })
 
   it('uses the full phone viewport for the right panel without changing wide docking', () => {

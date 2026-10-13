@@ -81,7 +81,12 @@ Object.assign(MOBILE_CONTROL_MESSAGES.en, {
   cpolarDownloadTimeout: 'The cpolar download timed out. Check this computer’s network or proxy, then retry.',
   cpolarDownloadHttp: 'The official cpolar download returned HTTP {status}. Retry later or check the official download page.',
   cpolarIntegrityFailed: 'The cpolar download did not match the pinned build, so it was not installed. Retry later or update DSH Mobile; do not bypass verification.',
-  cpolarExtractFailed: 'The cpolar download completed, but extraction failed. Check system extraction tools and security software, then retry.',
+  cpolarExtractFailed: 'The cpolar download was verified, but extraction failed. Check the extraction stage in the DSH log; the message alone does not establish a security-software block.',
+  cpolarExtractToolsFailed: 'A required Windows extraction tool is unavailable. Check system PowerShell, tar and expand; no administrator startup or service installation is required.',
+  cpolarExtractArchiveFailed: 'Could not extract the verified cpolar ZIP or locate its MSI. Check the ZIP extraction stage in the DSH log.',
+  cpolarExtractDatabaseFailed: 'Could not read the cpolar MSI database or its embedded cabinet. Check the MSI read stage in the DSH log; do not install the MSI as a workaround.',
+  cpolarExtractCabinetFailed: 'Could not extract the cpolar executable from its cabinet. Check the cabinet extraction stage and private-directory permissions.',
+  cpolarExtractFileFailed: 'Could not read or copy the extracted cpolar executable. Check private-directory permissions and disk space; your existing component is retained.',
   cpolarStorageFailed: 'Could not write the cpolar component in DSH Mobile’s private directory. Check disk space, permissions, and security software, then retry.',
 })
 Object.assign(MOBILE_CONTROL_MESSAGES.it, {
@@ -91,7 +96,12 @@ Object.assign(MOBILE_CONTROL_MESSAGES.it, {
   cpolarDownloadTimeout: 'Download di cpolar scaduto. Controlla rete o proxy del computer e riprova.',
   cpolarDownloadHttp: 'Il download ufficiale di cpolar ha restituito HTTP {status}. Riprova più tardi o controlla la pagina ufficiale.',
   cpolarIntegrityFailed: 'Il pacchetto cpolar non corrisponde alla versione verificata e non è stato installato. Riprova più tardi o aggiorna DSH Mobile; non aggirare la verifica.',
-  cpolarExtractFailed: 'Download di cpolar completato, ma estrazione non riuscita. Controlla gli strumenti di estrazione e il software di sicurezza, poi riprova.',
+  cpolarExtractFailed: 'Download di cpolar verificato, ma estrazione non riuscita. Controlla la fase nel log DSH; il messaggio non dimostra un blocco del software di sicurezza.',
+  cpolarExtractToolsFailed: 'Uno strumento di estrazione Windows richiesto non è disponibile. Controlla PowerShell di sistema, tar ed expand; non serve avviare come amministratore o installare un servizio.',
+  cpolarExtractArchiveFailed: 'Impossibile estrarre lo ZIP cpolar verificato o trovare il suo MSI. Controlla la fase ZIP nel log DSH.',
+  cpolarExtractDatabaseFailed: 'Impossibile leggere il database MSI cpolar o il cabinet incorporato. Controlla la fase di lettura MSI nel log DSH; non installare il MSI per aggirare il problema.',
+  cpolarExtractCabinetFailed: 'Impossibile estrarre il programma cpolar dal cabinet. Controlla la fase cabinet e i permessi della directory privata.',
+  cpolarExtractFileFailed: 'Impossibile leggere o copiare il programma cpolar estratto. Controlla permessi e spazio nella directory privata; il componente esistente è conservato.',
   cpolarStorageFailed: 'Impossibile scrivere cpolar nella directory privata di DSH Mobile. Controlla spazio, permessi e software di sicurezza, poi riprova.',
 })
 Object.assign(MOBILE_CONTROL_MESSAGES.zh, {
@@ -101,7 +111,12 @@ Object.assign(MOBILE_CONTROL_MESSAGES.zh, {
   cpolarDownloadTimeout: '下载 cpolar 组件超时。请检查这台电脑的网络或代理，然后重试。',
   cpolarDownloadHttp: 'cpolar 官网下载返回 HTTP {status}。请稍后重试，或检查官网下载页。',
   cpolarIntegrityFailed: '下载的 cpolar 组件未通过固定版本校验，因此没有安装。请稍后重试或更新 DSH Mobile，不要跳过校验。',
-  cpolarExtractFailed: 'cpolar 下载完成，但解包失败。请检查系统解压组件和安全软件，然后重试。',
+  cpolarExtractFailed: 'cpolar 下载已校验，但提取失败。请查看 DSH 日志中的具体阶段，不能仅凭此提示认定安全软件拦截。',
+  cpolarExtractToolsFailed: '所需的 Windows 提取工具不可用。请检查系统 PowerShell、tar 和 expand；无需以管理员启动 DSH 或安装系统服务。',
+  cpolarExtractArchiveFailed: '无法展开已校验的 cpolar ZIP 或找到其中的 MSI。请查看 DSH 日志中的 ZIP 提取阶段。',
+  cpolarExtractDatabaseFailed: '无法读取 cpolar MSI 数据库或内嵌 CAB。请查看 DSH 日志中的 MSI 读取阶段，不要用运行 MSI 安装程序绕过此问题。',
+  cpolarExtractCabinetFailed: '无法从 CAB 中提取 cpolar 程序。请查看 CAB 提取阶段及私有目录权限。',
+  cpolarExtractFileFailed: '无法读取或复制已提取的 cpolar 程序。请检查私有目录权限和磁盘空间；已有组件不会被替换。',
   cpolarStorageFailed: '无法把 cpolar 写入 DSH Mobile 私有目录。请检查磁盘空间、目录权限和安全软件，然后重试。',
 })
 

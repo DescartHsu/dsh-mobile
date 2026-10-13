@@ -23,6 +23,7 @@ Browser checks consume built client files. Run `npm run build` and `npx playwrig
 | --- | --- |
 | Question cards | `npm run smoke:question-fixes` |
 | Layout, drawers and panels | `npm run smoke:native-layout` |
+| Mobile root geometry under broad skin rules | `npm run smoke:layout-ownership` |
 | Conversation scrollport and older viewport units | `node scripts/smoke-conversation-scroll.mjs` |
 | Composer focus and keyboard | `npm run smoke:composer-keyboard` |
 | Composer controls, typography and wrapping | `npm run smoke:composer-overflow` |
@@ -34,9 +35,12 @@ Browser checks consume built client files. Run `npm run build` and `npx playwrig
 | API fallback on older WebViews | `npm run smoke:mobile-compat` |
 | Async access-panel forms | `npm run smoke:control-state` |
 | Module-selection recovery | `npm run smoke:module-recovery` |
+| Module grouping/search, read/write recovery and a published optional skin | `npm run smoke:module-settings` |
 | Local extension Worker execution and explicit recovery | `npm run smoke:extension-workers` |
 
 These fixtures do not submit a model request or read the normal DSH home. Browser evidence does not establish physical Android keyboard, camera or device-lifecycle behavior.
+
+`smoke:layout-ownership` captures the built layout stylesheet and checks an owned display-contents/virtualized-view fixture under broad unlayered skin overrides. It observes visible, scrollable and clickable content, narrow/wide geometry and an unchanged stock-layout control. Its controlled collapse case removes only the ownership layer and requires a zero-height ledger before reporting success. This is CSS regression evidence, not full compatibility with any particular skin.
 
 Transport recovery uses the same isolated packed DSH runtime described below and a loopback-only fault proxy. It requires healthy HTTP during an actual mux interruption, a new 101 handshake and fresh Workspace baseline, and an unchanged document/editor/draft. `--interactions` adds a test-only Host question through the real Loader, checks desktop/mobile delivery and reconnection, and rejects one answer request before an explicit retry. It does not simulate an approval audit or establish a reporter's Cloudflare deployment. `--negative-control-mux` deliberately leaves the mux unavailable and must fail with `Mux recovery negative control detected`; another setup error is not a passing negative control.
 
@@ -63,6 +67,8 @@ For installation changes, run `npm run smoke:plugin-installation` against the sa
 
 `npm run smoke:mobile-settings` checks the mounted DSH General settings, local typography and narrow-screen controls. Its native bridge is simulated; physical WebView zoom, keyboard and system-bar behavior require ADB evidence.
 
+`npm run smoke:module-settings` uses the isolated DSH runtime above through `DSH_BOOT_SMOKE_BIN`; the plugin's own `npm ci` does not install the DSH CLI. Set `DSH_BOOT_SMOKE_MOBILE_TARBALL` to fix the candidate tarball instead of packing the checkout. The smoke checks the real module modal, failed-read/write recovery, device-only exclusions, retained drafts and a pinned published skin combination. This combination regression does not establish full visual skin compatibility.
+
 Compatibility changes also run `npm run smoke:dsh-boot -- --legacy-webview`. The `--negative-control-compat` variation must fail with its expected missing-API marker after the compatibility script is blocked; an installation or fixture failure is not a successful negative control.
 
 The conversation scroll check uses the same isolated runtime and packed plugin. Its `--negative-control-viewport` variation removes the height fallback and must fail with `Viewport negative control detected`; it cannot substitute for testing the reporter's actual WebView.
@@ -78,6 +84,8 @@ Follow the [Android build instructions](apps/mobile/README.md#build) and keep bo
 Review the internal [design reference](design-system/dsh-mobile/MASTER.md) for native screens and plugin-owned controls. Do not change DSH source to implement plugin features without a separately authorized upstream change.
 
 For macOS cloudflared changes, build and run `npm run smoke:cloudflared-component`. It verifies official archives and reinitialization in temporary state, then removes its owned files; it never executes downloaded Mach-O binaries. `-- --archive-dir <directory>` reuses independently verified official archives.
+
+For Windows cpolar changes, build and run `npm run smoke:cpolar-component` on native Windows, optionally passing `-- --archive <fixed-official-zip>`. It verifies the pinned archive and executable, reads MSI tables/embedded CAB without installer actions, checks initialization and cleanup in an owned Unicode/space path, and never runs cpolar. Windows Node 24 CI owns this native smoke; source unit tests use controlled subprocess output. Opt-in `DSH_CPOLAR_TEST_MSI` and `DSH_CPOLAR_TEST_ZIP` run the real-data unit checks; without those fixtures they explicitly skip rather than establish native extraction evidence.
 
 The optional Caddy workflow keeps one pinned Windows/Linux x64 double-build/native-test matrix and one generic publisher. PR/ordinary dispatch runs are read-only; both publication inputs default false and simultaneous opt-ins fail early. The fork-only review path remains a labelled TEST prerelease. The official path is restricted to public `saya-ch/dsh-mobile` and the existing exact non-v tag `caddy-component-2.11.6-tencentcloud-0.4.3`; it publishes a non-prerelease, non-latest **component distribution**, never npm/plugin/APK or enabled installation.
 

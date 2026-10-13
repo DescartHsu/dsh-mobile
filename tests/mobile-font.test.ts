@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_MOBILE_FONT_SIZE, MOBILE_FONT_STORAGE_KEY, MOBILE_TYPOGRAPHY_STORAGE_KEY,
   MobileFontPreference, installMobileFontPreference, normalizeMobileFontFamily, parseMobileFontSize } from '../src/mobile-font.js'
+import { readMobileTypographyCapabilities, type MobileTypographyCapabilities } from '../src/mobile-font-capabilities.js'
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -111,26 +112,73 @@ describe('mobile font preference', () => {
     }
     expect(preference.getTypographySnapshot()).toEqual({ sizes: { text: 16, code: 20 }, families: { text: '', code: 'monospace' } })
   })
+
+  it('retains unsupported saved roles when resetting visible controls', () => {
+    const preference = new MobileFontPreference(null)
+    preference.set(24)
+    preference.setRoleSize('code', 20)
+    preference.setRoleFamily('text', 'Saved Text')
+    preference.setRoleFamily('code', 'Saved Mono')
+    preference.updateCapabilities({ codeSize: false, textFamily: true, codeFamily: false })
+    preference.resetSupported()
+    expect(preference.getTypographySnapshot()).toEqual({ sizes: { text: 16, code: 20 }, families: { text: '', code: '"Saved Mono"' } })
+  })
+
+  it('notifies capability subscribers only when actual support changes', () => {
+    const preference = new MobileFontPreference(null)
+    const listener = vi.fn()
+    const unsubscribe = preference.subscribeCapabilities(listener)
+    const supported = { codeSize: true, textFamily: true, codeFamily: true }
+    preference.updateCapabilities(supported)
+    preference.updateCapabilities({ ...supported })
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(Object.isFrozen(preference.getCapabilitiesSnapshot())).toBe(true)
+    unsubscribe()
+    preference.updateCapabilities({ codeSize: false, textFamily: true, codeFamily: true })
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
 })
 
-function fontSurface(initial: Record<string, string>) {
+function fontSurface(initial: Record<string, string>, capabilities: MobileTypographyCapabilities = { codeSize: true, textFamily: true, codeFamily: true }) {
+  const supported = { ...capabilities }
   const values = new Map(Object.entries(initial).map(([property, value]) => [property, { value, priority: '' }]))
   const style = {
+    get cssText() { return JSON.stringify([...values]) },
     getPropertyValue: (property: string) => values.get(property)?.value ?? '',
     getPropertyPriority: (property: string) => values.get(property)?.priority ?? '',
     setProperty: (property: string, value: string, priority = '') => { values.set(property, { value, priority }) },
     removeProperty: (property: string) => { const value = values.get(property)?.value ?? ''; values.delete(property); return value },
   }
   const disconnect = vi.fn()
-  let notify = (): void => {}
+  const observers: Array<(records: MutationRecord[]) => void> = []
+  const observations: Array<{ target: object; options: MutationObserverInit; callback: (records: MutationRecord[]) => void }> = []
+  const probes: Array<{ style: { cssText: string; font: string }; setAttribute: () => void; remove: () => void }> = []
+  const body = { style, className: '', getAttribute: () => null, append() {} }
+  const doc = { body, head: { addEventListener() {}, removeEventListener() {} }, documentElement: {}, createElement: () => {
+    const probe = { style: { cssText: '', font: '' }, setAttribute() {}, remove: vi.fn() }
+    probes.push(probe)
+    return probe
+  } }
   vi.stubGlobal('window', { localStorage: null })
-  vi.stubGlobal('document', { body: { style } })
+  vi.stubGlobal('document', doc)
+  vi.stubGlobal('getComputedStyle', (probe: typeof probes[number]) => {
+    const code = probe.style.font.includes('code-block')
+    return { fontSize: code && supported.codeSize ? style.getPropertyValue('--dsh-code-font-size') : code ? '11px' : '14px',
+      fontFamily: code && supported.codeFamily ? style.getPropertyValue('--dsh-font-family-code')
+        : !code && supported.textFamily ? style.getPropertyValue('--dsh-font-family-text') : 'Default Font' }
+  })
   vi.stubGlobal('MutationObserver', class {
-    constructor(callback: () => void) { notify = callback }
-    observe() {}
+    constructor(private readonly callback: (records: MutationRecord[]) => void) { observers.push(callback) }
+    observe(target: object, options: MutationObserverInit) { observations.push({ target, options, callback: this.callback }) }
     disconnect = disconnect
   })
-  return { style, disconnect, notify: () => { notify() } }
+  return { style, disconnect, probes, observations, doc, capabilities: supported, notify: () => { observers[0]?.([]) },
+    notifyBodyTextMutation: () => {
+      const interested = observations.filter(({ target, options }) => (target === body && options.childList)
+        || (target === doc.documentElement && options.subtree && (options.childList || options.characterData)))
+      for (const { callback } of interested) callback([])
+      return interested.length
+    } }
 }
 
 describe('mobile font presentation ownership', () => {
@@ -152,7 +200,7 @@ describe('mobile font presentation ownership', () => {
     expect(surface.style.getPropertyValue('--dsh-content-font-size')).toBe('14px')
     expect(surface.style.getPropertyValue('--dsh-font-family-text')).toBe('Host Font')
     expect(surface.style.getPropertyValue('--dsh-code-font-size')).toBe('')
-    expect(surface.disconnect).toHaveBeenCalledTimes(1)
+    expect(surface.disconnect).toHaveBeenCalledTimes(2)
   })
 
   it('retains mobile values through Host presentation updates and restores the latest foreign values on dispose', () => {
@@ -191,5 +239,98 @@ describe('mobile font presentation ownership', () => {
     local.dispose()
     expect(surface.style.getPropertyValue('--dsh-content-font-size')).toBe('16px')
     expect(surface.style.getPropertyPriority('--dsh-content-font-size')).toBe('important')
+  })
+
+  it('does not claim theme support from unused custom properties or project unsupported preferences', () => {
+    const surface = fontSurface({ '--dsh-code-font-size': '17px', '--dsh-font-family-code': 'Unused Mono' },
+      { codeSize: false, textFamily: false, codeFamily: false })
+    const local = installMobileFontPreference()
+    local.preference.setRoleSize('code', 23)
+    local.preference.setRoleFamily('code', 'Saved Mono')
+    expect(local.preference.getCapabilitiesSnapshot()).toEqual({ codeSize: false, textFamily: false, codeFamily: false })
+    expect(surface.style.getPropertyValue('--dsh-code-font-size')).toBe('17px')
+    expect(surface.style.getPropertyValue('--dsh-font-family-code')).toBe('Unused Mono')
+    expect(surface.style.getPropertyValue('--dsh-content-font-size')).toBe('16px')
+    local.dispose()
+  })
+
+  it('detects each consumer independently and restores every probe input', () => {
+    const surface = fontSurface({ '--dsh-code-font-size': '17px', '--dsh-font-family-text': 'Host Font' },
+      { codeSize: true, textFamily: false, codeFamily: true })
+    expect(readMobileTypographyCapabilities(document)).toEqual({ codeSize: true, textFamily: false, codeFamily: true })
+    expect(surface.style.getPropertyValue('--dsh-code-font-size')).toBe('17px')
+    expect(surface.style.getPropertyValue('--dsh-font-family-text')).toBe('Host Font')
+    expect(surface.style.getPropertyValue('--dsh-font-family-code')).toBe('')
+    for (const probe of surface.probes) expect(probe.remove).toHaveBeenCalledOnce()
+  })
+
+  it('restores temporary inputs and removes probes when style sampling fails', () => {
+    const surface = fontSurface({ '--dsh-code-font-size': '17px' })
+    surface.style.setProperty('--dsh-code-font-size', '17px', 'important')
+    vi.stubGlobal('getComputedStyle', () => { throw new Error('Style sampling interrupted') })
+    expect(() => readMobileTypographyCapabilities(document)).toThrow('Style sampling interrupted')
+    expect(surface.style.getPropertyValue('--dsh-code-font-size')).toBe('17px')
+    expect(surface.style.getPropertyPriority('--dsh-code-font-size')).toBe('important')
+    expect(surface.style.getPropertyValue('--dsh-font-family-code')).toBe('')
+    for (const probe of surface.probes) expect(probe.remove).toHaveBeenCalledOnce()
+  })
+
+  it('withdraws unsupported projections and resumes retained values when the active theme changes', () => {
+    const surface = fontSurface({ '--dsh-code-font-size': '14px', '--dsh-font-family-code': 'Host Mono' })
+    const local = installMobileFontPreference()
+    local.preference.setRoleSize('code', 20)
+    local.preference.setRoleFamily('code', 'Saved Mono')
+    surface.capabilities.codeSize = false
+    surface.capabilities.codeFamily = false
+    surface.style.setProperty('--theme-change', 'old-theme')
+    surface.notify()
+    expect(surface.style.getPropertyValue('--dsh-code-font-size')).toBe('14px')
+    expect(surface.style.getPropertyValue('--dsh-font-family-code')).toBe('Host Mono')
+    expect(local.preference.getTypographySnapshot().sizes.code).toBe(20)
+    surface.capabilities.codeSize = true
+    surface.capabilities.codeFamily = true
+    surface.style.setProperty('--theme-change', 'supported-theme')
+    surface.notify()
+    expect(surface.style.getPropertyValue('--dsh-code-font-size')).toBe('20px')
+    expect(surface.style.getPropertyValue('--dsh-font-family-code')).toBe('"Saved Mono"')
+    local.dispose()
+  })
+
+  it('does not repeat synchronous probes in response to their own style mutations', () => {
+    const surface = fontSurface({})
+    const local = installMobileFontPreference()
+    expect(surface.probes).toHaveLength(2)
+    surface.notify()
+    surface.notify()
+    expect(surface.probes).toHaveLength(2)
+    local.preference.set(20)
+    surface.notify()
+    expect(surface.probes).toHaveLength(2)
+    local.dispose()
+  })
+
+  it('does not observe conversation text mutations or scan the body subtree for stylesheets', () => {
+    const surface = fontSurface({})
+    const local = installMobileFontPreference()
+    expect(surface.observations.map(({ target }) => target)).toEqual([surface.doc.body, surface.doc.head])
+    expect(surface.observations[0]?.options).toEqual({ attributes: true, attributeFilter: ['style', 'class', 'data-ds-dark-theme'] })
+    expect(surface.observations[1]?.options).toEqual({ subtree: true, childList: true, characterData: true, attributes: true,
+      attributeFilter: ['href', 'media', 'disabled', 'rel'] })
+    for (let chunk = 0; chunk < 100; chunk++) expect(surface.notifyBodyTextMutation()).toBe(0)
+    expect(surface.probes).toHaveLength(2)
+    local.dispose()
+  })
+
+  it('preserves an unsupported foreign write before newly acquiring that property', () => {
+    const surface = fontSurface({ '--dsh-code-font-size': '14px' }, { codeSize: false, textFamily: false, codeFamily: false })
+    const local = installMobileFontPreference()
+    local.preference.setRoleSize('code', 20)
+    surface.style.setProperty('--dsh-code-font-size', '18px', 'important')
+    surface.capabilities.codeSize = true
+    surface.notify()
+    expect(surface.style.getPropertyValue('--dsh-code-font-size')).toBe('20px')
+    local.dispose()
+    expect(surface.style.getPropertyValue('--dsh-code-font-size')).toBe('18px')
+    expect(surface.style.getPropertyPriority('--dsh-code-font-size')).toBe('important')
   })
 })

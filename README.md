@@ -31,7 +31,7 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.4**。改善窄屏输入栏触摸区域、Windows Desktop 启动适配、插件安装与连接数据可靠性，并保留可选扩展 Worker 模式。[更新记录](CHANGELOG.md) · [版本下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.4)。
+> **当前正式版本：0.6.5**。优化移动页面模块管理与字体设置，改善设置操作可达性，修复 Windows cpolar 解包及部分皮肤造成的轨迹空白。[更新记录](CHANGELOG.md) · [版本下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.5)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
@@ -268,6 +268,8 @@ DSH Mobile 保留工作区、任务管理、终端和文件面板入口，第三
 
 第三方插件需要能在 DSH Web 页面中运行，并使用可达的 HTTP／WebSocket 接口。移动层不保证把所有插件的自定义布局自动改成手机布局，也不能替代插件依赖的桌面原生窗口。
 
+皮肤若依赖原生布局容器，背景或装饰可能无法在专用移动布局中挂载。可在手机的“移动页面模块”中只对本设备不加载可选皮肤，无需卸载电脑插件；背景、配色与排查边界见[皮肤与移动布局](docs/SKIN_COMPATIBILITY.md)。
+
 ### WebSocket 放行
 
 - 网关默认只允许 DSH 内置的第一方 WebSocket 路径，包括 `/sidebar/ws/terminal`。社区侧边栏插件使用的其他路径默认拦截，通常会在诊断页显示为待处理项目；截图中的 `/sidebar/ws/agent-opens` 和 `/sidebar/ws/agent-terminals` 就属于这类需要按实际插件确认的路径。
@@ -319,7 +321,7 @@ excludedClientModules:
 | Android App | 日常使用 | 首次配对时分别提供局域网与远程入口；局域网自动发现，公开远程证书由系统验证，自签 FRP 入口由 App 固定 CA |
 | 手机浏览器 | 临时或跨平台访问 | 打开“移动访问”卡片显示的 HTTPS 地址；局域网私有证书可能需要手动确认，公开远程证书不应出现警告 |
 
-Android App 只是 Kotlin WebView 薄壳，不内置另一份网页；手机浏览器访问的是同一页面。需要排查兼容性时，可在浏览器地址后追加 `?frontend=stock`，临时回到旧的桌面页面适配模式。
+Android App 只是 Kotlin WebView 薄壳，不内置另一份网页；手机浏览器访问的是同一页面。开发者可在已认证移动地址后追加 `?frontend=stock` 对照原生布局；该诊断入口绕过移动增强和模块选择，部分 API 操作可能被拒绝，不能代替正常移动入口。详见[皮肤与移动布局](docs/SKIN_COMPATIBILITY.md)。
 
 0.5.5 的专用移动页面会在 DSH 的第一个启动脚本之前，同步加载经网关鉴权的同源 `/mobile-access/compat.js`，为缺少 `Iterator` / Iterator helpers 的 WebView 提供随插件打包的 core-js 兼容实现，避免启动时出现 `Iterator is not defined`。兼容层按能力检测保留或修正原生 helper，不依赖 CDN，也不会放宽 CSP；桌面页面与 `?frontend=stock` 页面不会加载这个网关脚本。
 
@@ -394,6 +396,7 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 | `0.6.2` | `0.2.0-rc.2` 的打包旧 WebView 启动、触屏滚动与缺失 API／视口负对照通过；发布 CI 通过。未将 #187 报告者的实际旧设备写成已验收 |
 | `0.6.3` | `0.2.0-rc.2`、`0.2.1-alpha.2`（打包安装、隔离配对、移动页面与 WebSocket 工作区读取）；另验证输入栏、设置与扩展 Worker 的超时、流式传输和显式恢复 |
 | `0.6.4` | `0.2.0-rc.2`（打包安装、隔离配对、移动页面与 WebSocket 工作区读取）；另验证 72 组真实公共插槽输入栏布局、Windows Desktop 目录选择器组合及跨平台回归。社区 Desktop 2.0.17 的原报告远程超时仍未宣称验收 |
+| `0.6.5` | `0.2.0-rc.2`、`0.2.1-alpha.2` 的打包模块管理与移动设置回归；另验证 Windows cpolar 解包及正式 `maid-atelier` 0.1.7 下有内容轨迹的布局修复。不代表全部第三方皮肤或报告者设备已验收 |
 
 <details>
 <summary>历史版本验证记录</summary>
@@ -424,7 +427,7 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 
 现有 App（0.3.3 及更新）无需重新配对；cpolar 用户应使用 0.3.15 或更新 App，较早版本可能在免费线路的慢速首次加载完成前超时；更早的 App 还使用不同的状态栏策略。App 0.4.0 才支持多设备列表、启动行为设置和电脑端撤销状态同步；旧版 App 仍可连接已保存的单台设备。App 0.1.3 及更早版本需卸载重装并重新配对。
 
-Android App 当前正式版为 0.6.2（build 78），新增页面缩放，改善系统区域处理与加密设备记录的可靠性；包名、签名及配对／续期协议保持兼容，已有配对无需重建。插件和 App 的版本号不要求相同；连接按协议及最低版本要求检查，具体原生功能另有要求时会说明所需 App 版本。
+Android App 的版本及原生更新见 [App 使用说明](apps/mobile/README.zh-CN.md)。包名、签名及配对／续期协议保持兼容，已有配对无需重建。插件和 App 的版本号不要求相同；连接按协议及最低版本要求检查，具体原生功能另有要求时会说明所需 App 版本。
 
 GitHub Release 的正式 APK 使用固定签名，可从同一签名的旧正式版原位升级并保留配对。自行构建的 Debug APK 若使用不同签名，不能直接覆盖安装正式版；切换前请准备重新配对。
 

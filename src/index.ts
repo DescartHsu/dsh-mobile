@@ -84,6 +84,7 @@ export {
 } from './storage.js'
 export type { DeviceSnapshot, DeviceStore, StoredDevice } from './storage.js'
 export { FRP_COMPONENT_RELEASES, FrpComponentManager } from './frp-component.js'
+export { CPOLAR_COMPONENT_RELEASE, CPOLAR_COMPONENT_RELEASES, CpolarComponentManager } from './cpolar-component.js'
 export {
   BlockedUpgradePathLog,
   MAX_BLOCKED_UPGRADE_PATHS,

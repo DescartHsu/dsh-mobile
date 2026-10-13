@@ -1,8 +1,8 @@
 # 贡献者 / Contributors
 
-GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-12 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
+GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-13 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-12. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-13. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
 ## 0.6.4 代码贡献 / Code contributions in 0.6.4
 
@@ -73,6 +73,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@chintoleung](https://github.com/chintoleung) | [#103](https://github.com/saya-ch/dsh-mobile/issues/103), [#166](https://github.com/saya-ch/dsh-mobile/issues/166), [#189](https://github.com/saya-ch/dsh-mobile/issues/189) |
 | [@chmzs](https://github.com/chmzs) | [#73](https://github.com/saya-ch/dsh-mobile/issues/73) |
 | [@gjzbbs](https://github.com/gjzbbs) | [#123](https://github.com/saya-ch/dsh-mobile/issues/123) |
+| [@fishdivinity](https://github.com/fishdivinity) | [#202](https://github.com/saya-ch/dsh-mobile/issues/202) |
 | [@hairyf](https://github.com/hairyf) | [#114](https://github.com/saya-ch/dsh-mobile/issues/114) |
 | [@helan-1997](https://github.com/helan-1997) | [#168](https://github.com/saya-ch/dsh-mobile/issues/168) |
 | [@hpsks416](https://github.com/hpsks416) | [#132](https://github.com/saya-ch/dsh-mobile/issues/132) |
@@ -100,6 +101,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@sortjiajun](https://github.com/sortjiajun) | [#90](https://github.com/saya-ch/dsh-mobile/issues/90) |
 | [@StrawberryAO](https://github.com/StrawberryAO) | [#39](https://github.com/saya-ch/dsh-mobile/issues/39) |
 | [@Surpass567](https://github.com/Surpass567) | [#80](https://github.com/saya-ch/dsh-mobile/issues/80), [#81](https://github.com/saya-ch/dsh-mobile/issues/81) |
+| [@WalkerJay666](https://github.com/WalkerJay666) | [#201](https://github.com/saya-ch/dsh-mobile/issues/201) |
 | [@up-and-down-0618](https://github.com/up-and-down-0618) | [#115](https://github.com/saya-ch/dsh-mobile/issues/115) |
 | [@taki-ohh](https://github.com/taki-ohh) | [#19](https://github.com/saya-ch/dsh-mobile/issues/19) |
 | [@tianyimc](https://github.com/tianyimc) | [#126](https://github.com/saya-ch/dsh-mobile/issues/126) |

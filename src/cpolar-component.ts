@@ -13,6 +13,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { downloadPinnedArtifact } from './component-download.js'
 import { restrictPrivateFile } from './private-file.js'
+import { cpolarWindowsExtractionStep, cpolarWindowsSystemTool, extractWindowsMsiBinary, runCpolarWindowsTool } from './windows-msi-extract.js'
 import { assertManagedParents, ensureManagedDirectory, removeManagedPaths, removeManagedTree, renameManagedPath, writeManagedPrivateFile } from './managed-files.js'
 
 /** Pinned cpolar components fetched only after an explicit user action. */
@@ -267,28 +268,27 @@ async function defaultFetchArtifact(
   })
 }
 
-async function extractWindowsMsi(archive: string, destination: string, executableName: string): Promise<void> {
+async function extractWindowsMsi(archive: string, destination: string, executableName: string, expectedBytes: number): Promise<void> {
   if (process.platform !== 'win32') throw new Error('cpolar_component_unsupported')
   const unpacked = join(destination, 'archive')
-  const administrative = join(destination, 'administrative')
-  await mkdir(unpacked, { recursive: true, mode: 0o700 })
-  await mkdir(administrative, { recursive: true, mode: 0o700 })
-  await run('tar.exe', ['-xf', archive, '-C', unpacked])
-  const archiveEntries = await readdir(unpacked, { recursive: true })
-  const msiRelative = archiveEntries.find(entry => entry.toLowerCase().endsWith('.msi'))
-  if (msiRelative === undefined) throw new Error('cpolar_installer_missing')
-  await run('msiexec.exe', ['/a', join(unpacked, msiRelative), '/qn', `TARGETDIR=${administrative}`])
-  const installedEntries = await readdir(administrative, { recursive: true })
-  const executableRelative = installedEntries.find(entry => basename(entry).toLowerCase() === executableName.toLowerCase())
-  if (executableRelative === undefined) throw new Error('cpolar_executable_missing')
-  await copyFile(join(administrative, executableRelative), join(destination, executableName))
+  const msi = await cpolarWindowsExtractionStep('archive', async () => {
+    await mkdir(unpacked, { recursive: true, mode: 0o700 })
+    await runCpolarWindowsTool('tar.exe', ['-xf', archive, '-C', unpacked])
+    const archiveEntries = await readdir(unpacked, { recursive: true })
+    const installers = archiveEntries.filter(entry => entry.toLowerCase().endsWith('.msi'))
+    const msiRelative = installers[0]
+    if (installers.length !== 1 || msiRelative === undefined || !inside(unpacked, join(unpacked, msiRelative))
+      || !await regularFile(join(unpacked, msiRelative))) throw new Error('cpolar_installer_missing')
+    return join(unpacked, msiRelative)
+  })
+  await extractWindowsMsiBinary(msi, destination, executableName, expectedBytes)
 }
 
 async function extractLinuxTarball(archive: string, destination: string, executableName: string): Promise<void> {
   const unpacked = join(destination, 'archive')
   await mkdir(unpacked, { recursive: true, mode: 0o700 })
   // The Linux tarball carries the binary at its root; no installer involved.
-  await run(process.platform === 'win32' ? 'tar.exe' : 'tar', ['-xzf', archive, '-C', unpacked])
+  await run(process.platform === 'win32' ? cpolarWindowsSystemTool('tar.exe') : 'tar', ['-xzf', archive, '-C', unpacked])
   const archiveEntries = await readdir(unpacked, { recursive: true })
   const executableRelative = archiveEntries.find(entry => basename(entry).toLowerCase() === executableName.toLowerCase())
   if (executableRelative === undefined) throw new Error('cpolar_executable_missing')
@@ -297,7 +297,7 @@ async function extractLinuxTarball(archive: string, destination: string, executa
 
 async function defaultExtractArtifact(archive: string, destination: string, release: CpolarArtifact): Promise<void> {
   if (release.archiveKind === 'tar.gz') return extractLinuxTarball(archive, destination, release.executableName)
-  return extractWindowsMsi(archive, destination, release.executableName)
+  return extractWindowsMsi(archive, destination, release.executableName, release.executableBytes)
 }
 
 /** Validate a cpolar Authtoken before it crosses the durable-file boundary. */
@@ -401,7 +401,7 @@ export class CpolarComponentManager {
     })
   }
 
-  /** Download, verify, and administratively extract cpolar after explicit confirmation. */
+  /** Download and verify cpolar, reading archive data without running installer actions. */
   install(): Promise<CpolarComponentStatus> {
     return this.enqueue(async () => {
       const release = this.release

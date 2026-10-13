@@ -31,7 +31,7 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.4**. Improve narrow-screen composer hit targets, Windows Desktop startup composition, plugin installation, and connection/data reliability while retaining optional extension Workers. [Changelog](CHANGELOG.md) · [Release downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.4).
+> **Current stable release: 0.6.5**. Improve mobile module management, typography and settings accessibility; fix Windows cpolar extraction and blank Trajectory views caused by some skins. [Changelog](CHANGELOG.md) · [Release downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.5).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
@@ -268,6 +268,8 @@ DSH Mobile keeps the Workspace, task-management, terminal and file-panel entry p
 
 A third-party plugin must work in DSH Web and use reachable HTTP/WebSocket interfaces. The mobile layer cannot guarantee a phone layout for every plugin or replace a desktop-native window required by that plugin.
 
+A skin tied to stock layout containers may not mount its backgrounds or decorations in the dedicated mobile layout. Mobile page module settings can omit an optional skin on this device without uninstalling the computer plugin; see [skins and mobile layout](docs/SKIN_COMPATIBILITY.en.md) for theme behavior and diagnosis.
+
 ### WebSocket approval
 
 - The gateway allows first-party DSH WebSocket paths by default, including `/sidebar/ws/terminal`. Other paths used by community sidebar plugins are blocked by default and appear in Diagnostics; the `/sidebar/ws/agent-opens` and `/sidebar/ws/agent-terminals` paths in the image are examples that must be reviewed for the actual plugin.
@@ -319,7 +321,7 @@ Selection priority is device choice → computer defaults → plugin configurati
 | Android app | Everyday use | Separate Local and Remote entries at first pairing; LAN discovery, system trust for public remote certificates, and app-pinned CA for the self-signed FRP entry |
 | Mobile browser | Temporary or cross-platform | Open the HTTPS origin shown by Mobile Access; a private LAN certificate may need confirmation, while a public remote certificate should not warn |
 
-The Android app is a thin Kotlin WebView shell and contains no frontend copy; mobile browsers load the same page. For compatibility diagnosis, append `?frontend=stock` to the browser URL to temporarily use the previous desktop-page adaptation.
+The Android app is a thin Kotlin WebView shell and contains no frontend copy; mobile browsers load the same page. Developers can append `?frontend=stock` to an authenticated mobile URL to compare the stock layout. This diagnostic entry bypasses mobile enhancements and module selection; some API operations may be rejected, so it does not replace normal mobile access. See [skins and mobile layout](docs/SKIN_COMPATIBILITY.en.md).
 
 In 0.5.5, the dedicated mobile page synchronously loads the authenticated, same-origin `/mobile-access/compat.js` before the first DSH boot script. This bundled core-js compatibility layer supplies `Iterator` / Iterator helpers to WebViews that lack them, preventing the startup error `Iterator is not defined`. It uses feature detection to preserve or repair native helpers, needs no CDN, and does not weaken CSP. The desktop and `?frontend=stock` pages do not load this gateway script.
 
@@ -393,6 +395,7 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 | `0.6.2` | Packed legacy-WebView boot, touch scrolling and missing-API/viewport negative controls passed on `0.2.0-rc.2`, with release CI passing. The reporter's physical old devices in #187 were not claimed as accepted |
 | `0.6.3` | `0.2.0-rc.2` and `0.2.1-alpha.2` (packed installation, isolated pairing, mobile boot and WebSocket Workspace reads); additional checks cover the composer, settings and extension Worker timeout, streaming and explicit recovery |
 | `0.6.4` | `0.2.0-rc.2` (packed installation, isolated pairing, mobile boot and WebSocket Workspace reads); additionally 72 real public-slot composer layouts, Windows Desktop directory-picker composition and cross-platform regressions. The reported remote timeout in community Desktop 2.0.17 remains unclaimed as accepted |
+| `0.6.5` | Packed module-management and mobile-settings regressions on `0.2.0-rc.2` and `0.2.1-alpha.2`; additionally Windows cpolar extraction and populated Trajectory layout with published `maid-atelier` 0.1.7. This does not establish acceptance of every third-party skin or reporter device |
 
 <details>
 <summary>Historical version checks</summary>
@@ -423,7 +426,7 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 
 Existing apps (0.3.3 and later) do not need re-pairing. cpolar users should use app 0.3.15 or later because earlier apps may time out before a slow first load over the free route finishes; earlier apps also use a different status-bar strategy. The 0.4.0 app adds the multi-device list, startup behavior, and computer-side revocation status; older apps continue to connect to their saved single device. App 0.1.3 or earlier requires reinstalling and pairing again.
 
-The current stable Android app is 0.6.2 (build 78), adding page zoom and improving system-area handling and encrypted-record reliability. Package identity, signing and the pairing/renewal protocol remain compatible without requiring re-pairing. Plugin and app version numbers do not need to match; connections check protocol and minimum-version requirements. Features with additional native requirements state the app version they need.
+See the [App guide](apps/mobile/README.md) for native release versions and changes. Package identity, signing and the pairing/renewal protocol remain compatible without requiring re-pairing. Plugin and app version numbers do not need to match; connections check protocol and minimum-version requirements. Features with additional native requirements state the app version they need.
 
 GitHub Release APKs use a stable signing certificate, so an older official APK with the same signer can be upgraded in place while retaining pairings. A locally built Debug APK with a different signer cannot be overwritten by the official APK; plan to pair again when switching between them.
 

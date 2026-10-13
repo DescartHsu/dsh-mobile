@@ -35,7 +35,7 @@ export class WindowsMsiExtractionError extends Error {
 
 // MsiOpenDatabase READONLY accesses tables, never an installation/action sequence.
 // All handles are closed on this synchronous reader's thread. Media maps File.Sequence
-// to an embedded _Streams CAB; expand subsequently extracts only the selected File key.
+// to an embedded _Streams CAB; the cabinet reader extracts only the selected File key.
 const READ_MSI_CABINET = String.raw`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -233,8 +233,139 @@ try {
 }
 `
 
+// SetupIterateCabinetW notifications and FILE_IN_CABINET_INFO_W follow the Windows SDK:
+// https://learn.microsoft.com/windows/win32/api/setupapi/nf-setupapi-setupiteratecabinetw
+// https://learn.microsoft.com/windows/win32/api/setupapi/ns-setupapi-file_in_cabinet_info_w
+// The callback writes only FullTargetName's inline UTF-16 buffer, never the native name pointer.
+const READ_MSI_CABINET_FILE = String.raw`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+try {
+  Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+
+public static class DshReadOnlyCabinet {
+  private const uint CabinetInfo = 0x10;
+  private const uint FileInCabinet = 0x11;
+  private const uint NeedNewCabinet = 0x12;
+  private const uint FileExtracted = 0x13;
+  private const uint FileopAbort = 0;
+  private const uint FileopDoit = 1;
+  private const uint FileopSkip = 2;
+  private const uint InvalidData = 13;
+  private const int MaxPath = 260;
+
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  private struct FileInCabinetInfo {
+    public IntPtr NameInCabinet;
+    public uint FileSize;
+    public uint Win32Error;
+    public ushort DosDate;
+    public ushort DosTime;
+    public ushort DosAttribs;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = MaxPath)]
+    public string FullTargetName;
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  private struct FilePaths {
+    public IntPtr Target;
+    public IntPtr Source;
+    public uint Win32Error;
+    public uint Flags;
+  }
+  [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+  private delegate uint CabinetCallback(IntPtr context, uint notification, IntPtr param1, IntPtr param2);
+  [DllImport("setupapi.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  private static extern bool SetupIterateCabinetW(string cabinet, uint reserved, CabinetCallback callback, IntPtr context);
+
+  public static void Extract(string cabinet, string directory, string wanted, int expectedBytes) {
+    if (!Regex.IsMatch(wanted, @"\A[A-Za-z_][A-Za-z0-9_.]{0,71}\z") || wanted.Contains("..")
+      || expectedBytes < 1 || !Path.IsPathRooted(cabinet) || !Path.IsPathRooted(directory)) {
+      throw new InvalidDataException("CABINET_INPUT_INVALID");
+    }
+    if (!Directory.Exists(directory) || (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0
+      || Directory.GetFileSystemEntries(directory).Length != 0) {
+      throw new InvalidDataException("CABINET_DESTINATION_INVALID");
+    }
+    string target = Path.GetFullPath(Path.Combine(directory, wanted));
+    string source = Path.GetFullPath(cabinet);
+    if (target.Length >= MaxPath || (File.GetAttributes(source) & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0) {
+      throw new InvalidDataException("CABINET_PATH_INVALID");
+    }
+    int targetOffset = Marshal.OffsetOf(typeof(FileInCabinetInfo), "FullTargetName").ToInt32();
+    if (targetOffset != IntPtr.Size + 14) throw new InvalidDataException("CABINET_ABI_INVALID");
+    int matched = 0;
+    int entries = 0;
+    int cabinets = 0;
+    bool completed = false;
+    bool callbackFailed = false;
+    CabinetCallback callback = delegate(IntPtr context, uint notification, IntPtr param1, IntPtr param2) {
+      try {
+        if (notification == CabinetInfo) {
+          if (++cabinets > 1) throw new InvalidDataException("CABINET_CONTINUATION_INVALID");
+          return 0;
+        }
+        if (notification == NeedNewCabinet) throw new InvalidDataException("CABINET_CONTINUATION_INVALID");
+        if (notification == FileInCabinet) {
+          if (++entries > 4096 || param1 == IntPtr.Zero) throw new InvalidDataException("CABINET_ENTRIES_INVALID");
+          var entry = (FileInCabinetInfo)Marshal.PtrToStructure(param1, typeof(FileInCabinetInfo));
+          string name = Marshal.PtrToStringUni(entry.NameInCabinet);
+          if (!String.Equals(name, wanted, StringComparison.Ordinal)) return FileopSkip;
+          if (++matched != 1 || entry.FileSize != (uint)expectedBytes || entry.Win32Error != 0
+            || (entry.DosAttribs & 0x410) != 0 || File.Exists(target) || Directory.Exists(target)
+            || (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) {
+            throw new InvalidDataException("CABINET_MEMBER_INVALID");
+          }
+          char[] path = new char[MaxPath];
+          target.CopyTo(0, path, 0, target.Length);
+          Marshal.Copy(path, 0, IntPtr.Add(param1, targetOffset), MaxPath);
+          return FileopDoit;
+        }
+        if (notification == FileExtracted) {
+          if (param1 == IntPtr.Zero) throw new InvalidDataException("CABINET_RESULT_INVALID");
+          var result = (FilePaths)Marshal.PtrToStructure(param1, typeof(FilePaths));
+          if (completed || matched != 1 || result.Win32Error != 0
+            || !String.Equals(Marshal.PtrToStringUni(result.Target), target, StringComparison.OrdinalIgnoreCase)
+            || !String.Equals(Marshal.PtrToStringUni(result.Source), source, StringComparison.OrdinalIgnoreCase)) {
+            throw new InvalidDataException("CABINET_RESULT_INVALID");
+          }
+          completed = true;
+          return 0;
+        }
+        throw new InvalidDataException("CABINET_NOTIFICATION_INVALID");
+      } catch (Exception) {
+        callbackFailed = true;
+        return notification == FileInCabinet ? FileopAbort : InvalidData;
+      }
+    };
+    bool success = SetupIterateCabinetW(source, 0, callback, IntPtr.Zero);
+    int error = success ? 0 : Marshal.GetLastWin32Error();
+    GC.KeepAlive(callback);
+    if (callbackFailed || !success || matched != 1 || !completed) {
+      throw new InvalidDataException("CABINET_EXTRACTION_FAILED_" + error);
+    }
+    if (!File.Exists(target) || (File.GetAttributes(target) & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0
+      || new FileInfo(target).Length != expectedBytes || Directory.GetFileSystemEntries(directory).Length != 1) {
+      throw new InvalidDataException("CABINET_OUTPUT_INVALID");
+    }
+  }
+}
+'@
+  [DshReadOnlyCabinet]::Extract($env:DSH_CAB_SOURCE, $env:DSH_CAB_DESTINATION, $env:DSH_CAB_MEMBER, [int]$env:DSH_CAB_BYTES)
+  [Console]::WriteLine('DSH_MSI_CABINET_READY')
+} catch {
+  [Console]::Error.WriteLine('DSH_MSI_CABINET_FAILED')
+  exit 1
+}
+`
+
 /** Resolve Windows built-in tools without inheriting a PATH-selected replacement. */
-export function cpolarWindowsSystemTool(name: 'powershell.exe' | 'expand.exe' | 'tar.exe'): string {
+export function cpolarWindowsSystemTool(name: 'powershell.exe' | 'tar.exe'): string {
   const root = process.env.SystemRoot ?? process.env.WINDIR
   if (root === undefined || !win32.isAbsolute(root) || root.startsWith('\\\\')) {
     throw new WindowsMsiExtractionError('tools', 0, 'SYSTEM_ROOT_UNAVAILABLE')
@@ -262,7 +393,7 @@ function safeCommandDetails(error: unknown): SafeCommandDetails {
 }
 
 /** Execute one system extraction tool with a fixed deadline; distinguish an unavailable executable from a rejected artifact. */
-export async function runCpolarWindowsTool(name: 'powershell.exe' | 'expand.exe' | 'tar.exe', args: readonly string[],
+export async function runCpolarWindowsTool(name: 'powershell.exe' | 'tar.exe', args: readonly string[],
   env?: NodeJS.ProcessEnv): Promise<{ stdout: string; stderr: string }> {
   const started = performance.now()
   try {
@@ -333,7 +464,11 @@ export async function extractWindowsMsiBinary(msi: string, destination: string, 
   })
   await cpolarWindowsExtractionStep('cabinet', async () => {
     await mkdir(extracted, { mode: 0o700 })
-    await runCpolarWindowsTool('expand.exe', [cabinet, `-F:${metadata.member}`, extracted])
+    const { stdout } = await runCpolarWindowsTool('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(READ_MSI_CABINET_FILE, 'utf16le').toString('base64'),
+    ], { ...process.env, DSH_CAB_SOURCE: cabinet, DSH_CAB_DESTINATION: extracted,
+      DSH_CAB_MEMBER: metadata.member, DSH_CAB_BYTES: String(expectedBytes) })
+    if (stdout.trim() !== 'DSH_MSI_CABINET_READY') throw new Error('invalid cabinet reader output')
   })
   await cpolarWindowsExtractionStep('file', async () => {
     const entries = await readdir(extracted)

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { inspect } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CPOLAR_COMPONENT_RELEASE } from '../src/cpolar-component.js'
 import { cpolarWindowsExtractionStep, cpolarWindowsSystemTool, extractWindowsMsiArchive, extractWindowsMsiBinary, runCpolarWindowsTool } from '../src/windows-msi-extract.js'
 
 const commands = vi.hoisted(() => ({ run: vi.fn(), stat: vi.fn() }))
@@ -13,7 +14,6 @@ vi.mock('node:fs/promises', async importOriginal => {
 })
 const roots: string[] = []
 const nativePowerShell = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
-const nativeExpand = 'C:\\Windows\\System32\\expand.exe'
 const member = 'cpolar_exe'
 
 async function fixture(): Promise<{ readonly root: string; readonly msi: string }> {
@@ -31,15 +31,17 @@ beforeEach(async () => {
   commands.run.mockReset()
   commands.run.mockImplementation(async (file: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => {
     if (file === nativePowerShell) {
+      const destination = options.env?.DSH_CAB_DESTINATION
+      if (destination !== undefined) {
+        await writeFile(join(destination, options.env?.DSH_CAB_MEMBER ?? member), 'test')
+        return { stdout: 'DSH_MSI_CABINET_READY', stderr: '' }
+      }
       const cabinet = options.env?.DSH_MSI_CABINET
       if (cabinet === undefined) throw new Error('fixture cabinet missing')
       await writeFile(cabinet, Buffer.alloc(36))
       return { stdout: JSON.stringify({ Member: member, Bytes: 4, CabinetBytes: 36 }), stderr: '' }
     }
-    const destination = args[2]
-    if (destination === undefined) throw new Error('fixture destination missing')
-    await writeFile(join(destination, member), 'test')
-    return { stdout: '', stderr: '' }
+    throw new Error('fixture refuses non-PowerShell tools')
   })
 })
 afterEach(async () => {
@@ -186,9 +188,33 @@ describe('read-only Windows MSI binary extraction', () => {
     await extractWindowsMsiBinary(msi, root, 'cpolar.exe', 4)
     expect(await readFile(join(root, 'cpolar.exe'), 'utf8')).toBe('test')
     expect(commands.run.mock.calls.map(call => basename(call[0] as string))).toHaveLength(2)
-    expect(commands.run).toHaveBeenLastCalledWith(nativeExpand, [join(root, 'component.cab'), `-F:${member}`, join(root, 'cabinet')], {
-      windowsHide: true, timeout: 120_000, maxBuffer: 16_384,
-    })
+    const cabinetCall = commands.run.mock.calls[1]!
+    expect(cabinetCall[0]).toBe(nativePowerShell)
+    expect(cabinetCall[1].slice(0, 4)).toEqual(['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand'])
+    expect(cabinetCall[2]).toMatchObject({ windowsHide: true, timeout: 120_000, maxBuffer: 16_384, env: {
+      DSH_CAB_SOURCE: join(root, 'component.cab'), DSH_CAB_DESTINATION: join(root, 'cabinet'),
+      DSH_CAB_MEMBER: member, DSH_CAB_BYTES: '4',
+    } })
+    const cabinetSource = Buffer.from(cabinetCall[1][4] as string, 'base64').toString('utf16le')
+    expect(cabinetSource).toContain('SetupIterateCabinetW')
+    expect(cabinetSource).toContain('DllImportSearchPath.System32')
+    expect(cabinetSource).toContain('public IntPtr NameInCabinet')
+    expect(cabinetSource).toContain('Marshal.PtrToStringUni(entry.NameInCabinet)')
+    expect(cabinetSource).toContain('Marshal.Copy(path, 0, IntPtr.Add(param1, targetOffset), MaxPath)')
+    expect(cabinetSource).toContain('targetOffset != IntPtr.Size + 14')
+    expect(cabinetSource).toContain('entry.FileSize != (uint)expectedBytes')
+    expect(cabinetSource).toContain('return FileopSkip')
+    expect(cabinetSource).toContain('++matched != 1')
+    expect(cabinetSource).toContain('Directory.GetFileSystemEntries(directory).Length != 0')
+    expect(cabinetSource).toContain('File.Exists(target) || Directory.Exists(target)')
+    expect(cabinetSource).toContain('notification == NeedNewCabinet')
+    expect(cabinetSource).toContain('return notification == FileInCabinet ? FileopAbort : InvalidData')
+    expect(cabinetSource).toContain('result.Win32Error != 0')
+    expect(cabinetSource).toContain('GC.KeepAlive(callback)')
+    expect(cabinetSource).not.toContain('Marshal.StructureToPtr')
+    expect(cabinetSource).not.toContain(msi)
+    expect(cabinetSource).not.toContain(root)
+    expect(cabinetSource).not.toMatch(/MsiInstallProduct|MsiDoAction|msiexec|AdminExecuteSequence|InstallExecuteSequence|expand\.exe/u)
     const call = commands.run.mock.calls[0]!
     expect(call[0]).toBe(nativePowerShell)
     expect(call[2]).toMatchObject({ windowsHide: true, timeout: 120_000, maxBuffer: 16_384, env: {
@@ -265,7 +291,7 @@ describe('read-only Windows MSI binary extraction', () => {
     expect(await readdir(root)).toEqual(['fixture.msi'])
   })
 
-  it.each(['powershell.exe', 'expand.exe', 'tar.exe'] as const)('classifies missing %s as a tool failure', async tool => {
+  it.each(['powershell.exe', 'tar.exe'] as const)('classifies missing %s as a tool failure', async tool => {
     commands.run.mockRejectedValueOnce(Object.assign(new Error('ENOENT private executable path'), { code: 'ENOENT' }))
     await expect(cpolarWindowsExtractionStep('database', () => runCpolarWindowsTool(tool, []))).rejects.toMatchObject({
       message: 'cpolar_extract_tools_failed', stage: 'tools', nativeCode: 'ENOENT', deadlineMs: 120_000,
@@ -277,12 +303,42 @@ describe('read-only Windows MSI binary extraction', () => {
     commands.run.mockImplementationOnce(async (_file, _args, options) => {
       await writeFile(options.env.DSH_MSI_CABINET, Buffer.alloc(36))
       return { stdout: JSON.stringify({ Member: member, Bytes: 4, CabinetBytes: 36 }), stderr: '' }
-    }).mockImplementationOnce(async (_file, args) => {
-      await writeFile(join(args[2], member), 'wrong size')
-      await writeFile(join(args[2], 'unexpected.exe'), 'extra')
-      return { stdout: '', stderr: '' }
+    }).mockImplementationOnce(async (_file, _args, options) => {
+      await writeFile(join(options.env.DSH_CAB_DESTINATION, member), 'wrong size')
+      await writeFile(join(options.env.DSH_CAB_DESTINATION, 'unexpected.exe'), 'extra')
+      return { stdout: 'DSH_MSI_CABINET_READY', stderr: '' }
     })
     await expect(extractWindowsMsiBinary(msi, root, 'cpolar.exe', 4)).rejects.toMatchObject({ stage: 'file' })
+    expect(await readdir(root)).not.toContain('cpolar.exe')
+  })
+
+  it.each(['', 'DSH_MSI_CABINET_FAILED', 'DSH_MSI_CABINET_READY\nextra'])('rejects incomplete cabinet reader output %j', async stdout => {
+    const { root, msi } = await fixture()
+    commands.run.mockImplementationOnce(async (_file, _args, options) => {
+      await writeFile(options.env.DSH_MSI_CABINET, Buffer.alloc(36))
+      return { stdout: JSON.stringify({ Member: member, Bytes: 4, CabinetBytes: 36 }), stderr: '' }
+    }).mockResolvedValueOnce({ stdout, stderr: '' })
+    await expect(extractWindowsMsiBinary(msi, root, 'cpolar.exe', 4)).rejects.toMatchObject({ stage: 'cabinet' })
+    expect(commands.run).toHaveBeenCalledTimes(2)
+    expect(await readdir(join(root, 'cabinet'))).toEqual([])
+    expect(await readdir(root)).not.toContain('cpolar.exe')
+  })
+
+  it('redacts a cabinet-reader timeout without promoting partial output or falling back', async () => {
+    const { root, msi } = await fixture()
+    const secret = 'private cabinet path and token'
+    commands.run.mockImplementationOnce(async (_file, _args, options) => {
+      await writeFile(options.env.DSH_MSI_CABINET, Buffer.alloc(36))
+      return { stdout: JSON.stringify({ Member: member, Bytes: 4, CabinetBytes: 36 }), stderr: '' }
+    }).mockRejectedValueOnce(Object.assign(new Error(secret), { code: null, killed: true, signal: 'SIGTERM', stderr: secret }))
+    try {
+      await extractWindowsMsiBinary(msi, root, 'cpolar.exe', 4)
+      throw new Error('fixture must reject')
+    } catch (error) {
+      expect(error).toMatchObject({ stage: 'cabinet', killed: true, signal: 'SIGTERM', deadlineMs: 120_000 })
+      expect(inspect(error)).not.toContain(secret)
+    }
+    expect(commands.run.mock.calls.map(call => call[0])).toEqual([nativePowerShell, nativePowerShell])
     expect(await readdir(root)).not.toContain('cpolar.exe')
   })
 
@@ -313,4 +369,34 @@ describe('read-only Windows MSI binary extraction', () => {
     await expect(extractWindowsMsiBinary(msi, root, 'cpolar.exe', 4)).rejects.toMatchObject({ nativeCode: 'INPUT_INVALID' })
     expect(commands.run).not.toHaveBeenCalled()
   })
+})
+
+const officialMsi = process.env.DSH_CPOLAR_TEST_MSI
+
+// These controls execute the fixed native callback, but never start MSI actions or the binary.
+describe.skipIf(process.platform !== 'win32' || officialMsi === undefined)('native Unicode cabinet rejection controls', () => {
+  it.each(['missing-member', 'wrong-size', 'occupied-directory'] as const)('rejects %s without publishing executable data', async fault => {
+    if (officialMsi === undefined) throw new Error('MSI fixture was not supplied')
+    const { root } = await fixture()
+    const actual = await vi.importActual<typeof import('../src/exec-file.js')>('../src/exec-file.js')
+    commands.run.mockImplementation(async (tool, args, options) => {
+      if (options.env?.DSH_CAB_SOURCE !== undefined) {
+        const env = { ...options.env }
+        if (fault === 'missing-member') env.DSH_CAB_MEMBER = 'intentionally_absent_member'
+        if (fault === 'wrong-size') env.DSH_CAB_BYTES = String(Number(env.DSH_CAB_BYTES) + 1)
+        if (fault === 'occupied-directory') await writeFile(join(env.DSH_CAB_DESTINATION, env.DSH_CAB_MEMBER), 'keep this owned file', { flag: 'wx' })
+        return actual.execFileText(tool, args, { ...options, env })
+      }
+      return actual.execFileText(tool, args, options)
+    })
+    await expect(extractWindowsMsiBinary(officialMsi, root, CPOLAR_COMPONENT_RELEASE.executableName,
+      CPOLAR_COMPONENT_RELEASE.executableBytes)).rejects.toMatchObject({ stage: 'cabinet' })
+    expect(commands.run.mock.calls.map(call => call[0])).toEqual([nativePowerShell, nativePowerShell])
+    expect(await readdir(root)).not.toContain('cpolar.exe')
+    const files = await readdir(join(root, 'cabinet'))
+    if (fault === 'occupied-directory') {
+      expect(files).toHaveLength(1)
+      expect(await readFile(join(root, 'cabinet', files[0]!), 'utf8')).toBe('keep this owned file')
+    } else expect(files).toEqual([])
+  }, 120_000)
 })

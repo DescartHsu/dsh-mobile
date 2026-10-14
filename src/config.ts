@@ -87,10 +87,8 @@ export interface PluginConfig {
   /**
    * Reserved cpolar subdomain passed through as `cpolar http -subdomain`.
    *
-   * cpolar allocates a random public hostname unless the account has reserved one.
-   * A reserved name is a paid cpolar feature and keeps the tunnel address stable
-   * across restarts, so an address saved by a browser or the App stays valid.
-   * Leave unset to keep the provider-assigned address.
+   * A compatible account reservation and region are required. Unset or blank values
+   * keep provider-selected allocation; credentials may still expire or be revoked.
    */
   cpolarSubdomain?: string
   /** cpolar region for `-region`; use the region chosen when reserving the subdomain. */

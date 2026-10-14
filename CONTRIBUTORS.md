@@ -4,6 +4,12 @@ GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/co
 
 GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-14. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
+## 开发中的代码贡献 / Code contributions in development
+
+[@GavinQiEr](https://github.com/GavinQiEr) 在 [#207](https://github.com/saya-ch/dsh-mobile/issues/207) 提出 cpolar 固定子域名支持，并在 [#208](https://github.com/saya-ch/dsh-mobile/pull/208) 提供配置、启动参数和文档实现。本地整合保留原作者提交 [`8dd7574`](https://github.com/saya-ch/dsh-mobile/commit/8dd75749d3823aecafdb6f5d9faccf674577e7b1)，并追加维护者修正；尚未发布。
+
+[@GavinQiEr](https://github.com/GavinQiEr) requested reserved cpolar subdomains in [#207](https://github.com/saya-ch/dsh-mobile/issues/207) and implemented the configuration, process arguments and guides in [#208](https://github.com/saya-ch/dsh-mobile/pull/208). The local integration retains author commit [`8dd7574`](https://github.com/saya-ch/dsh-mobile/commit/8dd75749d3823aecafdb6f5d9faccf674577e7b1) alongside maintainer corrections; it is not yet released.
+
 ## 0.6.4 代码贡献 / Code contributions in 0.6.4
 
 [@abworks-dev](https://github.com/abworks-dev) 的 [#200](https://github.com/saya-ch/dsh-mobile/pull/200) 提供窄屏输入栏包装层与按钮点击区域的尺寸修正及回归测试，代码已随 0.6.4 发布；随后以合并提交 [`71754e5`](https://github.com/saya-ch/dsh-mobile/commit/71754e5191d3e9eadfedad16982e144491272f26) 保留原作者提交 [`03604ae`](https://github.com/saya-ch/dsh-mobile/commit/03604ae7623ceb42090ff4c4ed0e84d4aff7144a)。这次历史补全不改变已发布的功能或标签。

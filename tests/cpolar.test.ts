@@ -134,6 +134,7 @@ describe('cpolar log protocol', () => {
     expect(parseCpolarOrigin('time="now" level=info msg="Tunnel established at https://example.r8.cpolar.cn"'))
       .toBe('https://example.r8.cpolar.cn')
     expect(parseCpolarOrigin('Tunnel established at https://example.cpolar.io')).toBe('https://example.cpolar.io')
+    expect(parseCpolarOrigin('Tunnel established at https://reserved.vip.cpolar.cn')).toBe('https://reserved.vip.cpolar.cn')
   })
 
   it('rejects lookalike, credentialed, and non-root origins', () => {
@@ -171,7 +172,7 @@ describe('cpolar provider lifecycle', () => {
       .toBeLessThan(explicit.args().indexOf('-region=cn_vip'))
   })
 
-  it('rejects a reserved subdomain cpolar could not accept as a DNS label', () => {
+  it('rejects malformed or oversized reserved-name requests before spawning', () => {
     const executable = join(tmpdir(), 'dsh-mobile-cpolar-validation', 'cpolar.exe')
     const configFile = join(tmpdir(), 'dsh-mobile-cpolar-validation', 'cpolar.yml')
     const build = (subdomain: string): CpolarController => new CpolarController({
@@ -185,7 +186,7 @@ describe('cpolar provider lifecycle', () => {
     for (const invalid of ['-leading', 'with space', 'sla/sh', 'a'.repeat(64)]) {
       expect(() => build(invalid)).toThrow('cpolar subdomain is invalid')
     }
-    // Separators inside the label and the 63-character boundary stay valid.
+    // Local request validation does not guarantee the provider accepts a reservation.
     expect(() => build('reserved-name')).not.toThrow()
     expect(() => build('a.b_c-d')).not.toThrow()
     expect(() => build('a'.repeat(63))).not.toThrow()

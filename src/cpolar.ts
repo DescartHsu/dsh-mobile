@@ -9,9 +9,7 @@ import { settleRemoteResources, terminateRemoteProcess, type RemoteProviderContr
 const MAX_LOG_BUFFER_BYTES = 64 * 1024
 const START_TIMEOUT_MS = 45_000
 const CPOLAR_HOST_SUFFIXES = Object.freeze(['.cpolar.cn', '.cpolar.io', '.cpolar.top', '.cpolar.com'])
-// A DNS label cpolar can accept as a reserved subdomain: no leading separator, and
-// at most 63 characters. The server still owns reservation, so an unheld name is
-// answered with its own error rather than silently redirecting the tunnel.
+// Bound the requested name, not the provider's reservation rules or HTTPS origin.
 const CPOLAR_SUBDOMAIN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/u
 
 /** Product-facing states for the optional cpolar remote transport. */
@@ -33,11 +31,11 @@ export interface CpolarControllerOptions {
   /**
    * Reserved subdomain requested from the cpolar server (`-subdomain`).
    *
-   * cpolar answers with a random hostname when this is unset. A reserved name is a
-   * paid cpolar feature and keeps the public origin stable, so an address already
-   * saved by a browser or the App keeps resolving to this computer.
+   * Omitted or blank values leave name allocation to cpolar. A reservation requires
+   * a compatible account and region; only the provider-reported HTTPS origin is used.
    */
   readonly subdomain?: string
+  /** Optional provider region; blank values leave routing to cpolar. */
   readonly region?: string
   readonly createGateway: (origin: string, listenPort: number) => Promise<MobileAccessGateway>
   readonly onStatus?: (status: CpolarStatus) => void
@@ -140,11 +138,19 @@ export class CpolarController implements RemoteProviderController {
     if (!isAbsolute(options.executable) || !isAbsolute(options.configFile)) {
       throw new Error('cpolar paths must be absolute')
     }
-    if (options.region !== undefined && !/^[a-z][a-z0-9_]{0,31}$/u.test(options.region)) {
+    const { subdomain: rawSubdomain, region: rawRegion, ...resources } = options
+    const subdomain = rawSubdomain?.trim() || undefined
+    const region = rawRegion?.trim() || undefined
+    if (region !== undefined && !/^[a-z][a-z0-9_]{0,31}$/u.test(region)) {
       throw new Error('cpolar region is invalid')
     }
-    if (options.subdomain !== undefined && !CPOLAR_SUBDOMAIN_PATTERN.test(options.subdomain)) {
+    if (subdomain !== undefined && !CPOLAR_SUBDOMAIN_PATTERN.test(subdomain)) {
       throw new Error('cpolar subdomain is invalid')
+    }
+    this.options = {
+      ...resources,
+      ...(subdomain === undefined ? {} : { subdomain }),
+      ...(region === undefined ? {} : { region }),
     }
   }
 

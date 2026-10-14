@@ -25,13 +25,13 @@
   <a href="#安全">安全</a> ·
   <a href="#兼容性">兼容性</a> ·
   <a href="#贡献者">贡献者</a> ·
-  <a href="CHANGELOG.md">更新记录</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.8">更新记录</a> ·
   <a href="README.en.md">English</a>
 </p>
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.7**。支持 cpolar 预留子域名配置，改善窄屏侧栏与浮层交互，并补全移动定制的入口识别、失败提示和恢复处理。[更新记录](CHANGELOG.md) · [版本下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.7)。
+> **当前正式版本：0.6.8**。修复不同电脑因状态路径相同而在 App 中相互覆盖的问题，保留正常使用的旧配对，并补充远程通道选型参考。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.8) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
@@ -152,14 +152,16 @@ dsh plugin --profile web add dshmarket
 
 页面能打开但一直“重连中”，应先区分 WebSocket 升级失败、慢速数据同步和心跳超时，操作见[慢链路与反复重连指南](docs/SLOW_CONNECTIONS.md)。0.5.4 还提供按确切路径启用的 WebSocket 压缩，默认关闭；长会话或计量网络可按指南尝试，并对比实际传输量。
 
-| 连接方式 | 需要准备 | 地址特点与注意事项 |
-| --- | --- | --- |
-| cpolar | cpolar 账号与 Authtoken | 国内网络可优先尝试；免费临时地址可能变化 |
-| cloudflared 快速隧道 | 无需账号或域名 | 临时随机地址；不支持 SSE，[即时通知存在限制](docs/CLOUDFLARE_TUNNEL.md#快速隧道的功能限制) |
-| cloudflared 命名隧道 | Cloudflare 账号与域名 | 固定域名；[配置指南](docs/CLOUDFLARE_TUNNEL.md) |
-| Tailscale Funnel | Tailscale 登录与 Funnel 授权 | 中国大陆网络可能不稳定 |
-| 自建 FRP | 已有 VPS，域名或真实公网 IPv4 | 需管理服务器；[部署](docs/SELF_HOSTED_FRP.md)或[接入既有 frps](docs/ATTACH_EXISTING_FRPS.md) |
-| 自有反向代理 | 已有公开 HTTPS 代理 | 插件只提供私有认证后端；[配置指南](docs/SELF_HOSTED_ORIGIN.md) |
+下表的使用参考来自维护者在中国大陆自用网络的长期体验，不是普适测评；实际表现受运营商、网络和套餐影响，请在自己的手机网络验证。
+
+| 连接方式 | 需要准备 | 地址特点与注意事项 | 维护者使用参考 |
+| --- | --- | --- | --- |
+| cpolar | cpolar 账号与 Authtoken | 免费临时地址可能变化 | 免费方案限速明显，日常加载与同步体验较差 |
+| cloudflared 快速隧道 | 无需账号或域名 | 临时随机地址；不支持 SSE，[即时通知存在限制](docs/CLOUDFLARE_TUNNEL.md#快速隧道的功能限制)；[官方仅定位为开发测试用途](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/) | 长期使用中经常断连，原因尚未确认；只作临时或测试选择 |
+| cloudflared 命名隧道 | Cloudflare 账号与域名 | 固定域名；[配置指南](docs/CLOUDFLARE_TUNNEL.md) | 已长期使用的通道中最稳定；有账号和域名可优先尝试 |
+| Tailscale Funnel | Tailscale 登录与 Funnel 授权 | 实际可用性取决于网络 | 自用网络常需代理辅助，仍可能连接失败；并非所有用户都需要代理 |
+| 自建 FRP | 已有 VPS，域名或真实公网 IPv4 | 需管理服务器；[部署](docs/SELF_HOSTED_FRP.md)或[接入既有 frps](docs/ATTACH_EXISTING_FRPS.md) | 部署与资源更可控，长期稳定性取决于 VPS 线路、配置与运维 |
+| 自有反向代理 | 已有公开 HTTPS 代理 | 插件只提供私有认证后端；[配置指南](docs/SELF_HOSTED_ORIGIN.md) | 可沿用自己的代理设施，稳定性取决于代理、线路与运维 |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/remote-access.png" width="82%" alt="DSH Mobile 远程访问与通道选择">
@@ -188,7 +190,7 @@ dsh plugin --profile web add dshmarket
 
 > **远程通知说明**：浏览器的 `Notification` 权限按 Origin 分别授权，网页系统通知只显示在运行该网页的设备上。Android App 的任务提醒是独立的 0.4.0 功能，需要在 App 内 DSH 的 **设置 → 通用设置** 中主动开启，且依赖 WebView 页面仍存活；它不是通用的后台推送。需要可靠的后台推送时，请使用你已配置的服务端 webhook 或机器人通道。
 
-Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。其运行组件把公开监听生命周期绑定到父进程和受限控制通道；父进程退出、控制通道关闭或显式停止时会结束当前代次并清理资源。cpolar 更适合国内网络；自建 FRP 适合已有 VPS、希望避开公共服务带宽限制的用户。cloudflared 有两种模式：快速隧道不需要账号或登录，但地址随机、每次重连都会变化，[官方定位为测试用途](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)且无可用性保证，因此只适合临时或验证场景；命名隧道使用 Cloudflare 账号令牌，能保留重启后不变的固定公网域名。中国大陆 VPS 上的未备案域名可能被云厂商拦截，此时可使用公网 IPv4 模式。插件会校验按需下载的固定版本组件；本机托管的配置与程序保存在 `$DSH_HOME/mobile-access/`，可在面板中清理。VPS 侧的文件须按自建连接指南单独清理。
+Funnel 的运行组件把公开监听生命周期绑定到父进程和受限控制通道；父进程退出、控制通道关闭或显式停止时会结束当前代次并清理资源。中国大陆 VPS 上的未备案域名可能被云厂商拦截，此时可使用公网 IPv4 模式。插件会校验按需下载的固定版本组件；本机托管的配置与程序保存在 `$DSH_HOME/mobile-access/`，可在面板中清理。VPS 侧的文件须按自建连接指南单独清理。
 
 自建 FRP 的托管部署使用指向 DSH 回环网关的 HTTP vhost：VPS 上的明文 vhost 只允许回环访问，由 Caddy 提供公网 HTTPS。0.4.6 新增“接入既有 frps”，不会安装或改动服务器；公开 CA 档仍需受限 HTTP vhost 与 Caddy，自签档则用 frps TCP 透传至电脑端 HTTPS 网关，须由 0.4.6 Android App 在配对时固定 CA。自签档目前面向公网 IPv4，旧版 App 不支持；两档都不开放任意 FRP 配置。frps 的 `proxyBindAddr` 是全局代理监听设置，不能只为新增 TCP 入口调整而忽略已有明文 vhost。[接入指南](docs/ATTACH_EXISTING_FRPS.md)。
 
@@ -238,6 +240,8 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
 ## 设备管理
 
 Android App 在“已配对设备”中统一显示电脑及其局域网／远程连接记录。两种方式的授权彼此独立，同一台电脑可能有两条记录。升级会迁移旧凭据，无需重新配对；重新验证变化的地址后，相同身份的记录会合并并保留名称。自签 FRP 使用独立 CA 指纹，可能另成一条记录。Token 和固定的 CA 由 Android Keystore 加密；配对二维码含短期配对信息，不含长期设备 Token 或 CA 私钥。
+
+未手动指定标识时，公开证书远程入口的新配对使用电脑保存的随机标识，避免相同安装路径让两台电脑的记录互相覆盖。已有连接无需为此重新配对，也不需要更新 Android App；局域网和自签 FRP 仍按各自的 CA 区分。更新后正常退出并重启 DSH，降级前请先阅读[状态备份注意事项](SECURITY.md#installation-identity-and-device-state-upgrades)。
 
 每条记录显示自定义名称、连接方式、Origin、定期更新的可达状态和最近连接时间。绿色状态点表示“可达”，灰色状态点表示“检测中”“暂不可达”“配对已过期”或“电脑端已移除”；可达性检查直接验证 DSH Gateway，不依赖 ICMP，也不会把暂时断网误判成电脑端撤销。
 
@@ -362,6 +366,7 @@ flowchart LR
 
 ## 故障排查
 
+- **配对第二台电脑后，第一台被覆盖**：见 [#213](https://github.com/saya-ch/dsh-mobile/issues/213) 和[修复版本](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.8)。使用修复版插件并正常重启 DSH 后，分别扫描两台电脑当前的二维码。已经被覆盖的 App 本地凭据不能自动找回；仍可连接的旧条目无需重配。若同一地址出现新旧两条记录，确认新条目正常后，只删除 App 中多余的本地条目，不要重置远程访问。
 - **配对成功后仍反复提示重新配对或续期 `401`**：同一域名上的其他服务或旧 Cookie 可能干扰认证。更新至最新插件及 App，再从当前移动访问入口重试；浏览器重新扫描当前二维码可更新本插件的认证 Cookie，无需清除所有网站数据。若仍失败，查看失败请求与脱敏日志，其他认证或代理错误也可能返回 `401`。
 - **内测声明无法确认或设置无法保存**：先在电脑端直接打开 DSH 的本机地址，查看终端日志或浏览器 Network 中失败的设置请求。连接诊断不检查设置写入；保留现有配置及 `settings.yaml.imported`，按具体错误排查。相同界面提示可能有不同原因，见 [DSH #860](https://github.com/deepseek-ai/deepseek-harness/discussions/860)。
 - **设置请求返回 HTTP `403`**：先检查 DSH 的 Host/Origin 信任校验及代理响应。检查 iframe、代理和浏览器扩展是否改变请求来源，使用本机直接访问验证；保持信任检查启用。

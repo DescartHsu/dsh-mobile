@@ -1,6 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import type { WebRoute, WebServer } from '@deepseek-ai/dsh-host-webserver'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
+import { createHash } from 'node:crypto'
 import { createServer, request as requestHttp, type IncomingMessage } from 'node:http'
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import type { AddressInfo } from 'node:net'
@@ -162,6 +163,78 @@ async function pairOriginBackend(port: number, token: string): Promise<number> {
     request.once('error', reject)
     request.end(body)
   })
+}
+
+/** Sends protocol requests only to the owned loopback listener behind the selected Origin. */
+async function nativeGatewayRequest(
+  port: number,
+  origin: string,
+  path: string,
+  data?: Record<string, string>,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const body = data === undefined ? undefined : JSON.stringify(data)
+  return new Promise((resolve, reject) => {
+    const request = requestHttp({ host: '127.0.0.1', port, path,
+      method: body === undefined ? 'GET' : 'POST', agent: false,
+      headers: { host: new URL(origin).host,
+        ...(body === undefined ? {} : { origin, 'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }),
+      },
+    }, response => {
+      const chunks: Buffer[] = []
+      response.on('data', chunk => chunks.push(Buffer.from(chunk)))
+      response.once('error', reject)
+      response.once('end', () => {
+        try {
+          const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('Native response must be an object')
+          resolve({ status: response.statusCode ?? 0, body: parsed as Record<string, unknown> })
+        } catch (error) { reject(error) }
+      })
+    })
+    request.setTimeout(5000, () => { request.destroy(new Error('Owned native request timed out')) })
+    request.once('error', reject)
+    request.end(body)
+  })
+}
+
+function responseString(body: Record<string, unknown>, field: string): string {
+  const value = body[field]
+  if (typeof value !== 'string') throw new Error(`Expected response field ${field}`)
+  return value
+}
+
+async function nativePairFromRoute(
+  route: WebRoute,
+  mode: 'lan' | 'remote',
+  port: number,
+  origin: string,
+  instanceId: string,
+): Promise<Record<string, unknown>> {
+  const discovery = await nativeGatewayRequest(port, origin, '/mobile-access/discovery')
+  expect(discovery.status).toBe(200)
+  expect(discovery.body.instanceId).toBe(instanceId)
+  const pairing = await invoke(route, 'POST', `/api/mobile-access/${mode}/pairing/open`, '{}')
+  expect(pairing.status).toBe(201)
+  const opened = JSON.parse(pairing.body) as Record<string, unknown>
+  const token = responseString(opened, 'token')
+  expect(opened.appKey).toBe(`dsh1.${instanceId}.${token}`)
+  const paired = await nativeGatewayRequest(port, origin, '/mobile-access/auth/native-pair', { token, label: 'Owned composition phone' })
+  expect(paired.status).toBe(201)
+  expect(Object.keys(paired.body).sort()).toEqual(['csrfToken', 'deviceExpiresAt', 'deviceId', 'deviceToken', 'instanceId', 'sessionExpiresAt', 'sessionToken'])
+  expect(paired.body.instanceId).toBe(instanceId)
+  return paired.body
+}
+
+async function checkNativeCredential(port: number, origin: string, token: string, instanceId: string, deviceId: string): Promise<void> {
+  const probe = await nativeGatewayRequest(port, origin, '/mobile-access/auth/native-probe', { deviceToken: token })
+  expect(probe.status).toBe(200)
+  expect(Object.keys(probe.body).sort()).toEqual(['deviceExpiresAt', 'deviceId', 'instanceId'])
+  expect(probe.body).toMatchObject({ instanceId, deviceId })
+  const renewed = await nativeGatewayRequest(port, origin, '/mobile-access/auth/native-renew', { deviceToken: token })
+  expect(renewed.status).toBe(200)
+  expect(Object.keys(renewed.body).sort()).toEqual(['csrfToken', 'deviceId', 'instanceId', 'sessionExpiresAt', 'sessionToken'])
+  expect(renewed.body).toMatchObject({ instanceId, deviceId })
 }
 
 /**
@@ -552,6 +625,77 @@ describe('stock DSH lifecycle', () => {
     const stopped = await invoke(mounted.route, 'POST', '/api/mobile-access/control', JSON.stringify({ running: false }))
     expect(stopped.status).toBe(200)
     expect(JSON.parse(stopped.body)).toEqual({ running: false })
+  })
+
+  it('advertises and binds the persisted installation identity through the default fixed gateway', async () => {
+    const mounted = await mount(true)
+    const instanceId = (await readFile(join(mounted.directory, 'installation-id'), 'utf8')).trim()
+    expect(instanceId).toMatch(/^[a-f0-9]{64}$/u)
+    const status = await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control')
+    expect(status.status).toBe(200)
+    const origin = responseString(JSON.parse(status.body) as Record<string, unknown>, 'origin')
+    const port = Number(new URL(origin).port)
+    const paired = await nativePairFromRoute(mounted.route, 'lan', port, origin, instanceId)
+    await checkNativeCredential(port, origin, responseString(paired, 'deviceToken'), instanceId, responseString(paired, 'deviceId'))
+    const state = JSON.parse(await readFile(join(mounted.directory, 'devices.json'), 'utf8')) as { version: number; devices: { nativeInstanceId?: string }[] }
+    expect(state.version).toBe(2)
+    expect(state.devices.map(device => device.nativeInstanceId)).toEqual([instanceId])
+  })
+
+  it('preserves legacy native credentials beside installation-bound own-Origin pairings after plugin restart', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-plugin-legacy-identity-'))
+    temporaryDirectories.push(directory)
+    const stateFile = join(directory, 'devices.json')
+    const legacyId = parseGatewayConfig({ stateFile, listenPort: 0, tls: { mode: 'disabled' } }).instanceId
+    const token = 'L'.repeat(43)
+    const deviceId = 'd'.repeat(32)
+    const now = Date.now()
+    await mkdir(join(directory, 'remote'), { recursive: true })
+    await writeFile(join(directory, 'remote', 'devices.json'), JSON.stringify({ version: 1, devices: [{
+      id: deviceId, label: 'Legacy composition phone', tokenDigest: createHash('sha256').update(token).digest('hex'),
+      createdAt: now - 1000, lastSeenAt: now - 1000, expiresAt: now + 3_600_000,
+    }] }), { mode: 0o600 })
+    const mounted = await mount(false, 3080, { stateFile })
+    const instanceId = (await readFile(join(directory, 'installation-id'), 'utf8')).trim()
+    expect(instanceId).not.toBe(legacyId)
+    const selected = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/provider', '{"provider":"origin"}')
+    expect(selected.status).toBe(200)
+    const first = await startOriginOnFreePort(mounted.route)
+    expect(first.configured.status).toBe(200)
+    expect(JSON.parse(first.started.body)).toMatchObject({ provider: 'origin', running: true, state: 'ready' })
+    await checkNativeCredential(first.port, first.form.publicOrigin, token, legacyId, deviceId)
+    const paired = await nativePairFromRoute(mounted.route, 'remote', first.port, first.form.publicOrigin, instanceId)
+    const freshToken = responseString(paired, 'deviceToken')
+    const freshDevice = responseString(paired, 'deviceId')
+    await checkNativeCredential(first.port, first.form.publicOrigin, freshToken, instanceId, freshDevice)
+    const stopped = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/control', '{"running":false}')
+    expect(JSON.parse(stopped.body)).toMatchObject({ running: false, state: 'off' })
+    await mounted.context.fiber.dispose()
+    contexts.splice(contexts.indexOf(mounted.context), 1)
+    const restarted = await mount(false, 3080, { stateFile })
+    expect((await readFile(join(directory, 'installation-id'), 'utf8')).trim()).toBe(instanceId)
+    const second = await startOriginOnFreePort(restarted.route)
+    expect(JSON.parse(second.started.body)).toMatchObject({ provider: 'origin', running: true, state: 'ready' })
+    await checkNativeCredential(second.port, second.form.publicOrigin, token, legacyId, deviceId)
+    await checkNativeCredential(second.port, second.form.publicOrigin, freshToken, instanceId, freshDevice)
+  })
+
+  it('retains the explicit operator identity for fixed and own-Origin native entries', async () => {
+    const instanceId = 'a'.repeat(64)
+    const mounted = await mount(true, 3080, { instanceId })
+    expect((await readFile(join(mounted.directory, 'installation-id'), 'utf8')).trim()).not.toBe(instanceId)
+    const status = await invoke(mounted.route, 'GET', '/api/mobile-access/lan/control')
+    const origin = responseString(JSON.parse(status.body) as Record<string, unknown>, 'origin')
+    const paired = await nativePairFromRoute(mounted.route, 'lan', Number(new URL(origin).port), origin, instanceId)
+    await checkNativeCredential(Number(new URL(origin).port), origin, responseString(paired, 'deviceToken'), instanceId, responseString(paired, 'deviceId'))
+    const stopped = await invoke(mounted.route, 'POST', '/api/mobile-access/lan/control', '{"running":false}')
+    expect(JSON.parse(stopped.body)).toMatchObject({ running: false })
+    const selected = await invoke(mounted.route, 'POST', '/api/mobile-access/remote/provider', '{"provider":"origin"}')
+    expect(selected.status).toBe(200)
+    const remote = await startOriginOnFreePort(mounted.route)
+    expect(JSON.parse(remote.started.body)).toMatchObject({ provider: 'origin', running: true, state: 'ready' })
+    const remotePair = await nativePairFromRoute(mounted.route, 'remote', remote.port, remote.form.publicOrigin, instanceId)
+    await checkNativeCredential(remote.port, remote.form.publicOrigin, responseString(remotePair, 'deviceToken'), instanceId, responseString(remotePair, 'deviceId'))
   })
 
   it('switches remote providers without changing the LAN runtime', async () => {

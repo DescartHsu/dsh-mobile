@@ -1197,6 +1197,8 @@ export class MobileAccessGateway {
     this.listenerTlsEnabled = config.tls.mode === 'provided'
     this.tlsEnabled = config.publicTls
     this.access = new AccessController(store, {
+      pairingInstanceId: config.instanceId,
+      ...(config.legacyInstanceId === undefined ? {} : { legacyInstanceId: config.legacyInstanceId }),
       pairingTtlMs: config.pairingTtlMs,
       deviceTtlMs: config.deviceTtlMs,
       sessionTtlMs: config.sessionTtlMs,
@@ -1626,6 +1628,13 @@ export class MobileAccessGateway {
     }, this.tlsEnabled)
   }
 
+  /** CA-backed entries retain their pin; public entries project the authenticated credential's identity. */
+  private nativeResponseInstanceId(result: { readonly nativeInstanceId?: string }): string {
+    return this.config.pairingCaFile === undefined
+      ? result.nativeInstanceId ?? this.config.instanceId
+      : this.config.instanceId
+  }
+
   private async handleNativePair(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const body = await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
     if (typeof body.token !== 'string' || (body.label !== undefined && typeof body.label !== 'string')) {
@@ -1637,7 +1646,7 @@ export class MobileAccessGateway {
       body.label as string | undefined,
     )
     sendJson(response, 201, {
-      instanceId: this.config.instanceId,
+      instanceId: this.nativeResponseInstanceId(result),
       deviceId: result.deviceId,
       deviceToken: result.deviceToken,
       deviceExpiresAt: result.deviceExpiresAt,
@@ -1655,7 +1664,7 @@ export class MobileAccessGateway {
     if (typeof body.deviceToken !== 'string') throw new HttpError(400, 'bad_request')
     const result = await this.access.renew(body.deviceToken)
     sendJson(response, 200, {
-      instanceId: this.config.instanceId,
+      instanceId: this.nativeResponseInstanceId(result),
       deviceId: result.deviceId,
       sessionToken: result.sessionToken,
       csrfToken: result.csrfToken,
@@ -1671,7 +1680,7 @@ export class MobileAccessGateway {
     if (typeof body.deviceToken !== 'string') throw new HttpError(400, 'bad_request')
     const result = await this.access.probe(body.deviceToken)
     sendJson(response, 200, {
-      instanceId: this.config.instanceId,
+      instanceId: this.nativeResponseInstanceId(result),
       deviceId: result.deviceId,
       deviceExpiresAt: result.deviceExpiresAt,
     }, this.tlsEnabled)

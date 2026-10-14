@@ -25,13 +25,13 @@
   <a href="#security">Security</a> ·
   <a href="#compatibility">Compatibility</a> ·
   <a href="#contributors">Contributors</a> ·
-  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.8">Release notes</a> ·
   <a href="README.md">简体中文</a>
 </p>
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.7**. Add reserved cpolar subdomain configuration, improve narrow-screen sidebar and overlay interaction, and clarify mobile customization ownership, failures and recovery. [Changelog](CHANGELOG.md) · [Release downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.7).
+> **Current stable release: 0.6.8**. Fix different computers with matching state paths overwriting one another in the App, preserve working old pairings, and add remote-channel selection notes. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.8) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
@@ -152,14 +152,16 @@ Remote providers may impose bandwidth and connection limits: the [cpolar Free pl
 
 If the page opens but stays on “Reconnecting,” distinguish WebSocket upgrade failures, slow synchronization, and heartbeat deadlines using the [slow-link and reconnection guide](docs/SLOW_CONNECTIONS.en.md). Version 0.5.4 also offers opt-in WebSocket compression per exact path, disabled by default; for long Sessions or metered links, follow the guide and compare actual transfer volume.
 
-| Channel | Prerequisites | Address and limitation |
-| --- | --- | --- |
-| cpolar | Account and Authtoken | An option to try on mainland networks; free temporary URLs may change |
-| cloudflared quick tunnel | No account or domain | Random temporary URL; no SSE, with [notification limits](docs/CLOUDFLARE_TUNNEL.en.md#quick-tunnel-feature-limits) |
-| cloudflared named tunnel | Cloudflare account and domain | Fixed hostname; [setup guide](docs/CLOUDFLARE_TUNNEL.en.md) |
-| Tailscale Funnel | Sign-in and Funnel authorization | May be unreliable on mainland-China networks |
-| Self-hosted FRP | VPS and domain or real public IPv4 | Server maintenance required; [deploy](docs/SELF_HOSTED_FRP.en.md) or [attach to existing frps](docs/ATTACH_EXISTING_FRPS.en.md) |
-| Own reverse proxy | Existing public HTTPS proxy | The plugin provides only its private authenticated backend; [guide](docs/SELF_HOSTED_ORIGIN.en.md) |
+The usage notes below reflect the maintainer's long-term experience on a personal mainland-China network, not a universal comparison. Performance depends on the carrier, network and plan; verify the route on your own phone's network.
+
+| Channel | Prerequisites | Address and limitation | Maintainer's usage notes |
+| --- | --- | --- | --- |
+| cpolar | Account and Authtoken | Free temporary URLs may change | The free plan's bandwidth limit noticeably slows everyday loading and synchronization |
+| cloudflared quick tunnel | No account or domain | Random temporary URL; no SSE, with [notification limits](docs/CLOUDFLARE_TUNNEL.en.md#quick-tunnel-feature-limits); [officially intended only for development and testing](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/) | Frequent disconnections in long-term use, with the cause still unconfirmed; a temporary or testing choice |
+| cloudflared named tunnel | Cloudflare account and domain | Fixed hostname; [setup guide](docs/CLOUDFLARE_TUNNEL.en.md) | The most stable of the channels used long-term; worth trying first if you have an account and domain |
+| Tailscale Funnel | Sign-in and Funnel authorization | Availability depends on the network | This personal network often needs proxy assistance and may still fail to connect; not every user needs a proxy |
+| Self-hosted FRP | VPS and domain or real public IPv4 | Server maintenance required; [deploy](docs/SELF_HOSTED_FRP.en.md) or [attach to existing frps](docs/ATTACH_EXISTING_FRPS.en.md) | More control over deployment and resources; long-term stability depends on the VPS route, configuration and maintenance |
+| Own reverse proxy | Existing public HTTPS proxy | The plugin provides only its private authenticated backend; [guide](docs/SELF_HOSTED_ORIGIN.en.md) | Reuses your proxy infrastructure; stability depends on the proxy, network route and maintenance |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/screenshots/remote-access-en.png" width="82%" alt="DSH Mobile remote access and provider selection">
@@ -188,7 +190,7 @@ After selecting the channel in the panel:
 
 > **Remote notifications**: browser `Notification` permission is granted per Origin, and a web-page system toast appears only on the device running that page. Android task reminders are a separate 0.4.0 feature: enable them under DSH **Settings → General** in the app, and keep the WebView page alive; they are not a general background push service. For reliable background delivery, use a server-side webhook or bot channel you have configured.
 
-Tailscale Funnel has broad reach but may be unreliable from mainland China. Its runtime ties the public listener to the parent process and a bounded control channel; parent exit, channel closure, or an explicit stop ends the current generation and cleans up its resources. cpolar is better suited to mainland networks, while self-hosted FRP fits users who already have a VPS and want to avoid public-provider bandwidth quotas. cloudflared runs in two modes: a quick tunnel needs no account or sign-in, but its hostname is random, changes on every reconnect, and is [intended by Cloudflare for testing](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/) without an uptime guarantee, so it suits temporary or verification use rather than a permanent channel; a named tunnel uses a Cloudflare account token and keeps one fixed public hostname across restarts. An unregistered domain on a mainland-China VPS may be intercepted by the cloud provider; public IPv4 mode avoids that dependency. The plugin validates pinned on-demand components; locally managed configuration and binaries live under `$DSH_HOME/mobile-access/` and can be cleaned up from the panel. VPS files require separate cleanup through the self-hosted connection guide.
+The Funnel runtime ties the public listener to the parent process and a bounded control channel; parent exit, channel closure, or an explicit stop ends the current generation and cleans up its resources. An unregistered domain on a mainland-China VPS may be intercepted by the cloud provider; public IPv4 mode avoids that dependency. The plugin validates pinned on-demand components; locally managed configuration and binaries live under `$DSH_HOME/mobile-access/` and can be cleaned up from the panel. VPS files require separate cleanup through the self-hosted connection guide.
 
 Managed self-hosted FRP uses an HTTP vhost to the DSH loopback gateway. Its plaintext VPS listener must be loopback-only, with Caddy providing public HTTPS. Version 0.4.6 adds existing-frps attachment without installing or changing the server: its public-CA mode still needs a restricted HTTP vhost and Caddy, while its self-signed mode forwards raw TCP to a computer-side HTTPS gateway whose CA the 0.4.6 Android app pins during pairing. The self-signed mode currently uses public IPv4 and is unavailable to older apps. Neither mode exposes arbitrary FRP configuration. Because frps `proxyBindAddr` governs proxy listeners globally, do not change it for the new TCP entry without checking existing plaintext vhosts. See the [attachment guide](docs/ATTACH_EXISTING_FRPS.en.md).
 
@@ -238,6 +240,8 @@ The examples above, applied:
 ## Device management
 
 The Android app lists computers and their LAN/remote records under **Paired computers**. The two authorization types remain separate, so one computer can have two rows. Upgrades migrate old credentials without re-pairing; after a changed address is verified, matching identities merge and keep their names. Self-signed FRP uses a separate CA fingerprint and may create another row. Android Keystore encrypts tokens and pinned CAs. A pairing QR code contains temporary pairing information, never a long-lived device token or CA private key.
+
+Unless an identifier is configured manually, new pairings through a public-certificate remote entry use a random identifier saved on the computer, preventing identical installation paths from overwriting another computer's row. Working connections need no re-pairing or Android App update; LAN and self-signed FRP still use their respective CAs. Quit DSH normally and restart after updating; read the [state-backup precautions](SECURITY.md#installation-identity-and-device-state-upgrades) before downgrading.
 
 Each row shows its custom name, transport, Origin, periodically refreshed reachability, and last connection time. A green dot means **Reachable**; a gray dot means **Checking**, **Temporarily unreachable**, **Pairing expired**, or **Removed on computer**. The check validates the DSH Gateway over HTTPS instead of using ICMP, so a temporary network outage is not mistaken for computer-side revocation.
 
@@ -361,6 +365,7 @@ See [SECURITY.md](SECURITY.md).
 
 ## Troubleshooting
 
+- **Pairing a second computer overwrites the first**: see [#213](https://github.com/saya-ch/dsh-mobile/issues/213) and the [fix version](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.8). After installing the fixed plugin and restarting DSH normally, scan each computer's current QR code. An App credential already overwritten cannot be recovered automatically; working old rows need no re-pairing. If the same address has both an old and a new row, confirm the new one works, then delete only the extra local App row. Do not reset remote access.
 - **Pairing succeeds but renewal returns `401` or repeatedly asks to pair again**: other services on the same hostname or stale Cookies may interfere with authentication. Update to the latest plugin and app, then retry through the current Mobile Access entry. In a browser, scanning the current QR code again refreshes this plugin's authentication Cookies without clearing all website data. If it still fails, inspect the failed request and sanitized logs; other authentication or proxy errors can also return `401`.
 - **The testing notice cannot be confirmed or settings cannot be saved**: open DSH directly at its local address on the computer, then inspect the terminal log or the failed settings request in the browser's Network panel. Connection diagnostics do not test settings writes. Keep the existing configuration and `settings.yaml.imported`, and investigate the specific error; the same UI message can have different causes. See [DSH #860](https://github.com/deepseek-ai/deepseek-harness/discussions/860).
 - **A settings request returns HTTP `403`**: first inspect DSH's Host/Origin trust checks and any proxy response. Check whether an iframe, proxy, or browser extension changes the request's origin, and verify direct local access. Keep the trust checks enabled.

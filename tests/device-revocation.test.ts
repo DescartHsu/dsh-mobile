@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -116,11 +116,34 @@ describe('durable device deletion', () => {
     const store = new JsonDeviceStore(file)
     const removed = legacyDevice('a', 'revoked-token', now - 1)
     const kept = legacyDevice('b', 'kept-token')
-    await store.save({ version: 1, devices: [removed, kept] })
+    await writeFile(file, JSON.stringify({ version: 1, devices: [removed, kept] }), { mode: 0o600 })
+    expect(await store.load()).toEqual({ version: 1, devices: [removed, kept] })
     const access = controller(store)
     await access.initialize()
-    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ version: 1, devices: [kept] })
-    expect(await new JsonDeviceStore(file).load()).toEqual({ version: 1, devices: [kept] })
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ version: 2, devices: [kept] })
+    expect(await new JsonDeviceStore(file).load()).toEqual({ version: 2, devices: [kept] })
+  })
+
+  it('preserves a native identity binding through JSON writes and removes it with its credential', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-native-identity-'))
+    directories.push(directory)
+    const file = join(directory, 'devices.json')
+    const bound = { ...legacyDevice('a', 'bound-token'), nativeInstanceId: 'c'.repeat(64) }
+    const legacy = legacyDevice('b', 'legacy-token')
+    const store = new JsonDeviceStore(file)
+    await store.save({ version: 1, devices: [legacy] })
+    expect(await store.load()).toEqual({ version: 2, devices: [legacy] })
+    await store.save({ version: 1, devices: [bound, legacy] })
+    expect(await new JsonDeviceStore(file).load()).toEqual({ version: 2, devices: [bound, legacy] })
+
+    const access = controller(new JsonDeviceStore(file))
+    await access.initialize()
+    expect((await access.renew('bound-token')).nativeInstanceId).toBe(bound.nativeInstanceId)
+    expect((await access.probe('bound-token')).nativeInstanceId).toBe(bound.nativeInstanceId)
+    expect((await store.load()).devices.find(device => device.id === bound.id)?.nativeInstanceId).toBe(bound.nativeInstanceId)
+    await access.revokeDevice(bound.id)
+    expect(await store.load()).toEqual({ version: 2, devices: [legacy] })
+    expect(await readFile(file, 'utf8')).not.toContain(bound.nativeInstanceId)
   })
 
   it('keeps non-revoked records unchanged and rejects a real device-limit overflow before writing', async () => {

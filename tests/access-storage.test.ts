@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { AccessController, AccessError, BoundedRateLimiter } from '../src/access.js'
 import { MemoryDeviceStore, parseDeviceSnapshot, type DeviceSnapshot, type DeviceStore } from '../src/storage.js'
@@ -15,6 +16,20 @@ function controller(store: DeviceStore, now: () => number, overrides: Partial<Co
     now,
     ...overrides,
   })
+}
+
+function legacySnapshot(token: string): DeviceSnapshot {
+  return {
+    version: 1,
+    devices: [{
+      id: 'a'.repeat(32),
+      label: 'Legacy phone',
+      tokenDigest: createHash('sha256').update(token).digest('hex'),
+      createdAt: 1_000,
+      expiresAt: 120_000,
+      lastSeenAt: 1_000,
+    }],
+  }
 }
 
 describe('device and Session state', () => {
@@ -56,6 +71,9 @@ describe('device and Session state', () => {
     expect(durable).not.toContain(opened.token)
     expect(durable).not.toContain(successful.value.deviceToken)
     expect(store.inspect().devices[0]?.tokenDigest).toMatch(/^[a-f\d]{64}$/)
+    expect(successful.value).not.toHaveProperty('nativeInstanceId')
+    expect(store.inspect().devices[0]).not.toHaveProperty('nativeInstanceId')
+    expect(store.inspect().version).toBe(2)
 
     const authorization = access.authorizeSession(successful.value.sessionToken)
     expect(() => access.assertCsrf(authorization, 'wrong')).toThrowError(AccessError)
@@ -65,6 +83,7 @@ describe('device and Session state', () => {
     const reloaded = controller(store, () => current)
     await reloaded.initialize()
     const renewed = await reloaded.renew(successful.value.deviceToken)
+    expect(renewed).not.toHaveProperty('nativeInstanceId')
     expect(reloaded.authorizeSession(renewed.sessionToken).deviceId).toBe(successful.value.deviceId)
   })
 
@@ -219,5 +238,159 @@ describe('device and Session state', () => {
     }
     expect(() => parseDeviceSnapshot({ version: 1, devices: [device, device] })).toThrow(/duplicate/)
     expect(() => parseDeviceSnapshot({ version: 1, devices: [{ ...device, tokenDigest: 'raw-token' }] })).toThrow(/digest/)
+  })
+})
+
+describe('native credential identity', () => {
+  it.each([1, 2] as const)('retains optional bindings and the input snapshot version %s', version => {
+    const device = { ...legacySnapshot('legacy-token').devices[0]!, nativeInstanceId: 'b'.repeat(64) }
+    const parsed = parseDeviceSnapshot({ version, devices: [{ ...device, discarded: 'not persisted' }] })
+    expect(parsed).toEqual({ version, devices: [device] })
+    expect(parseDeviceSnapshot({ version, devices: legacySnapshot('legacy-token').devices }).devices[0])
+      .not.toHaveProperty('nativeInstanceId')
+  })
+
+  it.each([1, 2] as const)('rejects an invalid binding rather than treating version %s as legacy', version => {
+    for (const nativeInstanceId of [null, '', 'a'.repeat(63), 'A'.repeat(64), 3]) {
+      expect(() => parseDeviceSnapshot({
+        version,
+        devices: [{ ...legacySnapshot('legacy-token').devices[0], nativeInstanceId }],
+      })).toThrow('invalid native instance id')
+    }
+    expect(() => parseDeviceSnapshot({ version: 3, devices: [] })).toThrow('unsupported version')
+  })
+
+  it('keeps legacy identities unbound and new identities bound across writes and restart', async () => {
+    const legacyToken = 'legacy-token'
+    const pairingInstanceId = 'b'.repeat(64)
+    const legacyInstanceId = 'c'.repeat(64)
+    const store = new MemoryDeviceStore(legacySnapshot(legacyToken))
+    const access = controller(store, () => 2_000, { pairingInstanceId, legacyInstanceId })
+    await access.initialize()
+    expect(store.inspect().version).toBe(1)
+
+    const legacyRenewed = await access.renew(legacyToken)
+    expect(legacyRenewed.nativeInstanceId).toBe(legacyInstanceId)
+    expect((await access.probe(legacyToken)).nativeInstanceId).toBe(legacyInstanceId)
+    expect(access.authorizeDevice(legacyToken).nativeInstanceId).toBe(legacyInstanceId)
+    expect(store.inspect().version).toBe(2)
+    expect(store.inspect().devices[0]).not.toHaveProperty('nativeInstanceId')
+
+    const opened = await access.openPairing()
+    const paired = await access.pair('source', opened.token)
+    expect(paired.nativeInstanceId).toBe(pairingInstanceId)
+    expect(store.inspect().devices.find(device => device.id === paired.deviceId)?.nativeInstanceId).toBe(pairingInstanceId)
+    expect(access.listDevices().every(device => !('nativeInstanceId' in device))).toBe(true)
+    await access.close()
+
+    const restarted = controller(store, () => 3_000, { pairingInstanceId: 'd'.repeat(64), legacyInstanceId })
+    await restarted.initialize()
+    expect((await restarted.renew(legacyToken)).nativeInstanceId).toBe(legacyInstanceId)
+    expect((await restarted.renew(paired.deviceToken)).nativeInstanceId).toBe(pairingInstanceId)
+    expect((await restarted.probe(paired.deviceToken)).nativeInstanceId).toBe(pairingInstanceId)
+    expect(restarted.authorizeDevice(paired.deviceToken).nativeInstanceId).toBe(pairingInstanceId)
+    expect(store.inspect().devices.find(device => device.id === 'a'.repeat(32))).not.toHaveProperty('nativeInstanceId')
+    await restarted.close()
+  })
+
+  it('falls back to the pairing identity for an unbound credential without a legacy option', async () => {
+    const store = new MemoryDeviceStore(legacySnapshot('legacy-token'))
+    const access = controller(store, () => 2_000, { pairingInstanceId: 'b'.repeat(64) })
+    await access.initialize()
+    expect((await access.renew('legacy-token')).nativeInstanceId).toBe('b'.repeat(64))
+    expect((await access.probe('legacy-token')).nativeInstanceId).toBe('b'.repeat(64))
+    expect(store.inspect().devices[0]).not.toHaveProperty('nativeInstanceId')
+    await access.close()
+  })
+
+  it('omits native identity fields for an unbound credential without either identity option', async () => {
+    const store = new MemoryDeviceStore(legacySnapshot('legacy-token'))
+    const access = controller(store, () => 2_000)
+    await access.initialize()
+    expect(await access.renew('legacy-token')).not.toHaveProperty('nativeInstanceId')
+    expect(await access.probe('legacy-token')).not.toHaveProperty('nativeInstanceId')
+    expect(access.authorizeDevice('legacy-token')).not.toHaveProperty('nativeInstanceId')
+    expect(store.inspect().devices[0]).not.toHaveProperty('nativeInstanceId')
+    await access.close()
+  })
+
+  it('loads legacy memory snapshots unchanged and writes the current format with or without bindings', async () => {
+    const legacy = legacySnapshot('legacy-token')
+    const store = new MemoryDeviceStore(legacy)
+    expect(await store.load()).toEqual(legacy)
+    await store.save(legacy)
+    expect(await store.load()).toEqual({ version: 2, devices: legacy.devices })
+    const bound = { ...legacy.devices[0]!, nativeInstanceId: 'b'.repeat(64) }
+    await store.save({ version: 1, devices: [bound] })
+    expect(await store.load()).toEqual({ version: 2, devices: [bound] })
+  })
+
+  it.each(['unknown', 'revoked', 'expired'] as const)('rejects a %s token before returning an identity or changing state', async mode => {
+    let current = 2_000
+    const store = new MemoryDeviceStore()
+    const access = controller(store, () => current, {
+      pairingInstanceId: 'b'.repeat(64),
+      legacyInstanceId: 'c'.repeat(64),
+      deviceTtlMs: 1_000,
+    })
+    await access.initialize()
+    const opened = await access.openPairing()
+    const paired = await access.pair('source', opened.token)
+    if (mode === 'revoked') await access.revokeDevice(paired.deviceId)
+    if (mode === 'expired') current = paired.deviceExpiresAt
+    const token = mode === 'unknown' ? 'unknown-token' : paired.deviceToken
+    const before = store.inspect()
+    const sessions = access.metrics().sessions
+    const code = mode === 'expired' ? 'device_expired' : 'authentication_failed'
+    await expect(access.renew(token)).rejects.toMatchObject({ status: 401, code })
+    await expect(access.probe(token)).rejects.toMatchObject({ status: 401, code })
+    expect(() => access.authorizeDevice(token)).toThrow(AccessError)
+    expect(store.inspect()).toEqual(before)
+    expect(access.metrics().sessions).toBe(sessions)
+    await access.close()
+  })
+
+  it('does not issue a bound device credential or Session when the pairing write fails', async () => {
+    const backing = new MemoryDeviceStore()
+    const store: DeviceStore = {
+      load: () => backing.load(),
+      async save() { throw new Error('disk full') },
+    }
+    const access = controller(store, () => 2_000, { pairingInstanceId: 'b'.repeat(64) })
+    await access.initialize()
+    const opened = await access.openPairing()
+    await expect(access.pair('source', opened.token)).rejects.toThrow('disk full')
+    expect(backing.inspect()).toEqual({ version: 1, devices: [] })
+    expect(access.listDevices()).toEqual([])
+    expect(access.metrics().sessions).toBe(0)
+    expect(access.pairingStatus().open).toBe(false)
+    await access.close()
+  })
+
+  it.each(['renew', 'probe'] as const)('retains the binding and existing Session when a %s write fails', async operation => {
+    let current = 2_000
+    const backing = new MemoryDeviceStore()
+    let rejectSave = false
+    const store: DeviceStore = {
+      load: () => backing.load(),
+      async save(snapshot) {
+        if (rejectSave) throw new Error('disk full')
+        await backing.save(snapshot)
+      },
+    }
+    const access = controller(store, () => current, { pairingInstanceId: 'b'.repeat(64) })
+    await access.initialize()
+    const opened = await access.openPairing()
+    const paired = await access.pair('source', opened.token)
+    const before = backing.inspect()
+    const sessions = access.metrics().sessions
+    current += 1_000
+    rejectSave = true
+    await expect(access[operation](paired.deviceToken)).rejects.toThrow('disk full')
+    expect(backing.inspect()).toEqual(before)
+    expect(access.metrics().sessions).toBe(sessions)
+    expect(access.authorizeSession(paired.sessionToken).deviceId).toBe(paired.deviceId)
+    expect(access.authorizeDevice(paired.deviceToken).nativeInstanceId).toBe('b'.repeat(64))
+    await access.close()
   })
 })

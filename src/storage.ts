@@ -11,19 +11,23 @@ export interface StoredDevice {
   readonly createdAt: number
   readonly expiresAt: number
   readonly lastSeenAt: number
+  /** Native pairing identity bound to this credential; older records omit it. */
+  readonly nativeInstanceId?: string
   /** Legacy tombstone accepted on load; AccessController removes it during initialization. */
   readonly revokedAt?: number
 }
 
 /** Versioned device state. Raw device and Session credentials are never members. */
 export interface DeviceSnapshot {
-  readonly version: 1
+  readonly version: 1 | 2
   readonly devices: readonly StoredDevice[]
 }
 
 /** Persistence seam for device-token digests and revocation metadata. */
 export interface DeviceStore {
+  /** Read either supported version without assigning identities to legacy rows. */
   load(): Promise<DeviceSnapshot>
+  /** Validate and persist version 2, retaining any credential identity bindings. */
   save(snapshot: DeviceSnapshot): Promise<void>
 }
 
@@ -43,6 +47,10 @@ function parseDevice(value: unknown): StoredDevice {
   if (typeof record.tokenDigest !== 'string' || !/^[a-f\d]{64}$/u.test(record.tokenDigest)) {
     throw new Error('device state contains an invalid credential digest')
   }
+  if (record.nativeInstanceId !== undefined
+    && (typeof record.nativeInstanceId !== 'string' || !/^[a-f\d]{64}$/u.test(record.nativeInstanceId))) {
+    throw new Error('device state contains an invalid native instance id')
+  }
   assertInteger(record.createdAt, 'createdAt')
   assertInteger(record.expiresAt, 'expiresAt')
   assertInteger(record.lastSeenAt, 'lastSeenAt')
@@ -57,6 +65,7 @@ function parseDevice(value: unknown): StoredDevice {
     createdAt: record.createdAt,
     expiresAt: record.expiresAt,
     lastSeenAt: record.lastSeenAt,
+    ...(record.nativeInstanceId === undefined ? {} : { nativeInstanceId: record.nativeInstanceId }),
     ...(record.revokedAt === undefined ? {} : { revokedAt: record.revokedAt }),
   })
 }
@@ -65,7 +74,8 @@ function parseDevice(value: unknown): StoredDevice {
 export function parseDeviceSnapshot(value: unknown, maximumDevices = 256): DeviceSnapshot {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('device state must be an object')
   const snapshot = value as Record<string, unknown>
-  if (snapshot.version !== 1 || !Array.isArray(snapshot.devices) || snapshot.devices.length > maximumDevices) {
+  if ((snapshot.version !== 1 && snapshot.version !== 2)
+    || !Array.isArray(snapshot.devices) || snapshot.devices.length > maximumDevices) {
     throw new Error('device state has an unsupported version or device count')
   }
   const devices = snapshot.devices.map(parseDevice)
@@ -73,7 +83,12 @@ export function parseDeviceSnapshot(value: unknown, maximumDevices = 256): Devic
     || new Set(devices.map(device => device.tokenDigest)).size !== devices.length) {
     throw new Error('device state contains duplicate device identities')
   }
-  return Object.freeze({ version: 1, devices: Object.freeze(devices) })
+  return Object.freeze({ version: snapshot.version, devices: Object.freeze(devices) })
+}
+
+function snapshotForSave(snapshot: DeviceSnapshot, maximumDevices?: number): DeviceSnapshot {
+  const validated = parseDeviceSnapshot(snapshot, maximumDevices)
+  return Object.freeze({ version: 2, devices: validated.devices })
 }
 
 /** Atomic JSON implementation with symlink refusal and owner-only file creation. */
@@ -102,7 +117,7 @@ export class JsonDeviceStore implements DeviceStore {
   }
 
   async save(snapshot: DeviceSnapshot): Promise<void> {
-    const validated = parseDeviceSnapshot(snapshot, this.maximumDevices)
+    const validated = snapshotForSave(snapshot, this.maximumDevices)
     const directory = dirname(this.file)
     await mkdir(directory, { recursive: true, mode: 0o700 })
     try {
@@ -140,7 +155,7 @@ export class MemoryDeviceStore implements DeviceStore {
   }
 
   async save(snapshot: DeviceSnapshot): Promise<void> {
-    this.snapshot = structuredClone(parseDeviceSnapshot(snapshot))
+    this.snapshot = structuredClone(snapshotForSave(snapshot))
   }
 
   /** Return a defensive copy for assertions or administrative export. */

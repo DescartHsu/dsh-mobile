@@ -9,6 +9,10 @@ import { settleRemoteResources, terminateRemoteProcess, type RemoteProviderContr
 const MAX_LOG_BUFFER_BYTES = 64 * 1024
 const START_TIMEOUT_MS = 45_000
 const CPOLAR_HOST_SUFFIXES = Object.freeze(['.cpolar.cn', '.cpolar.io', '.cpolar.top', '.cpolar.com'])
+// A DNS label cpolar can accept as a reserved subdomain: no leading separator, and
+// at most 63 characters. The server still owns reservation, so an unheld name is
+// answered with its own error rather than silently redirecting the tunnel.
+const CPOLAR_SUBDOMAIN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/u
 
 /** Product-facing states for the optional cpolar remote transport. */
 export type CpolarState = 'off' | 'unavailable' | 'starting' | 'connecting' | 'ready' | 'error'
@@ -26,6 +30,14 @@ export interface CpolarControllerOptions {
   readonly store: MobileAccessControlStore
   readonly executable: string
   readonly configFile: string
+  /**
+   * Reserved subdomain requested from the cpolar server (`-subdomain`).
+   *
+   * cpolar answers with a random hostname when this is unset. A reserved name is a
+   * paid cpolar feature and keeps the public origin stable, so an address already
+   * saved by a browser or the App keeps resolving to this computer.
+   */
+  readonly subdomain?: string
   readonly region?: string
   readonly createGateway: (origin: string, listenPort: number) => Promise<MobileAccessGateway>
   readonly onStatus?: (status: CpolarStatus) => void
@@ -130,6 +142,9 @@ export class CpolarController implements RemoteProviderController {
     }
     if (options.region !== undefined && !/^[a-z][a-z0-9_]{0,31}$/u.test(options.region)) {
       throw new Error('cpolar region is invalid')
+    }
+    if (options.subdomain !== undefined && !CPOLAR_SUBDOMAIN_PATTERN.test(options.subdomain)) {
+      throw new Error('cpolar subdomain is invalid')
     }
   }
 
@@ -242,6 +257,7 @@ export class CpolarController implements RemoteProviderController {
     const args = [
       'http',
       `-config=${resolve(this.options.configFile)}`,
+      ...(this.options.subdomain === undefined ? [] : [`-subdomain=${this.options.subdomain}`]),
       ...(this.options.region === undefined ? [] : [`-region=${this.options.region}`]),
       '-inspect-addr=false',
       '-redirect-https=true',

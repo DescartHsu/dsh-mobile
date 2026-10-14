@@ -94,7 +94,7 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 
 async function fixture(
   createGateway: (origin: string, port: number) => Promise<MobileAccessGateway>,
-  options: { readonly region?: string } = {},
+  options: { readonly region?: string, readonly subdomain?: string } = {},
 ): Promise<{
   readonly child: FakeChild
   readonly controller: CpolarController
@@ -116,6 +116,7 @@ async function fixture(
     configFile,
     createGateway,
     ...(options.region === undefined ? {} : { region: options.region }),
+    ...(options.subdomain === undefined ? {} : { subdomain: options.subdomain }),
     onStatus: journal.publish,
     spawnProcess: (_executable, args) => {
       startedArgs = [...args]
@@ -148,9 +149,46 @@ describe('cpolar provider lifecycle', () => {
     expect(automatic.args()).not.toContain('-region=cn')
 
     const explicit = await fixture(async () => gateway('https://explicit.r8.cpolar.cn', 1), { region: 'cn_vip' })
-    // The controller accepts an explicit region through its public options;
-    // the product wiring leaves this unset so cpolar can choose a route.
+    // An explicit region reaches the provider; leaving it unset leaves the route to cpolar.
     expect(explicit.args()).toContain('-region=cn_vip')
+  })
+
+  it('requests a reserved subdomain only when one is configured', async () => {
+    // Without a reservation cpolar answers with a random hostname, which stays the
+    // default for accounts that have not reserved a name.
+    const automatic = await fixture(async () => gateway('https://automatic.r8.cpolar.cn', 1))
+    expect(automatic.args().some(argument => argument.startsWith('-subdomain='))).toBe(false)
+
+    const explicit = await fixture(
+      async () => gateway('https://reserved.r8.cpolar.cn', 1),
+      { subdomain: 'reserved', region: 'cn_vip' },
+    )
+    expect(explicit.args()).toContain('-subdomain=reserved')
+    // Both flags reach cpolar, in the documented order. The name stays a request
+    // to the provider: cpolar still reports the established origin, so a rejected
+    // reservation cannot redirect the tunnel to a host this controller never validated.
+    expect(explicit.args().indexOf('-subdomain=reserved'))
+      .toBeLessThan(explicit.args().indexOf('-region=cn_vip'))
+  })
+
+  it('rejects a reserved subdomain cpolar could not accept as a DNS label', () => {
+    const executable = join(tmpdir(), 'dsh-mobile-cpolar-validation', 'cpolar.exe')
+    const configFile = join(tmpdir(), 'dsh-mobile-cpolar-validation', 'cpolar.yml')
+    const build = (subdomain: string): CpolarController => new CpolarController({
+      store: new MemoryControlStore(),
+      executable,
+      configFile,
+      subdomain,
+      createGateway: async () => gateway('https://unused.r8.cpolar.cn', 1),
+    })
+
+    for (const invalid of ['-leading', 'with space', 'sla/sh', 'a'.repeat(64)]) {
+      expect(() => build(invalid)).toThrow('cpolar subdomain is invalid')
+    }
+    // Separators inside the label and the 63-character boundary stay valid.
+    expect(() => build('reserved-name')).not.toThrow()
+    expect(() => build('a.b_c-d')).not.toThrow()
+    expect(() => build('a'.repeat(63))).not.toThrow()
   })
 
   it('rotates different origins in order on the same loopback port', async () => {

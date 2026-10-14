@@ -1,7 +1,7 @@
 /** Exercise customization ownership and recovery on the actual installed DSH client and paired Gateway. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { chromium } from 'playwright'
@@ -22,6 +22,7 @@ const cleanupFailures = []
 let dsh
 let browser
 let failure
+let prompts = 0
 
 const probeCss = revision => `[data-custom-assets-probe] { color: ${revision === 'one' ? 'rgb(13, 37, 59)' : 'rgb(41, 61, 83)'}; padding-top: 7px; }\n`
 const probeScript = revision => `window.dshMobile.register(({ root, window }) => {
@@ -125,7 +126,11 @@ function assertSecurityHeaders(headers) {
 }
 
 try {
-  const home = await createMobileProfile(root, { tarball, dshBin, packageStoreDirectory: join(root, 'package-store') })
+  const workspacePath = join(root, 'owned-workspace')
+  await mkdir(workspacePath)
+  const home = await createMobileProfile(root, { tarball, dshBin, packageStoreDirectory: join(root, 'package-store'),
+    extraPatches: [{ id: 'llm-deepseek', config: { models: [{ id: 'custom-assets-model', name: 'Owned customization model',
+      contextWindow: 128000, inputModalities: ['text'] }] } }] })
   await seed(home, 'one')
   dsh = launchDsh(root, home, dshBin)
   browser = await chromium.launch({ headless: true })
@@ -133,10 +138,21 @@ try {
   const desktop = await desktopContext.newPage()
   const desktopUrl = await dsh.ready()
   await desktop.goto(desktopUrl, { waitUntil: 'domcontentloaded' })
+  const createdWorkspace = await desktop.evaluate(async path => {
+    const response = await fetch('/api/workspace/create', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'custom-assets-workspace', method: 'workspace/create', payload: { args: { request: { path } } } }),
+      signal: AbortSignal.timeout(60_000) })
+    return { status: response.status, body: await response.json() }
+  }, workspacePath)
+  assert.equal(createdWorkspace.status, 200, 'Owned Workspace creation was rejected')
+  assert.equal(createdWorkspace.body.result?.ok, true, 'Owned Workspace creation failed')
+  const workspaceId = createdWorkspace.body.result.value.workspace.workspaceId
   const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'en-US' })
   const phone = await phoneContext.newPage()
   const state = await instrumentation(phone)
-  await pairMobilePage(phone, await openPairing(desktop, undefined, dsh.logs), dsh.logs)
+  await phone.route('**/api/session/prompt', async route => { prompts++; await route.abort('blockedbyclient') })
+  const baseline = await pairMobilePage(phone, await openPairing(desktop, undefined, dsh.logs), dsh.logs)
+  assert(baseline.value.items.some(item => item.workspaceId === workspaceId), 'Workspace baseline omitted the owned Workspace')
   await dismissOnboarding(phone)
   await probe(phone, 'one')
   await waitForState(() => streams(phone), sources => sources.length === 1 && sources[0].readyState === 1, 'The authenticated event stream did not open')
@@ -152,7 +168,22 @@ try {
   cases.push('paired dedicated Gateway applied real custom CSS and JavaScript')
   console.log('Packed custom assets: paired dedicated CSS/JS and event stream passed')
 
-  const editor = phone.locator('[data-composer-input][contenteditable="true"]').first()
+  // A fresh profile can remain on Landing without a conversation editor. Open
+  // an owned Session through the real Workspace action before measuring its draft.
+  const drawer = phone.locator('.dshm-drawer')
+  if (await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
+  const createdSession = phone.waitForResponse(response => new URL(response.url()).pathname === '/api/session/create'
+    && response.request().postDataJSON()?.payload?.args?.request?.workspaceId === workspaceId, { timeout: CLIENT_TIMEOUT_MS })
+  try {
+    await drawer.locator(`[role="treeitem"][data-row-key="workspace:${workspaceId}"]`).getByRole('button').last().click()
+  } catch (error) { void createdSession.catch(() => {}); throw error }
+  const sessionResponse = await (await createdSession).json()
+  assert.equal(sessionResponse.result?.ok, true, 'Owned Session creation failed')
+  const sessionId = sessionResponse.result.value.sessionId
+  await phone.waitForFunction(id => document.querySelector('[data-conversation-session]')?.dataset.conversationSession === id,
+    sessionId, { timeout: CLIENT_TIMEOUT_MS })
+  if (await drawer.getAttribute('data-open') === 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
+  const editor = phone.locator('[data-conversation-session] [data-composer-input][contenteditable="true"]').first()
   await editor.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
   const draft = 'Retained customization smoke draft; do not submit'
   await editor.fill(draft)
@@ -253,6 +284,7 @@ try {
   cases.push('real raw DSH preview retained DOM Back enhancement with no custom API or SSE requests')
   assert.deepEqual(state.errors, [], 'Paired customization generated unhandled page errors')
   assert.deepEqual(rawState.errors, [], 'Raw preview generated unhandled page errors')
+  assert.equal(prompts, 0, 'The customization smoke attempted a model prompt')
 } catch (error) {
   failure = new Error(sanitized(error instanceof Error ? error.stack ?? error.message : String(error)))
 } finally {

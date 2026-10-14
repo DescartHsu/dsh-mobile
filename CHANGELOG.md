@@ -2,6 +2,12 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## Unreleased plugin changes
+
+- Add optional `cpolarSubdomain` and `cpolarRegion` profile settings for a reserved cpolar address. Omitted or blank values keep provider defaults; only the validated HTTPS origin reported by cpolar is used. Existing pairing and authorization checks are unchanged. [Configuration guide](docs/CPOLAR_SUBDOMAIN.en.md).
+- Include complete profile override examples and regressions for configuration-to-process arguments, invalid settings and provider startup failures. This feature does not require an Android App update.
+- Thanks @GavinQiEr for the request in [#207](https://github.com/saya-ch/dsh-mobile/issues/207) and implementation in [#208](https://github.com/saya-ch/dsh-mobile/pull/208); the original author commit is retained alongside maintainer corrections.
+
 ## Unreleased Android changes
 
 - Prefer the system Photo Picker on Android 13+ for supported image requests, with document selection for other requests or an unavailable picker. Preserve multi-selection, MIME filtering and selected URI results without adding storage permission or forcing a vendor gallery.

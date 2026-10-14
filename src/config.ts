@@ -84,6 +84,15 @@ export interface PluginConfig {
     keyFile?: string
     caFile?: string
   }
+  /**
+   * Reserved cpolar subdomain passed through as `cpolar http -subdomain`.
+   *
+   * A compatible account reservation and region are required. Unset or blank values
+   * keep provider-selected allocation; credentials may still expire or be revoked.
+   */
+  cpolarSubdomain?: string
+  /** cpolar region for `-region`; use the region chosen when reserving the subdomain. */
+  cpolarRegion?: string
   pairingTtlMs?: number
   deviceTtlMs?: number
   sessionTtlMs?: number
@@ -184,6 +193,8 @@ export const Config: z<PluginConfig> = z.object({
     keyFile: z.string(),
     caFile: z.string(),
   }),
+  cpolarSubdomain: z.string(),
+  cpolarRegion: z.string(),
   pairingTtlMs: z.natural(),
   deviceTtlMs: z.natural(),
   sessionTtlMs: z.natural(),

@@ -735,6 +735,11 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       store: cpolarStore,
       executable: cpolarComponent.executable,
       configFile: cpolarComponent.configFile,
+      // Read from the loader config rather than a packaged setup file: a reserved
+      // subdomain is a user preference, and the setup file only carries managed
+      // gateway settings.
+      ...(config.cpolarSubdomain === undefined ? {} : { subdomain: config.cpolarSubdomain }),
+      ...(config.cpolarRegion === undefined ? {} : { region: config.cpolarRegion }),
       createGateway: createRemoteGateway,
     }),
     cloudflared: new CloudflaredController({

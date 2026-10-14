@@ -28,6 +28,14 @@
 
 ## 开发与安全 / Development and security
 
+### 开发中的配置 / Configuration in development
+
+当前正式插件仍为 0.6.6。以下指南描述尚未发布的候选功能，不代表升级当前正式包即可使用。
+
+| 功能 | 中文 | English | 状态 |
+| --- | --- | --- | --- |
+| 请求 cpolar 账号已预留的固定子域名 | [固定子域名](CPOLAR_SUBDOMAIN.md) | [Reserved subdomain](CPOLAR_SUBDOMAIN.en.md) | 候选配置项；无面板字段，需保留完整加载器配置 |
+
 0.6.3 的 [扩展 Worker 指南](EXTENSION_WORKERS.md)／[Worker guide](EXTENSION_WORKERS.en.md) 介绍按扩展启用、预算与显式恢复；此功能不迁移普通 Cordis 插件，也不是权限沙箱。
 
 - [贡献指南](../CONTRIBUTING.md)：本地检查、浏览器与 Android 验证、发布要求。

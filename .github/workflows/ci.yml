@@ -59,6 +59,9 @@ jobs:
           DSH_BOOT_SMOKE_INSTALL_SOURCE: registry
           DSH_BOOT_SMOKE_NODE_LINKER: isolated
         run: npm run smoke:plugin-installation
+      - name: Verify complete cpolar guide config and reject partial replacement
+        if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
+        run: npm run smoke:cpolar-config
       - name: Verify upgrading the published 0.6.2 bundle
         if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
         shell: bash

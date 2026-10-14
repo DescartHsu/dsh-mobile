@@ -20,6 +20,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.MediaStore
 import android.provider.Settings
 import android.text.TextUtils
 import android.text.InputType
@@ -141,7 +142,12 @@ class MainActivity : Activity() {
     private var gatewayOrigin: GatewayOrigin? = null
     private var accessMode = AccessMode.LAN
     private var setupBackAction: (() -> Unit)? = null
-    private var uploadCallback: ValueCallback<Array<Uri>>? = null
+    private data class PendingWebFileChooser(
+        val owner: WebFileChooserOwner<WebView>,
+        val callback: ValueCallback<Array<Uri>>,
+    )
+    private val webFileChooser = WebFileChooserGate<PendingWebFileChooser>(webFileChooserRequestCodes)
+    private var fileChooserDocument = 0L
     private var pendingDownload: PendingDownload? = null
     private var failureDialog: AlertDialog? = null
     private var retryUrl: String? = null
@@ -177,6 +183,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        savedInstanceState?.getInt(STATE_NEXT_FILE_CHOOSER_CODE)?.let(webFileChooserRequestCodes::restoreAtLeast)
         cleanupStaleDownloadFiles(cacheDir)
         configureEdgeToEdgeWindow(window)
         applyStatusBarIconContrast(window, getColor(R.color.app_background))
@@ -218,6 +225,7 @@ class MainActivity : Activity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt(STATE_NEXT_FILE_CHOOSER_CODE, webFileChooserRequestCodes.nextCode())
         outState.putBoolean(STATE_SHOWING_SETUP, showingSetup)
         outState.putString(STATE_ACCESS_MODE, accessMode.name)
         (nativeBridge?.saveState() ?: restoredNativeBridgeState)?.let { outState.putBundle(STATE_NATIVE_BRIDGE, it) }
@@ -261,8 +269,11 @@ class MainActivity : Activity() {
             deferredBridgeResult = DeferredBridgeResult(requestCode, resultCode, data)
             return
         }
+        if (WebFileChooserRequestCodes.owns(requestCode)) {
+            finishFileSelection(requestCode, resultCode, data)
+            return
+        }
         when (requestCode) {
-            FILE_CHOOSER_REQUEST -> finishFileSelection(resultCode, data)
             DOWNLOAD_DESTINATION_REQUEST -> finishDownloadSelection(resultCode, data)
             SCAN_QR_REQUEST -> finishScanResult(resultCode, data)
         }
@@ -293,8 +304,6 @@ class MainActivity : Activity() {
         invalidateRestoreAttempts()
         invalidatePairingAttempts()
         failureDialog?.dismiss()
-        uploadCallback?.onReceiveValue(null)
-        uploadCallback = null
         retryUrl = null
         destroyWebView(isChangingConfigurations)
         if (!isChangingConfigurations) {
@@ -2416,6 +2425,7 @@ class MainActivity : Activity() {
             },
             onTopLevelUrlChanged = {
                 if (ownsBrowser()) {
+                    invalidateWebFileChooser()
                     displayScale.onDocumentStarted()
                     cancelPendingWebBack()
                     pendingAudioPermission = null
@@ -2438,7 +2448,7 @@ class MainActivity : Activity() {
                 webView: WebView,
                 filePathCallback: ValueCallback<Array<Uri>>,
                 fileChooserParams: FileChooserParams,
-            ): Boolean = showFileChooser(filePathCallback, fileChooserParams)
+            ): Boolean = showFileChooser(webView, origin, filePathCallback, fileChooserParams)
 
             override fun onPermissionRequest(request: PermissionRequest) {
                 // DSH's voice input records through getUserMedia, which only the
@@ -2557,42 +2567,101 @@ class MainActivity : Activity() {
     }
 
     private fun showFileChooser(
+        browser: WebView,
+        origin: GatewayOrigin,
         callback: ValueCallback<Array<Uri>>,
         params: WebChromeClient.FileChooserParams,
     ): Boolean {
-        uploadCallback?.onReceiveValue(null)
-        uploadCallback = callback
+        val owner = WebFileChooserOwner(browser, origin.serialized, fileChooserDocument)
+        if (!isCurrentFileChooser(owner)) {
+            respondToFileChooser(callback, null)
+            return true
+        }
+        cancelWebFileChooser()
+        val request = webFileChooser.begin(PendingWebFileChooser(owner, callback))
+        if (request == null) {
+            respondToFileChooser(callback, null)
+            if (isCurrentFileChooser(owner)) toastError(R.string.file_picker_unavailable)
+            return true
+        }
         val mimeTypes = acceptedMimeTypes(params.acceptTypes)
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        val multiple = params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+        val photoMime = photoPickerMimeType(
+            Build.VERSION.SDK_INT,
+            mimeTypes,
+            params.isCaptureEnabled,
+            params.mode == WebChromeClient.FileChooserParams.MODE_OPEN || multiple,
+        )
+        if (photoMime != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val limit = if (multiple) runCatching { MediaStore.getPickImagesMaxLimit() }.getOrNull() else null
+            if (!multiple || (limit != null && photoPickerSelectionLimit(true, limit) != null)) {
+                val photo = Intent(MediaStore.ACTION_PICK_IMAGES).apply {
+                    type = photoMime
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    if (multiple) putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, requireNotNull(limit))
+                }
+                // Direct starts avoid package-visibility queries; absent/blocked system pickers fall back.
+                if (launchFileChooser(photo, request.requestCode)) return true
+            }
+        }
+        val document = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             type = if (mimeTypes.size == 1) mimeTypes.single() else "*/*"
             if (mimeTypes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes.toTypedArray())
-            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE)
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
         }
-        return try {
-            startActivityForResult(Intent.createChooser(intent, getString(R.string.choose_file)), FILE_CHOOSER_REQUEST)
-            true
-        } catch (_: ActivityNotFoundException) {
-            uploadCallback?.onReceiveValue(null)
-            uploadCallback = null
-            false
+        if (!launchFileChooser(document, request.requestCode)) {
+            webFileChooser.take(request.requestCode)?.let {
+                respondToFileChooser(it.callback, null)
+                if (isCurrentFileChooser(it.owner)) toastError(R.string.file_picker_unavailable)
+            }
         }
+        // Claimed or explicitly cancelled; WebView must not settle the same callback again.
+        return true
     }
 
-    private fun finishFileSelection(resultCode: Int, data: Intent?) {
-        val callback = uploadCallback ?: return
-        uploadCallback = null
-        if (resultCode != RESULT_OK) {
-            callback.onReceiveValue(null)
+    private fun launchFileChooser(intent: Intent, requestCode: Int): Boolean = try {
+        startActivityForResult(intent, requestCode)
+        true
+    } catch (_: ActivityNotFoundException) {
+        false
+    } catch (_: SecurityException) {
+        // A fallback still uses its own system provider and permission checks; it grants no bypass.
+        false
+    }
+
+    private fun isCurrentFileChooser(owner: WebFileChooserOwner<WebView>): Boolean {
+        val origin = gatewayOrigin ?: return false
+        return owner.matches(webView, origin.serialized, fileChooserDocument) && !isFinishing && !isDestroyed &&
+            GatewayUrlPolicy.isSameOrigin(origin, owner.browser.url.orEmpty())
+    }
+
+    private fun respondToFileChooser(callback: ValueCallback<Array<Uri>>, values: Array<Uri>?) {
+        // Chromium can withdraw its callback during renderer teardown; cancellation must not crash the Activity.
+        runCatching { callback.onReceiveValue(values) }
+    }
+
+    private fun cancelWebFileChooser() {
+        webFileChooser.cancel()?.let { respondToFileChooser(it.callback, null) }
+    }
+
+    private fun invalidateWebFileChooser() {
+        fileChooserDocument += 1
+        cancelWebFileChooser()
+    }
+
+    private fun finishFileSelection(requestCode: Int, resultCode: Int, data: Intent?) {
+        val pending = webFileChooser.take(requestCode) ?: return
+        if (!isCurrentFileChooser(pending.owner) || resultCode != RESULT_OK) {
+            respondToFileChooser(pending.callback, null)
             return
         }
-        val uris = mutableListOf<Uri>()
-        data?.clipData?.let { clip: ClipData ->
-            for (index in 0 until clip.itemCount) uris += clip.getItemAt(index).uri
-        }
-        data?.data?.let { if (it !in uris) uris += it }
-        callback.onReceiveValue(uris.takeIf { it.isNotEmpty() }?.toTypedArray())
+        val clipItems = data?.clipData?.let { clip: ClipData ->
+            (0 until clip.itemCount).map { clip.getItemAt(it).uri }
+        }.orEmpty()
+        val uris = mergeFileChooserItems(clipItems, data?.data)
+        respondToFileChooser(pending.callback, uris.takeIf { it.isNotEmpty() }?.toTypedArray())
     }
 
     private fun requestDownload(
@@ -2772,6 +2841,7 @@ class MainActivity : Activity() {
     }
 
     private fun destroyWebView(changingConfigurations: Boolean = false, rendererGone: Boolean = false) {
+        invalidateWebFileChooser()
         cancelPendingWebBack()
         secureWebViewClient?.dispose()
         secureWebViewClient = null
@@ -2930,7 +3000,8 @@ class MainActivity : Activity() {
         const val STATE_DEFERRED_BRIDGE_DATA = "deferred_bridge_data"
         const val STATE_DEFERRED_BRIDGE_PERMISSION = "deferred_bridge_permission"
         const val STATE_PENDING_DOWNLOAD = "pending_download"
-        const val FILE_CHOOSER_REQUEST = 4101
+        private const val STATE_NEXT_FILE_CHOOSER_CODE = "next_file_chooser_request_code"
+        private val webFileChooserRequestCodes = WebFileChooserRequestCodes()
         const val DOWNLOAD_DESTINATION_REQUEST = 4102
         const val SCAN_CAMERA_REQUEST = 4103
         const val NEARBY_WIFI_REQUEST = 4104

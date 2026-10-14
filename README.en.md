@@ -31,7 +31,7 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.5**. Improve mobile module management, typography and settings accessibility; fix Windows cpolar extraction and blank Trajectory views caused by some skins. [Changelog](CHANGELOG.md) · [Release downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.5).
+> **Current stable release: 0.6.6**. Fix captured images not reaching the DSH attachment draft, and improve cancellation and late-result handling in browser file selection. [Changelog](CHANGELOG.md) · [Release downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.6).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
@@ -396,6 +396,7 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 | `0.6.3` | `0.2.0-rc.2` and `0.2.1-alpha.2` (packed installation, isolated pairing, mobile boot and WebSocket Workspace reads); additional checks cover the composer, settings and extension Worker timeout, streaming and explicit recovery |
 | `0.6.4` | `0.2.0-rc.2` (packed installation, isolated pairing, mobile boot and WebSocket Workspace reads); additionally 72 real public-slot composer layouts, Windows Desktop directory-picker composition and cross-platform regressions. The reported remote timeout in community Desktop 2.0.17 remains unclaimed as accepted |
 | `0.6.5` | Packed module-management and mobile-settings regressions on `0.2.0-rc.2` and `0.2.1-alpha.2`; additionally Windows cpolar extraction and populated Trajectory layout with published `maid-atelier` 0.1.7. This does not establish acceptance of every third-party skin or reporter device |
+| `0.6.6` | Packed attachment intake and decoded-preview regressions on `0.2.0-rc.2` and `0.2.1-alpha.2`, covering multiple images, cancellation, late results and superseded requests. Android system-picker changes are released independently, not through the npm update |
 
 <details>
 <summary>Historical version checks</summary>

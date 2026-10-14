@@ -18,6 +18,7 @@ import { isDesktopAdminSurface, localAdminRequestHeaders } from './local-admin-h
 import { fireDeviceRevoked, fireTaskNotifyEvent, isDeviceRevokedPayload, parseTaskNotifyPayload, taskCompletionTag } from './task-notify.js'
 import { EXTENSION_RECOVERY_STYLES, installExtensionRecoveryControl } from './extension-recovery-ui.js'
 import { invokeBoundNativeCapability } from './native-capability.js'
+import { pickBrowserFiles } from './browser-file-picker.js'
 
 export { DIAGNOSTIC_REASON_MESSAGES, LOCALIZED_DIAGNOSTIC_COPY, MOBILE_CONTROL_MESSAGES } from './client-messages.js'
 export type { MobileControlLocale } from './client-messages.js'
@@ -3944,47 +3945,8 @@ function installCustomAssets(): () => void {
     if (action === 'clipboard.read' && navigator.clipboard !== undefined) return { text: await navigator.clipboard.readText() }
     if (action === 'clipboard.write' && navigator.clipboard !== undefined) { await navigator.clipboard.writeText(typeof input === 'object' && input !== null && 'text' in input ? String((input as { text: unknown }).text) : ''); return { ok: true } }
     if (action === 'files.pick' || action === 'camera.capture') {
-      const inputElement = element('input')
-      inputElement.type = 'file'
-      inputElement.accept = action === 'camera.capture' ? 'image/*' : '*/*'
-      if (action === 'camera.capture') inputElement.capture = 'environment'
-      inputElement.hidden = true
-      return new Promise<File | undefined>((resolve, reject) => {
-        let settled = false
-        let cleaned = false
-        let cleanupTimer = 0
-        let watchdogTimer = 0
-        const cleanup = (): void => {
-          if (cleaned) return
-          cleaned = true
-          if (cleanupTimer !== 0) window.clearTimeout(cleanupTimer)
-          if (watchdogTimer !== 0) window.clearTimeout(watchdogTimer)
-          window.removeEventListener('focus', scheduleCancel)
-          document.removeEventListener('visibilitychange', onVisibilityChange)
-          signal.removeEventListener('abort', onAbort)
-          inputElement.removeEventListener('change', onChange)
-          inputElement.removeEventListener('cancel', onCancel)
-          inputElement.remove()
-        }
-        const finish = (callback: () => void): void => { if (settled) return; settled = true; cleanup(); callback() }
-        const onChange = (): void => { const file = inputElement.files?.[0]; finish(() => { resolve(file) }) }
-        const onCancel = (): void => { finish(() => { resolve(undefined) }) }
-        const onAbort = (): void => { finish(() => { reject(abortReason()) }) }
-        const scheduleCancel = (): void => { if (!settled && cleanupTimer === 0) cleanupTimer = window.setTimeout(onCancel, 1000) }
-        const onVisibilityChange = (): void => { if (document.visibilityState === 'visible') scheduleCancel() }
-        inputElement.addEventListener('change', onChange, { once: true })
-        inputElement.addEventListener('cancel', onCancel, { once: true })
-        window.addEventListener('focus', scheduleCancel)
-        document.addEventListener('visibilitychange', onVisibilityChange)
-        signal.addEventListener('abort', onAbort, { once: true })
-        watchdogTimer = window.setTimeout(onCancel, 300_000)
-        try {
-          document.body.append(inputElement)
-          inputElement.click()
-        } catch (error) {
-          finish(() => { reject(error) })
-        }
-      })
+      return pickBrowserFiles({ signal, accept: action === 'camera.capture' ? 'image/*' : '*/*',
+        ...(action === 'camera.capture' ? { capture: 'environment' } : {}), abortReason }).then(files => files?.[0])
     }
     throw new Error('native capability is unavailable')
   }

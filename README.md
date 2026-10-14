@@ -31,7 +31,7 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.5**。优化移动页面模块管理与字体设置，改善设置操作可达性，修复 Windows cpolar 解包及部分皮肤造成的轨迹空白。[更新记录](CHANGELOG.md) · [版本下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.5)。
+> **当前正式版本：0.6.6**。修复拍照图片无法进入 DSH 附件草稿的问题，改善浏览器文件选择的取消与迟到结果处理。[更新记录](CHANGELOG.md) · [版本下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.6)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
@@ -397,6 +397,7 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 | `0.6.3` | `0.2.0-rc.2`、`0.2.1-alpha.2`（打包安装、隔离配对、移动页面与 WebSocket 工作区读取）；另验证输入栏、设置与扩展 Worker 的超时、流式传输和显式恢复 |
 | `0.6.4` | `0.2.0-rc.2`（打包安装、隔离配对、移动页面与 WebSocket 工作区读取）；另验证 72 组真实公共插槽输入栏布局、Windows Desktop 目录选择器组合及跨平台回归。社区 Desktop 2.0.17 的原报告远程超时仍未宣称验收 |
 | `0.6.5` | `0.2.0-rc.2`、`0.2.1-alpha.2` 的打包模块管理与移动设置回归；另验证 Windows cpolar 解包及正式 `maid-atelier` 0.1.7 下有内容轨迹的布局修复。不代表全部第三方皮肤或报告者设备已验收 |
+| `0.6.6` | `0.2.0-rc.2`、`0.2.1-alpha.2` 的打包附件接收与图片预览回归，覆盖多图、取消、迟到结果和旧请求；Android 系统选择器改进独立发布，不包含在 npm 更新中 |
 
 <details>
 <summary>历史版本验证记录</summary>

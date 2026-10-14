@@ -8,6 +8,10 @@ Android is the only supported native target. The iOS client remains an unpublish
 
 The current stable app is **0.6.3** (build 79). The app and npm plugin update independently; plugin web UI or connection fixes do not require reinstalling the APK. Install a new signed release APK for native updates or when the app reports that its version is too old. Older official APKs with the same signer retain pairing during in-place upgrades; a differently signed Debug build cannot overwrite the official app.
 
+### Attachment changes in development
+
+Unreleased App code uses the system Photo Picker on Android 13+ when the webpage requests a single supported image MIME filter. Multiple selection follows the system limit; unavailable pickers, older systems, capture requests and filters that cannot be represented exactly use the document picker instead. Document requests start directly, retain MIME and multiple settings, and do not promise a particular manufacturer's gallery. Standard callbacks are bound to the current WebView, Origin and document; obsolete results cannot complete a newer request. These native changes are not in the published 0.6.3 APK, and need a future signed App update.
+
 ## 0.6.3 update
 
 Build 79 adds per-computer recovery guidance, readable expired-CA records, duplicate-pairing protection and deduplicated status checks that leave capacity for an explicit connection. TLS still refuses expired certificates. It also improves dark-mode primary buttons and explicitly excludes encrypted pairings and WebView sessions from cloud backup and device transfer. The earlier automatic-recovery ownership corrections are included. This signed App is published independently from plugin 0.6.4.
@@ -106,7 +110,9 @@ For ordinary DSH attachments, the App forwards the webpage's multiple-selection 
 
 Task reminders use Host completion events and explicit pending-input cards while the page remains alive. Enable notifications or open system settings from DSH **Settings → General** inside the app. Lock-screen text is generic and tapping opens the app. Plugin 0.6.4 distinguishes full session and turn IDs, including long and non-ASCII IDs; earlier versions can replace notifications when their tags collide. Completion reminders require SSE and have no offline event replay; Cloudflare Quick Tunnels do not support the stream. See [channel limits](../../docs/CLOUDFLARE_TUNNEL.en.md#quick-tunnel-feature-limits).
 
-Only one file-selection or camera interaction runs at a time, with a five-minute deadline. Cancellation, WebView destruction, timeout and stale-session results are cleaned up or rejected. Browsers use corresponding Web APIs and return `unsupported` when unavailable.
+Bridge file/camera actions are serialized with a five-minute deadline. Cancellation, WebView destruction, timeout and stale-session results are cleaned up or rejected. Standard WebView file inputs are a separate path. Since plugin 0.6.6, browser media selection waits for change, explicit cancellation, abort or the deadline rather than treating restored focus as cancellation. Unsupported browser capabilities return `unsupported`.
+
+For image attachment diagnosis, compare the native DSH file button and camera action using a small JPEG or PNG and check the unsent draft preview. DSH keeps images in the browser draft before submission, so no new computer-side image object does not establish picker failure. Checking the selected file count/type and the draft preview is sufficient without sending a model request; generic files can use a different storage path. File selection, webpage intake and later submission are separate stages.
 
 From App 0.4.7, its native keyboard adapter uses plain Enter for a new draft line when an inset-backed on-screen keyboard is visible, Android reports no hardware keyboard, and an active session composer is focused. The Send button still submits a multiline draft. Floating keyboards, unknown state and older Apps do not use this native rule; the plugin's touch-browser rule below can still apply. Physical keyboards can use Shift+Enter for a line break.
 

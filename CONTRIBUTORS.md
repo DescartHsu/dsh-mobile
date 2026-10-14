@@ -1,8 +1,8 @@
 # 贡献者 / Contributors
 
-GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-13 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
+GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-14 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-13. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-14. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
 ## 0.6.4 代码贡献 / Code contributions in 0.6.4
 
@@ -58,6 +58,10 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 
 ## 问题反馈与建议 / Issue reports and ideas
 
+感谢 [@xhwxt](https://github.com/xhwxt) 在 [#203](https://github.com/saya-ch/dsh-mobile/pull/203) 中提出文档选择器改进方案，以及 [@Void-LifeStream](https://github.com/Void-LifeStream) 在 [#205](https://github.com/saya-ch/dsh-mobile/issues/205) 中提供附件选择与回传问题的详细反馈。
+
+Thanks [@xhwxt](https://github.com/xhwxt) for the document-picker proposal in [#203](https://github.com/saya-ch/dsh-mobile/pull/203), and [@Void-LifeStream](https://github.com/Void-LifeStream) for the detailed attachment-selection and delivery report in [#205](https://github.com/saya-ch/dsh-mobile/issues/205).
+
 以下名单包括提出问题、复现缺陷和建议功能的成员；出现在本表不表示提交过代码。 / These members opened repository issues; listing them does not imply code authorship.
 
 | 反馈贡献者 / Issue reporter | 提交的问题 / Issues |
@@ -101,6 +105,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@sortjiajun](https://github.com/sortjiajun) | [#90](https://github.com/saya-ch/dsh-mobile/issues/90) |
 | [@StrawberryAO](https://github.com/StrawberryAO) | [#39](https://github.com/saya-ch/dsh-mobile/issues/39) |
 | [@Surpass567](https://github.com/Surpass567) | [#80](https://github.com/saya-ch/dsh-mobile/issues/80), [#81](https://github.com/saya-ch/dsh-mobile/issues/81) |
+| [@Void-LifeStream](https://github.com/Void-LifeStream) | [#205](https://github.com/saya-ch/dsh-mobile/issues/205) |
 | [@WalkerJay666](https://github.com/WalkerJay666) | [#201](https://github.com/saya-ch/dsh-mobile/issues/201) |
 | [@up-and-down-0618](https://github.com/up-and-down-0618) | [#115](https://github.com/saya-ch/dsh-mobile/issues/115) |
 | [@taki-ohh](https://github.com/taki-ohh) | [#19](https://github.com/saya-ch/dsh-mobile/issues/19) |

@@ -105,6 +105,18 @@ jobs:
       - name: Verify usable device module selection with the pinned skin
         if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
         run: npm run smoke:module-settings
+      - name: Verify image handoff through the actual DSH attachment consumer
+        if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
+        run: npm run smoke:attachments
+      - name: Detect a file transfer missing the consumer item list
+        if: matrix.dsh == '0.2.0-rc.2'
+        shell: bash
+        run: |
+          if npm run smoke:attachments -- --negative-control-items > "$RUNNER_TEMP/attachment-items-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/attachment-items-negative.log"
+            exit 1
+          fi
+          node scripts/negative-control.mjs "$RUNNER_TEMP/attachment-items-negative.log" "Attachment handoff negative control detected"
       - name: Identify an HTTP-successful client module execution failure
         if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
         shell: bash

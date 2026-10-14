@@ -2,6 +2,18 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## Unreleased Android changes
+
+- Prefer the system Photo Picker on Android 13+ for supported image requests, with document selection for other requests or an unavailable picker. Preserve multi-selection, MIME filtering and selected URI results without adding storage permission or forcing a vendor gallery.
+- Bind standard file callbacks to the active WebView, Origin and document. Cancel them on navigation or teardown and prevent old results from consuming a newer request. These changes require a future App release; the published Android 0.6.3 APK is unchanged.
+
+## 0.6.6 - 2026-10-14
+
+- Fix captured images not reaching DSH's attachment draft. Supply both files and iterable file items, with compatible drag-and-drop objects for browsers whose constructed objects are incomplete.
+- Improve browser camera and extension file selection: returning to the page no longer discards a pending selection after one second. Handle explicit cancellation, late results, aborted requests and timeouts while preserving the current draft.
+- Add packed DSH regressions for multiple images, decoded previews, cancellation and superseded requests. The Android App remains independently published as 0.6.3; this plugin update does not replace its system file chooser.
+- Thanks @Void-LifeStream for the detailed report in [#205](https://github.com/saya-ch/dsh-mobile/issues/205), and @xhwxt for the document-picker proposal in [#203](https://github.com/saya-ch/dsh-mobile/pull/203).
+
 ## 0.6.5 - 2026-10-13
 
 - Make mobile module selection easier to navigate: optional extensions first, collapsed DSH and boot-required groups, name/ID search, loading filters, and exact IDs and dependencies in details. Keep close and save actions outside the scrolling list, show unsaved changes, and confirm before discarding them.

@@ -2,12 +2,14 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
-## 0.6.8 - 2026-10-14
+## 0.6.8 - Unreleased
 
 - Fix remote pairing on computers with the same default state path overwriting one another in the Android device list. Automatically identified entries without a pairing CA use their persisted random installation identifier for new pairings; explicit operator IDs, LAN CA fingerprints and self-signed FRP CA fingerprints remain unchanged.
 - Read both device-state versions and write version 2 on the next mutation, preserving each new credential's pairing identity. Existing credentials keep their previous native renewal/probe identity during ordinary upgrades with the same state path and gateway configuration, with no wire-protocol change or required Android App update. See [upgrade and downgrade precautions](SECURITY.md#installation-identity-and-device-state-upgrades).
 - Publish the complete installation identifier atomically without replacing an existing one, avoiding a concurrent starter reading an empty file. Refuse invalid identity files and unsupported initial publication rather than silently changing the identity.
 - Keep working pairings without re-pairing. A local App credential already overwritten by the collision cannot be recovered automatically: update and restart the plugin, then pair each affected computer again. Usable old rows remain valid; any duplicate local row can be removed explicitly without computer-side revocation.
+- Adapt compatibility checks to DSH 0.2.1-alpha.3's authenticated Host-backed settings while retaining the Remote/Connection dependency checks and earlier settings policies. Mobile typography remains local to its Origin. Extend the browser test matrix to alpha.3 and recognize its first-run account dialog without submitting credentials.
+- Add bilingual remote-channel selection notes distinguishing the maintainer's long-term network experience from provider limits and conditional self-hosted deployment characteristics.
 - Android App 0.6.3 remains the published native release. The pending Android file-picker changes below are not part of this plugin fix. Thanks @Yurzi for reporting [#213](https://github.com/saya-ch/dsh-mobile/issues/213).
 
 ## 0.6.7 - 2026-10-14

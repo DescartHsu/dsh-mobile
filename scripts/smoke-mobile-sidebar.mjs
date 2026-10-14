@@ -9,7 +9,7 @@ import { chromium } from 'playwright'
 import { installPackedBundle, packBundle } from './packed-profile.mjs'
 import { completeSmoke, recordSmokeFailure } from './negative-control.mjs'
 import { observeMobileBootDiagnostics, summarizeMobileBootDiagnostics } from './mobile-boot-diagnostics.mjs'
-import { CLIENT_TIMEOUT_MS, createMobileProfile, dismissOnboarding, launchDsh, openPairing,
+import { CLIENT_TIMEOUT_MS, createMobileProfile, dismissOnboarding, launchDsh, openMobileSettings, openPairing,
   pairMobilePage, removeTemporaryRoot, sanitized } from './mobile-boot-fixture.mjs'
 
 const args = process.argv.slice(2)
@@ -285,8 +285,7 @@ try {
         await phone.locator('#sidebar-fixture-dialog').waitFor({ state: 'visible' })
         await hit(phone.locator('#sidebar-fixture-close'), `${label} shell overlay dialog`)
         assert.equal(await phone.evaluate(() => window.__sidebarFixture.clicks.at(-1)), 'overlay')
-        const settings = sidebar().locator('button:has([data-slot="settings.trigger"])')
-        await hit(settings, `${label} stock Settings`)
+        await openMobileSettings(phone, { sidebar: sidebar(), activate: (button, stage) => hit(button, `${label} Settings ${stage}`) })
         const settingsDialog = phone.locator('[data-dsh-mobile-settings]')
         await settingsDialog.waitFor({ state: 'visible' })
         await settingsDialog.evaluate(node => {

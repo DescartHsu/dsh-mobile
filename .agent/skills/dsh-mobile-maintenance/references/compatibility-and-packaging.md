@@ -30,6 +30,8 @@ Use `scripts/check-dsh-compatibility.mjs` as a source-contract check, then exerc
 
 Inspect the actual frontend package for DOM ownership, slots, keyboard/menu behavior, theme tokens and settings writes. Client slots can be absent in a new or old release; do not remove a working fallback before verifying the replacement exists. Trace preferences to the renderer: Markdown and code fonts can be CSS-driven while xterm reads a ThemeRuntime snapshot. A control that changes only storage is not a completed adaptation.
 
+A settings launcher may replace a direct button with an account menu while retaining the same sidebar seat and settings panel. Check the mounted launcher and its actual menu action before treating a missing old selector as a product failure. Browser fixtures must follow the supported navigation and dismiss only recognized onboarding actions; never skip arbitrary authentication or approval dialogs. Host-backed native settings and Mobile's Origin-local typography are separate owners: verify both instead of assuming a removed memory-only settings branch changes the plugin preference's scope.
+
 For skin conflicts, inspect the attached images as well as the installed package bytes: a missing background, unreadable drawer, shadowed header and blank trace are separate observations. A fix in the skin repository does not establish that the same-version npm package includes it. Reproduce the reported artifact before widening compatibility claims; [skin guidance](../../../../docs/SKIN_COMPATIBILITY.en.md) distinguishes existing semantic markers and per-device module selection from recreating a skin's private layout.
 
 Keep changes within the plugin when possible. Prefer an existing optional capability or version-independent feature detection to a brittle version allowlist. When the documented DSH seam cannot provide the requested behavior, explain the limitation and defer or explicitly propose the upstream change.
@@ -45,6 +47,8 @@ The embedded `packages/question-fixes` component is private and belongs to the m
 Use `scripts/packed-profile.mjs`, `scripts/check-packed-profile.mjs`, `scripts/check-companion-package.mjs` and `scripts/smoke-plugin-installation.mjs`. The live smoke covers the plugin-manager operation, persisted bundle, DSH-selected Host/Client and component toggle. An upgrade can legitimately return `restart-required`; restart only the owned fixture before completing acceptance. Keep a fresh-install failure distinct from that upgrade result.
 
 For installation/upgrade fixes, cover hoisted and isolated pnpm, a fresh install and an existing published installation. Old nested files may remain after an upgrade; verify the new artifact is selected rather than deleting user installation directories. For a market-install report, test a registry package spec as well as a local tarball; the loopback registry fixture supplies the same real artifact without publishing it.
+
+When converting an existing `link:` dependency to an archive, a successful `pnpm add` can update the manifest specifier while retaining the old link resolution. Inspect the lockfile resolution, selected filesystem target and installed manifest together; a targeted `pnpm update` can re-resolve the requested archive without changing unrelated dependencies. A package-manager store-format mismatch is a separate installation failure: preserve recoverable dependencies and align the profile's toolchain rather than changing the global store, clearing user data or granting an incompatibility exemption.
 
 ## Older WebViews
 

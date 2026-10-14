@@ -257,6 +257,31 @@ export async function pairMobilePage(phone, pairUrl, logs, {
   return workspace
 }
 
+/** Open upstream Settings in the supplied sidebar; activation can also inspect the real hit target. */
+export async function openMobileSettings(phone, { sidebar, activate = button => button.click() } = {}) {
+  const drawer = sidebar ?? phone.locator('.dshm-drawer')
+  if (sidebar === undefined && await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
+  const direct = drawer.locator('button:has([data-slot="settings.trigger"])')
+  const account = drawer.getByRole('button', { name: /^(?:Account menu|账号菜单)$/u })
+  await direct.or(account).waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
+  const directCount = await direct.count()
+  const accountCount = await account.count()
+  if (directCount + accountCount !== 1) throw new Error('Unexpected Mobile settings launcher')
+  if (directCount === 1) {
+    await activate(direct, 'launcher')
+    return
+  }
+  if (await account.getAttribute('aria-haspopup') !== 'menu') {
+    throw new Error('Unexpected Mobile settings launcher')
+  }
+  await activate(account, 'launcher')
+  const menu = phone.getByRole('menu')
+  await menu.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
+  const settings = menu.getByRole('menuitem').filter({ has: phone.getByText(/^(?:Settings|设置)$/u, { exact: true }) })
+  if (await settings.count() !== 1) throw new Error('Unexpected Mobile account settings action')
+  await activate(settings, 'menuitem')
+}
+
 /** Dismiss first-run choices without hiding arbitrary dialogs from screenshots. */
 export async function dismissOnboarding(phone) {
   const dialog = phone.locator('[role="dialog"][aria-modal="true"]').first()
@@ -264,9 +289,22 @@ export async function dismissOnboarding(phone) {
     await dialog.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {})
     if (await dialog.count() === 0) return
     const label = await dialog.getAttribute('aria-label')
-    const choices = await dialog.locator('button').allTextContents()
-    const skip = choices.findIndex(value => /稍后|later|skip|not now/iu.test(value))
-    const choice = skip >= 0 ? skip : choices.length === 1 ? 0 : -1
+    const choices = (await dialog.locator('button').allTextContents()).map(value => value.trim())
+    const initialAccount = /^(?:Get started|开始使用)$/u.test(label ?? '')
+      && choices.some(value => /^(?:Add API Key|添加 API Key)$/u.test(value))
+      && choices.some(value => /^(?:Sign in|登录)$/u.test(value))
+    if (initialAccount) {
+      const close = dialog.getByRole('button', { name: /^(?:Close|关闭)$/u })
+      if (await close.count() !== 1) throw new Error('Unexpected initial DSH account close action')
+      await close.click()
+      await phone.waitForFunction(previous => document.querySelector('[role="dialog"][aria-modal="true"]')?.getAttribute('aria-label') !== previous, label)
+      continue
+    }
+    const apiKeyOnboarding = /^(?:Add an API key to get started|添加一个 API Key 开始使用)$/u.test(label ?? '')
+    const skip = apiKeyOnboarding ? choices.findIndex(value => /^(?:Configure later|稍后配置)$/u.test(value)) : -1
+    const previewNotice = /^(?:Internal Testing Notice|Preview Notice|内测声明|预览版说明)$/u.test(label ?? '')
+      && choices.length === 1 && /^(?:Continue|继续)$/u.test(choices[0])
+    const choice = skip >= 0 ? skip : previewNotice ? 0 : -1
     if (choice < 0) throw new Error('Unexpected initial DSH dialog choices')
     await dialog.locator('button').nth(choice).click()
     await phone.waitForFunction(previous => document.querySelector('[role="dialog"][aria-modal="true"]')?.getAttribute('aria-label') !== previous, label)

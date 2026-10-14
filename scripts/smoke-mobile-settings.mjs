@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { packBundle } from './packed-profile.mjs'
 import { createMobileProfile, launchDsh, removeTemporaryRoot, openPairing, pairMobilePage,
-  dismissOnboarding, CLIENT_TIMEOUT_MS, sanitized } from './mobile-boot-fixture.mjs'
+  dismissOnboarding, openMobileSettings, CLIENT_TIMEOUT_MS, sanitized } from './mobile-boot-fixture.mjs'
 
 const repository = fileURLToPath(new URL('..', import.meta.url))
 const mobileRoot = process.env.DSH_BOOT_SMOKE_MOBILE_ROOT === undefined ? repository : resolve(process.env.DSH_BOOT_SMOKE_MOBILE_ROOT)
@@ -22,9 +22,7 @@ let failure
 let tarballSha256
 
 async function openSettings(page) {
-  const drawer = page.locator('.dshm-drawer')
-  if (await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
-  await drawer.locator('button:has([data-slot="settings.trigger"])').click()
+  await openMobileSettings(page)
   await page.locator('[data-mobile-font-setting]').waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
 }
 

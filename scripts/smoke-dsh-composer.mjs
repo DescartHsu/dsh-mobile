@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -6,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { packBundle } from './packed-profile.mjs'
 import {
-  createMobileProfile, launchDsh, removeTemporaryRoot, openPairing,
+  createMobileProfile, launchDsh, removeTemporaryRoot, openMobileSettings, openPairing,
   pairMobilePage, dismissOnboarding, CLIENT_TIMEOUT_MS, sanitized,
 } from './mobile-boot-fixture.mjs'
 
@@ -22,16 +23,22 @@ let browser
 let phone
 let failure
 let rpcSequence = 0
+let providerServer
+let providerRequests = 0
 
 async function rpc(page, method, request) {
-  const response = await page.evaluate(async ({ method, request, rpcId }) => {
+  return rpcArgs(page, method, { request })
+}
+
+async function rpcArgs(page, method, args) {
+  const response = await page.evaluate(async ({ method, args, rpcId }) => {
     const result = await fetch(`/api/${method}`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ type: 'client-request', rpcId, method, payload: { args: { request } } }),
+      body: JSON.stringify({ type: 'client-request', rpcId, method, payload: { args } }),
       signal: AbortSignal.timeout(60000),
     })
     return { status: result.status, body: await result.json() }
-  }, { method, request, rpcId: `composer-smoke-${++rpcSequence}` })
+  }, { method, args, rpcId: `composer-smoke-${++rpcSequence}` })
   assert.equal(response.status, 200, `${method} HTTP failure: ${sanitized(JSON.stringify(response))}`)
   assert.equal(response.body.result?.ok, true, `${method} RPC failure: ${sanitized(JSON.stringify(response))}`)
   return response.body.result.value
@@ -45,8 +52,7 @@ const nativeBack = page => page.evaluate(() => {
 })
 async function setMobileFontSize(page, size) {
   const drawer = page.locator('.dshm-drawer')
-  if (await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
-  await drawer.locator('button:has([data-slot="settings.trigger"])').click()
+  await openMobileSettings(page)
   const row = page.locator('[data-mobile-font-setting]')
   await row.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
   for (let steps = 0; steps < 32; steps++) {
@@ -86,6 +92,15 @@ function lineBreaks(node) {
 }
 
 try {
+  providerServer = createServer((request, response) => {
+    providerRequests += 1
+    request.resume()
+    response.writeHead(503, { 'content-type': 'application/json', connection: 'close' })
+    response.end(JSON.stringify({ error: 'Owned composer provider requests are forbidden' }))
+  })
+  await new Promise(resolveListen => { providerServer.listen(0, '127.0.0.1', resolveListen) })
+  const providerOrigin = `http://127.0.0.1:${providerServer.address().port}`
+  const credentialRef = 'DSH_COMPOSER_FIXTURE_KEY'
   const workspacePath = join(root, 'workspace')
   await mkdir(workspacePath)
   await writeFile(join(workspacePath, referenceName), 'Reference-only composer acceptance fixture.\n')
@@ -94,7 +109,9 @@ try {
   const home = await createMobileProfile(root, {
     tarball, dshBin,
     extraPatches: [{ id: 'llm-deepseek', config: {
-      // Static provider metadata exercises the real search UI without an API key or model request.
+      // This complete entry supplies an owned credential reference and loopback trap, never a user's key or endpoint.
+      apiKeyEnv: credentialRef,
+      baseURL: providerOrigin,
       models: Array.from({ length: 6 }, (_, index) => ({ id: `composer-model-${index}`, name: `Composer model ${index}`, contextWindow: 128000, inputModalities: ['text', 'image'] })),
     } }],
   })
@@ -102,6 +119,13 @@ try {
   browser = await chromium.launch({ headless: true })
   const desktop = await browser.newPage({ locale: 'en-US' })
   const pairUrl = await openPairing(desktop, await dsh.ready(), dsh.logs)
+  await rpcArgs(desktop, 'credentials/set', { ref: credentialRef, value: 'SYNTHETIC-composer-fixture-not-a-real-api-key' })
+  const ownedModelCatalog = await rpcArgs(desktop, 'session/modelCatalog', {})
+  const ownedGroup = ownedModelCatalog.groups.find(group => group.models.some(model => model.id === 'composer-model-0'))
+  const ownedModels = ownedGroup?.models
+  assert.deepEqual(ownedModels?.map(model => model.id), Array.from({ length: 6 }, (_, index) => `composer-model-${index}`),
+    'The actual Host catalog did not advertise all six owned static models')
+  assert.equal(providerRequests, 0, 'Static model catalog discovery contacted the owned provider trap')
   const workspace = await rpc(desktop, 'workspace/create', { path: workspacePath })
   assert.equal(typeof workspace.workspace?.workspaceId, 'string')
   phone = await browser.newPage({ viewport: { width: 375, height: 812 }, locale: 'en-US', isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
@@ -132,6 +156,15 @@ try {
   const card = phone.locator('[data-composer-card]').first()
   const editor = card.locator('[data-composer-input][contenteditable="true"]')
   await editor.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
+  // The selector's own Remote method supplies an explicit starting model; its live projection must reach the real trigger.
+  const effort = ownedModels[0].reasoning?.defaultEffort
+  const ownedSelection = { provider: ownedGroup.id, model: 'composer-model-0',
+    ...(effort === undefined ? {} : { reasoningEffort: effort }) }
+  const selected = await rpc(desktop, 'session/selectModel', { sessionId, ...ownedSelection })
+  assert.deepEqual(selected.selected, ownedSelection)
+  await phone.waitForFunction(() => document.querySelector('[data-dsh-mobile-composer-model-trigger]')?.textContent?.includes('Composer model 0'), undefined,
+    { timeout: CLIENT_TIMEOUT_MS })
+  assert.equal(providerRequests, 0, 'Selecting a model dispatched a provider request')
 
   const ordinaryRow = await card.evaluate(node => {
     const add = node.querySelector('[data-dsh-mobile-composer-tools] button')?.getBoundingClientRect()
@@ -343,9 +376,9 @@ try {
     }
   }
   assert.equal(prompts.length, 0, 'Composer acceptance attempted a model submission')
+  assert.equal(providerRequests, 0, 'Composer acceptance dispatched a provider request')
   await phone.setViewportSize({ width: 375, height: 812 })
-  if (await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
-  await drawer.locator('button:has([data-slot="settings.trigger"])').click()
+  await openMobileSettings(phone)
   const moduleRow = phone.locator('.dsh-module-row')
   await moduleRow.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
   const moduleCatalog = phone.waitForResponse(response => new URL(response.url()).pathname === '/mobile-access/client-modules' && response.request().method() === 'GET')
@@ -383,8 +416,9 @@ try {
   assert.deepEqual(afterModules.images.map(image => image.alt), expected.images.map(image => image.alt))
   assert.equal(await phone.evaluate(() => performance.timeOrigin), timeOrigin)
   assert.equal(prompts.length, 0)
+  assert.equal(providerRequests, 0, 'Composer module settings dispatched a provider request')
   console.log(`Packed DSH composer acceptance passed: ordinary single toolbar row, real browser Enter/empty draft, Lexical reference/image retention, panel button/native Back without autofocus, model body-portal/search/native Back, portrait/short-viewport/landscape and 16px/20px/32px fonts (${geometry.length} layouts).`)
-  console.log('Real DSH module settings: catalog, device-local save/reset, CSRF, Native Back and no automatic reload/draft loss passed.')
+  console.log('Real DSH module settings: catalog, device-local save/reset, CSRF, Native Back and no automatic reload/draft loss passed; model submissions=0, provider requests=0.')
   console.log(JSON.stringify(panelGeometry))
   console.log(JSON.stringify(geometry))
 } catch (error) {
@@ -399,6 +433,10 @@ try {
         throw new Error(`Composer DSH fixture did not stop quiescently: ${sanitized(JSON.stringify(stopped))}\n${dsh.logs()}`)
       }
     } catch (error) { failures.push(error) }
+  }
+  if (providerServer !== undefined) {
+    try { await new Promise((resolveClosed, reject) => { providerServer.close(error => { if (error) reject(error); else resolveClosed() }) }) }
+    catch (error) { failures.push(error) }
   }
   await removeTemporaryRoot(root, prefix).catch(error => { failures.push(error) })
   if (failures.length === 1) throw failures[0]

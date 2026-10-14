@@ -807,6 +807,7 @@ describe('HTTP gateway', () => {
     const mobile = await request(instance.address().port, '/', { headers })
     expect(mobile.status).toBe(200)
     expect(mobile.body).toContain('window.__DSH_MOBILE_FRONTEND__="dedicated"')
+    expect(mobile.body).toContain('<meta name="dsh-mobile-gateway" content="authenticated">')
     expect(mobile.body).toContain('/mobile-access/mobile-layout.js')
     expect(mobile.body).toContain('/plugins/feature.js')
     expect(mobile.body).toContain('<script src="/mobile-access/compat.js"></script>')
@@ -829,8 +830,23 @@ describe('HTTP gateway', () => {
     const stock = await request(instance.address().port, '/?frontend=stock', { headers })
     expect(stock.status).toBe(200)
     expect(stock.body).not.toContain('__DSH_MOBILE_FRONTEND__')
+    expect(stock.body).toContain('<meta name="dsh-mobile-gateway" content="authenticated">')
     expect(stock.body).toContain('/plugins/layout.js')
     expect(stock.body).not.toContain('/mobile-access/compat.js')
+    const conditionalStock = await request(instance.address().port, '/?frontend=stock', {
+      headers: { ...headers, 'if-none-match': '"old-upstream-html"', 'if-modified-since': 'Wed, 14 Oct 2026 00:00:00 GMT' },
+    })
+    expect(conditionalStock.status).toBe(200)
+    expect(conditionalStock.body).toContain('<meta name="dsh-mobile-gateway" content="authenticated">')
+    expect(inner.observations.at(-1)?.headers['if-none-match']).toBeUndefined()
+    expect(inner.observations.at(-1)?.headers['if-modified-since']).toBeUndefined()
+    const stockIndex = await request(instance.address().port, '/index.html?frontend=stock', { headers })
+    expect(stockIndex.status).toBe(200)
+    expect(stockIndex.body).toContain('<meta name="dsh-mobile-gateway" content="authenticated">')
+    expect(stockIndex.body).not.toContain('__DSH_MOBILE_FRONTEND__')
+    const unpairedStock = await request(instance.address().port, '/?frontend=stock', { headers: { ...headers, cookie: '' } })
+    expect(unpairedStock.status).toBe(302)
+    expect(unpairedStock.body).not.toContain('dsh-mobile-gateway')
   })
 
   it('localizes browser pairing and reauthentication pages from Accept-Language', async () => {

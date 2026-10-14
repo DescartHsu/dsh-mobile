@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | 使用 Android App、了解返回键、权限与升级 | [App 手册](../apps/mobile/README.zh-CN.md) | [Android app](../apps/mobile/README.md) |
 | 使用固定 Cloudflare 域名，而非临时随机地址 | [命名隧道](CLOUDFLARE_TUNNEL.md) | [Named tunnel](CLOUDFLARE_TUNNEL.en.md) |
+| 请求 cpolar 账号已预留的固定子域名（0.6.7 起） | [固定子域名](CPOLAR_SUBDOMAIN.md) | [Reserved subdomain](CPOLAR_SUBDOMAIN.en.md) |
 | 在已有 VPS 上新部署 FRP 与 HTTPS 入口 | [自建 FRP](SELF_HOSTED_FRP.md) | [Self-hosted FRP](SELF_HOSTED_FRP.en.md) |
 | 复用已经运行的 frps，不自动修改服务器 | [接入既有 frps](ATTACH_EXISTING_FRPS.md) | [Existing frps](ATTACH_EXISTING_FRPS.en.md) |
 | 复用 Lucky、Nginx 或 Caddy 的公开 HTTPS 入口 | [自有反向代理](SELF_HOSTED_ORIGIN.md) | [Own reverse proxy](SELF_HOSTED_ORIGIN.en.md) |
@@ -27,14 +28,6 @@
 | 由插件管理 Caddy HTTPS 上游 | [托管 Caddy](CADDY_MANAGED.md) | [Managed Caddy](CADDY_MANAGED.en.md) | 尚无可信固定二进制分发，安装与连接仍禁用 |
 
 ## 开发与安全 / Development and security
-
-### 开发中的配置 / Configuration in development
-
-当前正式插件仍为 0.6.6。以下指南描述尚未发布的候选功能，不代表升级当前正式包即可使用。
-
-| 功能 | 中文 | English | 状态 |
-| --- | --- | --- | --- |
-| 请求 cpolar 账号已预留的固定子域名 | [固定子域名](CPOLAR_SUBDOMAIN.md) | [Reserved subdomain](CPOLAR_SUBDOMAIN.en.md) | 候选配置项；无面板字段，需保留完整加载器配置 |
 
 0.6.3 的 [扩展 Worker 指南](EXTENSION_WORKERS.md)／[Worker guide](EXTENSION_WORKERS.en.md) 介绍按扩展启用、预算与显式恢复；此功能不迁移普通 Cordis 插件，也不是权限沙箱。
 

@@ -8,17 +8,9 @@ import z from '@deepseek-ai/schemastery'
 import { finished, type Readable } from 'node:stream'
 import { defaultExtensionWorkerModule, ExtensionWorkerBudget, ExtensionWorkerHost, type WorkerParentLogger } from './extension-worker.js'
 import { resolveHostExecution, type HostExecutionConfig, type ResolvedHostExecutionConfig } from './extension-worker-config.js'
+import { EXTENSION_LIMITS } from './extension-limits.js'
 
-/** Maximum sizes enforced at the local-extension filesystem boundary. */
-export const EXTENSION_LIMITS = Object.freeze({
-  manifest: 64 * 1024,
-  script: 1024 * 1024,
-  css: 512 * 1024,
-  asset: 8 * 1024 * 1024,
-  assetFiles: 256,
-  assetBytes: 32 * 1024 * 1024,
-  assetDepth: 8,
-})
+export { EXTENSION_LIMITS } from './extension-limits.js'
 
 /** A misbehaving host activation must not wedge the local watcher forever. */
 const HOST_ACTIVATION_TIMEOUT_MS = 5_000

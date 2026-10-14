@@ -73,6 +73,13 @@ export const NATIVE_MOBILE_STYLES = `
   html.dsh-native-mobile-active [data-dsh-mobile-sidebar] [class*="_sessionRow"] [class*="_pinIndicator"] { display:none !important; }
   html.dsh-native-mobile-active [data-dsh-mobile-sidebar] [class*="_rowActions"] button { box-sizing:border-box !important; width:32px !important; min-width:32px !important; height:32px !important; min-height:32px !important; }
   [data-dsh-mobile-frame] { grid-template-columns:0 minmax(0,1fr) 0 !important; width:100% !important; height:100dvh !important; overflow:hidden !important; }
+  /* The stock frame owns layout, not a tap target. Restore only its content
+     columns; the stock shell-overlay retains its own descendant hit policy. */
+  html.dsh-native-mobile-active [data-dsh-mobile-frame] { pointer-events:none !important; }
+  html.dsh-native-mobile-active [data-dsh-mobile-frame] > :is([data-dsh-mobile-sidebar],[data-dsh-mobile-center],[class*="_rightbarCol"]) { pointer-events:auto !important; }
+  /* Floating slot surfaces paint above mobile drawers; their empty layer
+     stays click-through and each stock occupant retains its own hit policy. */
+  html.dsh-native-mobile-active [data-shell-overlay] { z-index:300 !important; pointer-events:none !important; }
   [data-dsh-mobile-center] { grid-column:2 !important; width:100vw !important; min-width:0 !important; }
   [data-dsh-mobile-center] > * { min-width:0 !important; }
   [data-dsh-mobile-header] { box-sizing:border-box !important; width:calc(100% - 16px) !important; margin:0 8px !important; min-width:0; padding-top:max(4px,env(safe-area-inset-top)) !important; padding-right:8px !important; padding-left:42px !important; }
@@ -94,6 +101,10 @@ export const NATIVE_MOBILE_STYLES = `
   [data-dsh-mobile-sidebar] { position:fixed !important; z-index:240 !important; inset:0 auto 0 0 !important; width:0 !important; overflow:visible !important; }
   [data-dsh-mobile-sidebar-root] { position:fixed !important; z-index:241 !important; inset:max(env(safe-area-inset-top),0px) auto 0 0 !important; height:auto !important; transition:width 180ms var(--dsh-mobile-motion-ease),box-shadow 180ms ease !important; }
   [data-dsh-mobile-sidebar][data-open="true"] [data-dsh-mobile-sidebar-root] { width:min(88vw,340px) !important; padding-top:0 !important; box-shadow:18px 0 46px rgb(15 23 42 / 18%); }
+  /* Extra panel/footer seats may exceed a short drawer. Keep a bounded
+     workspace scrollport and let the drawer scroll to the remaining seats. */
+  [data-dsh-mobile-sidebar][data-open="true"]:not(:has([data-dsh-mobile-settings])) [data-dsh-mobile-sidebar-root] { overflow-y:auto !important; overscroll-behavior-y:contain; }
+  [data-dsh-mobile-sidebar][data-open="true"]:not(:has([data-dsh-mobile-settings])) [data-dsh-mobile-sidebar-root] > [class*="_regionArea"] { flex:1 0 50% !important; }
   [data-dsh-mobile-sidebar][data-open="true"] [data-dsh-mobile-sidebar-root] [class*="_logoRow"] { height:52px !important; padding:4px 0 4px 4px !important; margin-bottom:4px !important; }
   [data-dsh-mobile-sidebar][data-open="false"] [data-dsh-mobile-sidebar-root] { width:0 !important; border:0 !important; background:transparent !important; box-shadow:none !important; overflow:visible !important; }
   [data-dsh-mobile-sidebar][data-open="false"] [data-dsh-mobile-sidebar-root] > :not(:has([data-dsh-mobile-toggle])) { display:none !important; }

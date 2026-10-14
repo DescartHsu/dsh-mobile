@@ -2,7 +2,7 @@
 
 [中文指南](CPOLAR_SUBDOMAIN.md)
 
-> These settings are still in development and are not included in the current stable plugin **0.6.6**. This guide applies to a local candidate containing the feature; upgrading only to 0.6.6 does not enable it.
+> Requires plugin **0.6.7 or later**; versions through 0.6.6 do not read these two settings. No Android App update is required.
 
 cpolar assigns a temporary public address by default. Reserving a subdomain lets an account request a fixed address, reducing bookmark updates and re-pairing after tunnel restarts. A fixed address does not keep the tunnel permanently online or remove re-pairing requirements after credentials expire or a device is revoked.
 
@@ -67,7 +67,7 @@ Existing pairings are bound to an exact HTTPS Origin. Switching from a temporary
 
 | Symptom | Checks and action |
 | --- | --- |
-| A temporary address is still displayed | Confirm that the running candidate contains this feature, the fields are inside the existing `mobile-access` entry's complete `config`, and DSH has fully restarted. Then check the account reservation and region; local configuration alone is not success. |
+| A temporary address is still displayed | Confirm that plugin 0.6.7 or later is running, the fields are inside the existing `mobile-access` entry's complete `config`, and DSH has fully restarted. Then check the account reservation and region; local configuration alone is not success. |
 | The plugin reports `cpolar subdomain is invalid` | Check the request syntax and 63-character limit above, using only the reserved name. Passing local syntax checks still does not ensure cpolar accepts it. |
 | The plugin reports `cpolar region is invalid` | The format starts with a lowercase letter, followed only by lowercase letters, digits or underscores, up to 32 characters. Also confirm the identifier is valid for the account reservation. |
 | cpolar rejects the name or fails to start | Check the current plan, account, reserved name and region; inspect the error and follow cpolar's current instructions. The plugin does not treat the requested value as a successfully returned public address. |

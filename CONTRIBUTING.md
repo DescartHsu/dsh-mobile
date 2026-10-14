@@ -38,6 +38,8 @@ Browser checks consume built client files. Run `npm run build` and `npx playwrig
 | Module grouping/search, read/write recovery and a published optional skin | `npm run smoke:module-settings` |
 | Image handoff into actual DSH draft state and decoded previews | `npm run smoke:attachments` |
 | Local extension Worker execution and explicit recovery | `npm run smoke:extension-workers` |
+| Real sidebar rows, short drawers and additive panel/footer/overlay slots | `npm run smoke:mobile-sidebar` |
+| Paired customization, stock ownership and retained-page failure recovery | `npm run smoke:custom-assets` |
 
 These fixtures do not submit a model request or read the normal DSH home. Browser evidence does not establish physical Android keyboard, camera or device-lifecycle behavior.
 
@@ -71,6 +73,8 @@ For installation changes, run `npm run smoke:plugin-installation` against the sa
 `npm run smoke:module-settings` uses the isolated DSH runtime above through `DSH_BOOT_SMOKE_BIN`; the plugin's own `npm ci` does not install the DSH CLI. Set `DSH_BOOT_SMOKE_MOBILE_TARBALL` to fix the candidate tarball instead of packing the checkout. The smoke checks the real module modal, failed-read/write recovery, device-only exclusions, retained drafts and a pinned published skin combination. This combination regression does not establish full visual skin compatibility.
 
 `npm run smoke:attachments` uses that same isolated runtime and tarball. It reads DSH's public per-session draft state and requires decoded previews after actual native file-input and browser-camera intake, with no prompt/model submission. `--negative-control-items` removes the transfer item list; `--expect-legacy-items-failure` checks an older affected bundle. Both negative lanes require missing item metadata, the actual consumer's iterator failure, unchanged attachment state and completed cleanup before the terminal receipt. Host object-directory counts are not attachment-selection evidence; this browser fixture does not operate the Android picker or camera.
+
+`smoke:mobile-sidebar` and `smoke:custom-assets` require explicit `DSH_BOOT_SMOKE_BIN` and `DSH_BOOT_SMOKE_MOBILE_TARBALL` paths. The sidebar fixture uses the real Workspace consumer and additive slots, tests stock/dedicated touch geometry, and verifies a clipped-list negative control with `--negative-control-drawer`. The customization fixture observes executed scripts, computed styles, retained document/editor/draft and event-stream recovery after an injected manifest 401. It distinguishes a paired stock page from an ordinary DSH preview. These are isolated Chromium checks, not arbitrary community-plugin, public reverse-proxy or physical Android acceptance.
 
 Compatibility changes also run `npm run smoke:dsh-boot -- --legacy-webview`. The `--negative-control-compat` variation must fail with its expected missing-API marker after the compatibility script is blocked; an installation or fixture failure is not a successful negative control.
 

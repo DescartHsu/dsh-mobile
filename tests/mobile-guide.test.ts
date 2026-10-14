@@ -25,6 +25,15 @@ describe('buildMobileGuide', () => {
     expect(bare).toContain('mobile.js：不存在')
   })
 
+  it('distinguishes detected files from authenticated page activation', () => {
+    const text = guide({ hasCustomCss: true, hasCustomJs: true })
+    expect(text).toContain('已检测到文件，需在已配对页面验证加载')
+    expect(text).not.toContain('当前生效的自定义')
+    expect(text).toContain('普通 DSH 网页的登录凭据不等于移动配对凭据')
+    expect(text).toContain('若扩展 manifest 返回 401，页面不会继续加载定制样式与脚本')
+    expect(text).toContain('核对 Cookie 时只确认是否存在，不读取或公开其值')
+  })
+
   it('lists installed extensions', () => {
     const text = guide({ extensions: [{ id: 'media-remote', name: '媒体遥控', version: '0.1.0' }] })
     expect(text).toContain('media-remote（媒体遥控 v0.1.0）')

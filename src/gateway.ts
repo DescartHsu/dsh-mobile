@@ -33,7 +33,8 @@ import {
 import type { ResolvedGatewayConfig } from './config.js'
 import { ClientModulePreferenceStore, parseExcludedClientModules, type ClientModuleEntry, type ClientModulePreferenceView } from './client-module-preferences.js'
 import { renderClientModuleRecoveryPage } from './client-module-recovery.js'
-import { ensureMobileCompatibility, MOBILE_COMPAT_PATH } from './mobile-compat-bootstrap.js'
+import { ensureMobileCompatibility, ensureMobileGatewayMarker, MOBILE_COMPAT_PATH } from './mobile-compat-bootstrap.js'
+import { LEGACY_CUSTOM_ASSET_LIMIT } from './extension-limits.js'
 import { matchesIfNoneMatch, weakenEntityTag } from './http-cache.js'
 import {
   AUTH_PREFIX,
@@ -699,7 +700,7 @@ function rewriteMobileIndexWithBatch(
   const replacement = `${MOBILE_GATEWAY_REACHABILITY_BOOTSTRAP}${transportBootstrap}${mobileCsrfFetchBootstrap(options.csrfCookie ?? CSRF_COOKIE)}window.__DSH_MOBILE_FRONTEND__="dedicated";${plan.assignment}${JSON.stringify(plan.parsed)};`
   const rewritten = `${html.slice(0, plan.replaceStart)}${replacement}${html.slice(plan.replaceEnd)}`
   return Object.freeze({
-    html: ensureMobileViewport(ensureMobileCompatibility(rewriteMobileApplicationPreloads(rewritten, preloadReplacements))),
+    html: ensureMobileGatewayMarker(ensureMobileViewport(ensureMobileCompatibility(rewriteMobileApplicationPreloads(rewritten, preloadReplacements)))),
     batches,
   })
 }
@@ -1912,7 +1913,7 @@ export class MobileAccessGateway {
           if (customAsset.fallback === undefined) throw new HttpError(503, 'mobile_frontend_unavailable')
           body = Buffer.from(customAsset.fallback)
         }
-        if (body.byteLength > 256 * 1024) throw new HttpError(413, 'payload_too_large')
+        if (body.byteLength > LEGACY_CUSTOM_ASSET_LIMIT) throw new HttpError(413, 'payload_too_large')
         const etag = `"${createHash('sha256').update(body).digest('hex')}"`
         const responseHeaders: Record<string, string | number> = { ETag: etag }
         if (mtime !== undefined) responseHeaders['Last-Modified'] = mtime.toUTCString()
@@ -1967,8 +1968,9 @@ export class MobileAccessGateway {
     // entry points. An HTML Accept header also belongs to plugin previews,
     // iframe documents and downloads; those must retain their own route.
     const frontendDocument = target.decodedPathname === '/' || target.decodedPathname === '/index.html'
-    if (request.method === 'GET' && frontendDocument && acceptsHtml && !stockFrontend) {
-      await this.proxyMobileIndex(request, response, authorization)
+    if (request.method === 'GET' && frontendDocument && acceptsHtml) {
+      if (stockFrontend && target.decodedPathname === '/') request.url = '/'
+      await this.proxyMobileIndex(request, response, authorization, stockFrontend)
       return
     }
     if (stockFrontend && target.decodedPathname === '/') request.url = '/'
@@ -2002,7 +2004,7 @@ export class MobileAccessGateway {
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
             source = Buffer.from(fallback)
           }
-          if (source.byteLength > 256 * 1024) throw new HttpError(413, 'payload_too_large')
+          if (source.byteLength > LEGACY_CUSTOM_ASSET_LIMIT) throw new HttpError(413, 'payload_too_large')
           return createHash('sha256').update(source).digest('hex')
         }
         const [scriptRevision, styleRevision] = await Promise.all([
@@ -2330,6 +2332,8 @@ export class MobileAccessGateway {
       signal.throwIfAborted()
       if (upstreamCookie !== undefined) headers.cookie = upstreamCookie
       headers['accept-encoding'] = 'identity'
+      delete headers['if-none-match']
+      delete headers['if-modified-since']
       const proxied = await new Promise<IncomingMessage>((resolve, reject) => {
         upstreamRequest = requestHttp({
           protocol: 'http:', hostname: stripIpv6Brackets(this.config.upstreamOrigin.hostname),
@@ -2364,6 +2368,7 @@ export class MobileAccessGateway {
     request: IncomingMessage,
     response: ServerResponse,
     authorization: SessionAuthorization,
+    stockFrontend = false,
   ): Promise<void> {
     const holder: { request?: ClientRequest } = {}
     const operation = this.allocateRequest(authorization, response, holder)
@@ -2371,41 +2376,44 @@ export class MobileAccessGateway {
     response.once('close', onClose)
     try {
       const index = await this.fetchAuthenticatedUpstreamIndex(operation.signal, request)
-      const preference = await this.clientModulePreferences.read(authorization.deviceId)
-      const excludedClientModules = preference.excludedClientModules
       let body: Buffer
-      try {
-        const html = index.html
-        const plan = parseMobileBootPlan(html, excludedClientModules)
-        const options = plan.rewrittenBatchEntries === undefined
-          ? { excludedClientModules }
-          : { ...await this.resolveMobileBootSizes(plan.rewrittenBatchEntries.flatMap(batch => batch.entries), operation.signal), excludedClientModules }
-        const cookies = browserAuthCookies(request.headers.cookie)
-        const csrfCookie = this.tlsEnabled && cookies.has(HOST_SESSION_COOKIE) ? HOST_CSRF_COOKIE : CSRF_COOKIE
-        const rewritten = rewriteMobileIndexWithBatch(html, { ...options, csrfCookie })
-        for (const batch of rewritten.batches) this.rememberMobileBootBatch(batch)
-        body = Buffer.from(rewritten.html)
-      } catch (error) {
-        if (error instanceof ExcludedClientModulesError) {
-          const detail = error.message.replace(/[\r\n]/gu, ' ').slice(0, 512)
-          if (detail !== this.lastModuleExclusionError) {
-            this.lastModuleExclusionError = detail
-            process.emitWarning(detail, { code: 'DSH_MOBILE_MODULE_EXCLUSION_INVALID' })
-          }
-          if (preference.source === 'device' || preference.source === 'computer') {
-            operation.signal.throwIfAborted()
-            const locale = resolveAuthPageLocale(headerValue(request.headers, 'accept-language'))
-            const recovery = Buffer.from(renderClientModuleRecoveryPage(locale))
-            // A valid owned document uses 200 so Android does not replace its recovery action with a generic HTTP-error dialog.
-            setSecurityHeaders(response, this.tlsEnabled)
-            response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': recovery.byteLength })
-            response.end(recovery)
+      if (stockFrontend) body = Buffer.from(ensureMobileGatewayMarker(index.html))
+      else {
+        const preference = await this.clientModulePreferences.read(authorization.deviceId)
+        const excludedClientModules = preference.excludedClientModules
+        try {
+          const html = index.html
+          const plan = parseMobileBootPlan(html, excludedClientModules)
+          const options = plan.rewrittenBatchEntries === undefined
+            ? { excludedClientModules }
+            : { ...await this.resolveMobileBootSizes(plan.rewrittenBatchEntries.flatMap(batch => batch.entries), operation.signal), excludedClientModules }
+          const cookies = browserAuthCookies(request.headers.cookie)
+          const csrfCookie = this.tlsEnabled && cookies.has(HOST_SESSION_COOKIE) ? HOST_CSRF_COOKIE : CSRF_COOKIE
+          const rewritten = rewriteMobileIndexWithBatch(html, { ...options, csrfCookie })
+          for (const batch of rewritten.batches) this.rememberMobileBootBatch(batch)
+          body = Buffer.from(rewritten.html)
+        } catch (error) {
+          if (error instanceof ExcludedClientModulesError) {
+            const detail = error.message.replace(/[\r\n]/gu, ' ').slice(0, 512)
+            if (detail !== this.lastModuleExclusionError) {
+              this.lastModuleExclusionError = detail
+              process.emitWarning(detail, { code: 'DSH_MOBILE_MODULE_EXCLUSION_INVALID' })
+            }
+            if (preference.source === 'device' || preference.source === 'computer') {
+              operation.signal.throwIfAborted()
+              const locale = resolveAuthPageLocale(headerValue(request.headers, 'accept-language'))
+              const recovery = Buffer.from(renderClientModuleRecoveryPage(locale))
+              // A valid owned document uses 200 so Android does not replace its recovery action with a generic HTTP-error dialog.
+              setSecurityHeaders(response, this.tlsEnabled)
+              response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': recovery.byteLength })
+              response.end(recovery)
+              return
+            }
+            sendJson(response, 409, { error: 'excluded_client_modules_invalid', detail }, this.tlsEnabled)
             return
           }
-          sendJson(response, 409, { error: 'excluded_client_modules_invalid', detail }, this.tlsEnabled)
-          return
+          throw new HttpError(502, 'upstream_unavailable')
         }
-        throw new HttpError(502, 'upstream_unavailable')
       }
       operation.signal.throwIfAborted()
       const headers = sanitizeResponseHeaders(index.headers, this.config.upstreamOrigin)
@@ -2936,7 +2944,7 @@ export class MobileAccessGateway {
     const digestFile = async (path: string, fallback: string): Promise<string> => {
       try {
         const info = await stat(path)
-        if (!info.isFile() || info.size > 256 * 1024) return `invalid:${String(info.size)}:${String(info.mtimeMs)}`
+        if (!info.isFile() || info.size > LEGACY_CUSTOM_ASSET_LIMIT) return `invalid:${String(info.size)}:${String(info.mtimeMs)}`
         return createHash('sha256').update(await readFile(path)).digest('hex')
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return createHash('sha256').update(fallback).digest('hex')

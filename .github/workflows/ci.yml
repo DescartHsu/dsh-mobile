@@ -87,6 +87,12 @@ jobs:
       - name: Verify the real stock composer with optional plugin controls
         if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
         run: npm run smoke:composer-toolbar
+      - name: Verify sidebar rows and short drawers with additive slots
+        if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
+        run: npm run smoke:mobile-sidebar
+      - name: Verify paired customization ownership and retained-page recovery
+        if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
+        run: npm run smoke:custom-assets
       - name: Verify packed Worker execution and explicit recovery
         if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2'
         run: npm run smoke:extension-workers

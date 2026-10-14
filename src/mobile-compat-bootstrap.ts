@@ -26,6 +26,14 @@ function commentRanges(html: string): readonly (readonly [number, number])[] {
   return [...html.matchAll(/<!--[\s\S]*?-->/gu)].map(match => [match.index, match.index + match[0].length] as const)
 }
 
+/** Mark an authenticated Gateway document without changing its layout, transport or module selection. */
+export function ensureMobileGatewayMarker(html: string): string {
+  const comments = commentRanges(html)
+  const first = [...html.matchAll(/<script\b[^>]*>/giu)].find(match => !comments.some(([start, end]) => match.index >= start && match.index < end))
+  if (first === undefined) return html
+  return `${html.slice(0, first.index)}<meta name="dsh-mobile-gateway" content="authenticated">${html.slice(first.index)}`
+}
+
 /**
  * Load the compatibility bundle synchronously, before the first DSH script.
  *

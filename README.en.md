@@ -31,7 +31,7 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.6**. Fix captured images not reaching the DSH attachment draft, and improve cancellation and late-result handling in browser file selection. [Changelog](CHANGELOG.md) · [Release downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.6).
+> **Current stable release: 0.6.7**. Add reserved cpolar subdomain configuration, improve narrow-screen sidebar and overlay interaction, and clarify mobile customization ownership, failures and recovery. [Changelog](CHANGELOG.md) · [Release downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.7).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
@@ -212,7 +212,9 @@ It can also drive computer capabilities the phone can use, like reading the mach
 /mobile give the phone a cyberpunk-style computer monitor panel that shows live CPU, memory, and disk usage
 ```
 
-Two kinds of changes are supported: the phone UI itself (theme, layout, buttons), and computer capabilities the phone can use (browsing computer files, running programs on the computer). `/mobile` hands the request to the DSH agent, which edits files under the local DSH configuration directory (`$DSH_HOME/mobile-access/`); the phone client applies them automatically. UI changes live in `mobile.css`/`mobile.js`. Computer capabilities come from extensions under `extensions/`, whose `host.mjs` runs with the local user's privileges on the computer. DeepSeek Harness source is not modified.
+Two kinds of changes are supported: the phone UI itself (theme, layout, buttons), and computer capabilities the phone can use (browsing computer files, running programs on the computer). `/mobile` hands the request to the DSH agent, which edits files under the local DSH configuration directory (`$DSH_HOME/mobile-access/`); paired mobile pages automatically check and apply them. UI changes live in `mobile.css`/`mobile.js`. Computer capabilities come from extensions under `extensions/`, whose `host.mjs` runs with the local user's privileges on the computer. DeepSeek Harness source is not modified.
+
+Open customizations through the **Mobile Access pairing entry**. Opening an ordinary DSH page or selecting a phone-sized browser viewport is not mobile pairing, and a file's presence does not establish that the current page loaded it. If extension requests return `401`, check the entry and pairing state; do not enable anonymous access or share Cookies or Tokens.
 
 Extension manifests, scripts, styles, and assets are revisioned. When the plugin observes a `/mobile` or extension-file change, it notifies authenticated phones to refresh immediately; 45-second visible and 5-minute hidden checks remain only as recovery fallbacks. A failed Host staging pass keeps the current version; if the Host has changed but the new phone UI cannot activate, that extension closes and retries instead of mixing generations.
 

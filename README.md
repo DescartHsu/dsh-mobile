@@ -31,7 +31,7 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.6**。修复拍照图片无法进入 DSH 附件草稿的问题，改善浏览器文件选择的取消与迟到结果处理。[更新记录](CHANGELOG.md) · [版本下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.6)。
+> **当前正式版本：0.6.7**。支持 cpolar 预留子域名配置，改善窄屏侧栏与浮层交互，并补全移动定制的入口识别、失败提示和恢复处理。[更新记录](CHANGELOG.md) · [版本下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.7)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
@@ -212,7 +212,9 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
 /mobile 为手机端添加赛博朋克风格的电脑监控面板，实时显示电脑的 CPU、内存和磁盘占用
 ```
 
-`/mobile` 把需求交给 DSH 对话中的 agent，由它直接修改本机 `$DSH_HOME/mobile-access/` 下的文件，保存后手机端自动生效。改动分两类：界面和交互在 `mobile.css`/`mobile.js`；需要电脑能力时用 `extensions/` 下的扩展，其 `host.mjs` 以本机用户权限在电脑上运行。不修改 DeepSeek Harness 源码。
+`/mobile` 把需求交给 DSH 对话中的 agent，由它直接修改本机 `$DSH_HOME/mobile-access/` 下的文件，已配对的移动页面会自动检查并应用。改动分两类：界面和交互在 `mobile.css`/`mobile.js`；需要电脑能力时用 `extensions/` 下的扩展，其 `host.mjs` 以本机用户权限在电脑上运行。不修改 DeepSeek Harness 源码。
+
+定制需要从 **移动访问的配对入口**进入。直接打开普通 DSH 网页或调整浏览器为手机视口，不等于完成移动配对；文件存在也不代表当前页面已加载。若扩展接口返回 `401`，先核对入口与配对状态，不要开放匿名访问或公开 Cookie、Token。
 
 扩展清单及其脚本、样式和资源按版本标识刷新。插件监听到 `/mobile` 或扩展文件变化后，会通过已认证连接通知手机立即更新；页面可见时每 45 秒、隐藏时每 5 分钟的检查只作为断线兜底。Host 暂存失败会继续使用现有版本；若 Host 已更新但新手机界面激活失败，则关闭该扩展并自动重试，避免混用新旧能力。
 

@@ -2,10 +2,14 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
-## Unreleased plugin changes
+## 0.6.7 - 2026-10-14
 
 - Add optional `cpolarSubdomain` and `cpolarRegion` profile settings for a reserved cpolar address. Omitted or blank values keep provider defaults; only the validated HTTPS origin reported by cpolar is used. Existing pairing and authorization checks are unchanged. [Configuration guide](docs/CPOLAR_SUBDOMAIN.en.md).
 - Include complete profile override examples and regressions for configuration-to-process arguments, invalid settings and provider startup failures. This feature does not require an Android App update.
+- Improve narrow-screen sidebar interaction and scrolling with larger panel/footer content. Keep the Workspace list usable and footer actions reachable without enabling the shell overlay as a full-page click target.
+- Load mobile customizations only on their authenticated Gateway entry, including the stock diagnostic page. Add deduplicated Chinese, English and Italian failure/recovery messages, pause unauthorized extension streams, and retain loaded styles and page state through temporary failures without weakening authentication.
+- Ignore a cancelled manifest request before it can clear newer extensions. Preserve the existing custom-file and extension size limits, and keep preview Back handling separate from Gateway API loading.
+- Clarify `/mobile` and both READMEs: detected files are not proof of page activation; ordinary DSH login or phone-sized preview does not establish mobile pairing. Thanks @Dantezcx for the detailed reports in [#209](https://github.com/saya-ch/dsh-mobile/issues/209) and [#210](https://github.com/saya-ch/dsh-mobile/issues/210).
 - Thanks @GavinQiEr for the request in [#207](https://github.com/saya-ch/dsh-mobile/issues/207) and implementation in [#208](https://github.com/saya-ch/dsh-mobile/pull/208); the original author commit is retained alongside maintainer corrections.
 
 ## Unreleased Android changes

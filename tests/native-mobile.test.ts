@@ -26,6 +26,27 @@ function fakeRoot(elements: readonly HTMLElement[], dialogs: readonly HTMLElemen
 }
 
 describe('native mobile presentation', () => {
+  it('keeps a scrollable workspace seat when a narrow drawer has long panel and footer seats', () => {
+    const [, overlay] = NATIVE_MOBILE_STYLES.split(`@media ${NATIVE_MOBILE_OVERLAY_QUERY}`)
+    expect(overlay).toContain('[data-dsh-mobile-sidebar][data-open="true"]:not(:has([data-dsh-mobile-settings])) [data-dsh-mobile-sidebar-root] { overflow-y:auto !important; overscroll-behavior-y:contain; }')
+    expect(overlay).toContain('[data-dsh-mobile-sidebar][data-open="true"]:not(:has([data-dsh-mobile-settings])) [data-dsh-mobile-sidebar-root] > [class*="_regionArea"] { flex:1 0 50% !important; }')
+    expect(overlay).not.toContain('min-height:220px')
+  })
+
+  it('lets only the marked stock content columns reclaim frame hit testing', () => {
+    const [, overlay] = NATIVE_MOBILE_STYLES.split(`@media ${NATIVE_MOBILE_OVERLAY_QUERY}`)
+    expect(overlay).toContain('html.dsh-native-mobile-active [data-dsh-mobile-frame] { pointer-events:none !important; }')
+    expect(overlay).toContain('[data-dsh-mobile-frame] > :is([data-dsh-mobile-sidebar],[data-dsh-mobile-center],[class*="_rightbarCol"]) { pointer-events:auto !important; }')
+    expect(overlay).not.toContain('[data-dsh-mobile-frame] > * { pointer-events:auto')
+    expect(overlay).not.toContain('[class*="_overlayLayer"] { pointer-events:auto')
+  })
+
+  it('raises public floating surfaces above narrow drawers without intercepting empty space', () => {
+    const [, overlay] = NATIVE_MOBILE_STYLES.split(`@media ${NATIVE_MOBILE_OVERLAY_QUERY}`)
+    expect(overlay).toContain('html.dsh-native-mobile-active [data-shell-overlay] { z-index:300 !important; pointer-events:none !important; }')
+    expect(overlay).not.toContain('[data-shell-overlay] > * { pointer-events:auto')
+  })
+
   it('reserves the full settings close target inside its padded header', () => {
     const shared = NATIVE_MOBILE_STYLES.slice(0, NATIVE_MOBILE_STYLES.indexOf('@media'))
     expect(shared).toContain('html.dsh-native-mobile-active [data-dsh-mobile-settings-header] { box-sizing:border-box !important; height:56px !important; min-height:56px !important; padding:4px 12px !important; }')

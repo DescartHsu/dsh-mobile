@@ -35,15 +35,15 @@ export interface MobileGuideState {
 
 /** Compose the guide with the current customization state injected. */
 export function buildMobileGuide(state: MobileGuideState): string {
-  const styleLine = state.hasCustomCss ? '存在（当前生效的自定义样式）' : '不存在（使用内置默认样式）'
-  const scriptLine = state.hasCustomJs ? '存在（当前生效的自定义脚本）' : '不存在（无自定义脚本）'
+  const styleLine = state.hasCustomCss ? '存在（已检测到文件，需在已配对页面验证加载）' : '不存在（使用内置默认样式）'
+  const scriptLine = state.hasCustomJs ? '存在（已检测到文件，需在已配对页面验证加载）' : '不存在（无自定义脚本）'
   const extensionLines = state.extensions.length === 0
     ? '（无）'
     : state.extensions.map(entry => `- ${entry.id}（${entry.name} v${entry.version}）${entry.executionMode === undefined ? '' : ` · ${entry.executionMode}${entry.executionState === 'unavailable' ? ' · 当前不可用，需要显式重启扩展' : ''}`}`).join('\n')
   const failureLine = state.failedExtensionCount > 0
     ? `注意：${state.failedExtensionCount} 个扩展的电脑端 host 激活失败，如改动相关扩展请先检查其 host.mjs 与 extension.json。`
     : ''
-  const currentState = `## 手机端当前状态（改动前必读，避免覆盖已有定制）
+  const currentState = `## 本机定制文件与扩展状态（改动前必读，避免覆盖已有定制）
 
 - 定制目录：${state.directory}（所有改动只允许在这里进行）
 - mobile.css：${styleLine}
@@ -70,7 +70,9 @@ const MOBILE_CUSTOMIZATION_GUIDE_BODY = `你在为用户定制 DSH Mobile 的手
 1. 界面与交互 —— 只改外观和交互，不需要碰电脑的文件或程序：
    - $DSH_HOME/mobile-access/mobile.css：手机端样式
    - $DSH_HOME/mobile-access/mobile.js：手机端脚本，用 window.dshMobile.register(({ root }) => { ... }) 把内容挂载到 root，返回清理函数
-   - 保存后手机端几秒内自动应用，无需重启
+   - 保存后已配对的 DSH Mobile 页面会自动检查并应用，无需重启；文件存在不表示某个页面已成功加载
+
+定制资源通过 DSH Mobile Gateway 的移动配对会话认证。普通 DSH 网页的登录凭据不等于移动配对凭据；直接打开普通 DSH 地址或仅用手机视口预览，不能据此验证 mobile.css / mobile.js。若扩展 manifest 返回 401，页面不会继续加载定制样式与脚本；先确认是通过“移动访问”配对入口进入，并检查实际请求与页面中的定制样式，不要盲改 CSS 或放松认证。核对 Cookie 时只确认是否存在，不读取或公开其值。
 
 动手前先读已有的定制文件。若要调整 DSH 自带的输入框、侧栏或设置等现有界面，先确认当前 DSH 版本与手机页面模式（专用移动页面或 ?frontend=stock），只读核对运行页面的 DOM、属性和样式；本机有同版本前端源码时可参考相应组件，没有源码时可查看已安装的客户端产物，不必下载源码。优先使用扩展 API、插槽和稳定的 data-* 标记，不凭猜测依赖构建类名。只读查看不改变前述写入范围。
 

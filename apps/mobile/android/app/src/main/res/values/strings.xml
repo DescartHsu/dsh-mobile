@@ -78,6 +78,7 @@
     <string name="blocked_navigation">Navigation blocked\nThe target is not HTTPS or was not opened by you. Open only trusted HTTPS links.</string>
     <string name="no_browser">Link could not be opened\nNo system browser is available. Install or enable a browser and try again.</string>
     <string name="choose_file">Choose file</string>
+    <string name="file_picker_unavailable">Could not start file selection. Restart the app and check the system file app, then try again.</string>
     <string name="take_photo">Take photo</string>
     <string name="choose_download_destination">Save download</string>
     <string name="download_blocked">Download blocked\nThe file is not from the currently connected DSH. Download only files provided by this DSH.</string>

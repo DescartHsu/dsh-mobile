@@ -7,6 +7,7 @@
  */
 import { installTaskCompletionWatcher, type TaskNotifyKind } from './task-notify.js'
 import { MOBILE_COMPOSER_TOOLBAR_STYLES } from './mobile-composer-toolbar.js'
+import { pickBrowserFiles } from './browser-file-picker.js'
 
 export const NATIVE_MOBILE_OVERLAY_QUERY = '(max-width:720px)'
 
@@ -422,16 +423,58 @@ export type NativeMobileLanguage = 'it' | 'en' | 'zh'
 
 interface FileDropTarget { dispatchEvent(event: Event): boolean }
 
-function controlledFileDragEvent(type: 'dragover' | 'drop', files: readonly File[], initialDropEffect: DataTransfer['dropEffect']): DragEvent {
-  const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent
-  const dataTransfer = {
+/** A read-only, file-only transfer for engines without usable native constructors. */
+function controlledFileTransfer(files: readonly File[], initialDropEffect: DataTransfer['dropEffect']): DataTransfer {
+  const snapshot = [...files]
+  const fileList: FileList = Object.assign(snapshot, { item: (index: number) => snapshot[index] ?? null })
+  const items: DataTransferItemList = Object.assign(snapshot.map((file): DataTransferItem => ({
+    kind: 'file', type: file.type, getAsFile: () => file,
+    getAsString: () => { /* File-only items have no string data. */ },
+    webkitGetAsEntry: () => null,
+  })), {
+    add: () => null,
+    clear: () => { /* Drag payload members are read-only. */ },
+    remove: () => { /* Drag payload members are read-only. */ },
+  })
+  Object.freeze(fileList); Object.freeze(items)
+  return {
     dropEffect: initialDropEffect,
     effectAllowed: 'copy',
-    files: Object.freeze([...files]),
+    files: fileList,
+    items,
     types: Object.freeze(['Files']),
-  } as unknown as DataTransfer
-  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
-  return event
+    clearData: () => { /* File-only drops do not carry string data. */ },
+    getData: () => '',
+    setData: () => { /* File-only drops do not carry string data. */ },
+    setDragImage: () => { /* No drag image is painted for programmatic delivery. */ },
+  }
+}
+
+function nativeFileTransfer(files: readonly File[], initialDropEffect: DataTransfer['dropEffect']): DataTransfer {
+  const transfer = new DataTransfer()
+  for (const file of files) if (transfer.items.add(file) === null) throw new Error('file_transfer_unavailable')
+  if (transfer.files.length !== files.length) throw new Error('file_transfer_unavailable')
+  transfer.effectAllowed = 'copy'; transfer.dropEffect = 'copy'
+  if (transfer.effectAllowed !== 'copy' || transfer.dropEffect !== 'copy') throw new Error('file_transfer_unavailable')
+  transfer.dropEffect = initialDropEffect
+  if (transfer.dropEffect !== initialDropEffect) throw new Error('file_transfer_unavailable')
+  return transfer
+}
+
+function controlledFileDragEvent(type: 'dragover' | 'drop', files: readonly File[], initialDropEffect: DataTransfer['dropEffect']): Event & { readonly dataTransfer: DataTransfer | null } {
+  let transfer: DataTransfer
+  if (typeof DataTransfer === 'function') {
+    try { transfer = nativeFileTransfer(files, initialDropEffect) }
+    catch (_error) { /* Some engines cannot populate transfers or change their preview effects. */ transfer = controlledFileTransfer(files, initialDropEffect) }
+  } else transfer = controlledFileTransfer(files, initialDropEffect)
+  if (typeof DragEvent === 'function') {
+    try {
+      const event = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer })
+      if (event.dataTransfer !== null) return event
+    }
+    catch (_error) { /* Older engines may reject a constructed or fallback transfer. */ }
+  }
+  return Object.assign(new Event(type, { bubbles: true, cancelable: true }), { dataTransfer: transfer })
 }
 
 /** Ask the official document dragover listener whether the current composer accepts files. */
@@ -1022,7 +1065,6 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   const preflightFile = new File([], 'dsh-mobile-preflight.png', { type: 'image/png' })
   const canAcceptComposerDrop = (): boolean => preflightComposerImageDrop(document, [preflightFile])
   const mediaPickerAbortController = new AbortController()
-  const browserPickerCleanups = new Set<() => void>()
   let boundEnterEditor: HTMLElement | null = null
   let boundEnterCard: HTMLElement | null = null
   let disposeEnterBinding: (() => void) | undefined
@@ -1071,60 +1113,14 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   }
   const deliverImages = (files: readonly File[], context: ReturnType<typeof mediaRequestContext>): void => {
     if (files.length === 0 || !mediaRequestIsCurrent(context)) return
-    dispatchComposerImageDrop(document, files)
+    if (!dispatchComposerImageDrop(document, files)) showMediaToast(label('Allegati immagine non disponibili', 'Image attachments are unavailable', '图片附件不可用'))
   }
   const launchBrowserCamera = (context: ReturnType<typeof mediaRequestContext>): void => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = 'image/*'
-    input.capture = 'environment'
-    input.hidden = true
-    const signal = mediaPickerAbortController.signal
-    let cleanupTimer = 0
-    let watchdogTimer = 0
-    let cleaned = false
-    const scheduleCleanup = (): void => {
-      if (!cleaned && cleanupTimer === 0) cleanupTimer = window.setTimeout(cleanup, 1000)
-    }
-    const onVisibilityChange = (): void => {
-      if (document.visibilityState === 'visible') scheduleCleanup()
-    }
-    const onChange = (): void => {
-      if (cleaned) return
-      const files = input.files === null ? [] : [...input.files]
-      cleanup()
-      deliverImages(files, context)
-    }
-    const cleanup = (): void => {
-      if (cleaned) return
-      cleaned = true
-      if (cleanupTimer !== 0) window.clearTimeout(cleanupTimer)
-      if (watchdogTimer !== 0) window.clearTimeout(watchdogTimer)
-      cleanupTimer = 0
-      watchdogTimer = 0
-      input.removeEventListener('change', onChange)
-      input.removeEventListener('cancel', cleanup)
-      window.removeEventListener('focus', scheduleCleanup)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-      signal.removeEventListener('abort', cleanup)
-      browserPickerCleanups.delete(cleanup)
-      input.remove()
-    }
-    input.addEventListener('change', onChange)
-    input.addEventListener('cancel', cleanup)
-    window.addEventListener('focus', scheduleCleanup)
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    signal.addEventListener('abort', cleanup, { once: true })
-    watchdogTimer = window.setTimeout(cleanup, 300_000)
-    browserPickerCleanups.add(cleanup)
-    if (signal.aborted) { cleanup(); return }
-    try {
-      document.body.append(input)
-      input.click()
-    } catch {
-      cleanup()
-      if (mediaRequestIsCurrent(context)) showMediaToast(label('Impossibile aprire la fotocamera', 'Could not open the camera', '无法打开相机'))
-    }
+    void pickBrowserFiles({ accept: 'image/*', capture: 'environment', signal: mediaPickerAbortController.signal }).then(files => {
+      if (files !== undefined) deliverImages(files, context)
+    }).catch((_error: unknown) => {
+      if (mediaRequestIsCurrent(context)) showMediaToast(label('Impossibile aggiungere la foto', 'Could not attach the photo', '无法附加照片'))
+    })
   }
   const dismissCommandMenu = (): void => {
     const trigger = boundComposer?.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"][aria-expanded="true"]')
@@ -1600,7 +1596,6 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     mediaRequestGeneration += 1
     mediaPickerAbortController.abort()
     restoreLanguageMarker()
-    for (const cleanup of [...browserPickerCleanups]) cleanup()
     disposeEnterBinding?.()
     disposeBrowserComposerSoftEnter()
     observer.disconnect()

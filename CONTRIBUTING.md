@@ -36,6 +36,7 @@ Browser checks consume built client files. Run `npm run build` and `npx playwrig
 | Async access-panel forms | `npm run smoke:control-state` |
 | Module-selection recovery | `npm run smoke:module-recovery` |
 | Module grouping/search, read/write recovery and a published optional skin | `npm run smoke:module-settings` |
+| Image handoff into actual DSH draft state and decoded previews | `npm run smoke:attachments` |
 | Local extension Worker execution and explicit recovery | `npm run smoke:extension-workers` |
 
 These fixtures do not submit a model request or read the normal DSH home. Browser evidence does not establish physical Android keyboard, camera or device-lifecycle behavior.
@@ -68,6 +69,8 @@ For installation changes, run `npm run smoke:plugin-installation` against the sa
 `npm run smoke:mobile-settings` checks the mounted DSH General settings, local typography and narrow-screen controls. Its native bridge is simulated; physical WebView zoom, keyboard and system-bar behavior require ADB evidence.
 
 `npm run smoke:module-settings` uses the isolated DSH runtime above through `DSH_BOOT_SMOKE_BIN`; the plugin's own `npm ci` does not install the DSH CLI. Set `DSH_BOOT_SMOKE_MOBILE_TARBALL` to fix the candidate tarball instead of packing the checkout. The smoke checks the real module modal, failed-read/write recovery, device-only exclusions, retained drafts and a pinned published skin combination. This combination regression does not establish full visual skin compatibility.
+
+`npm run smoke:attachments` uses that same isolated runtime and tarball. It reads DSH's public per-session draft state and requires decoded previews after actual native file-input and browser-camera intake, with no prompt/model submission. `--negative-control-items` removes the transfer item list; `--expect-legacy-items-failure` checks an older affected bundle. Both negative lanes require missing item metadata, the actual consumer's iterator failure, unchanged attachment state and completed cleanup before the terminal receipt. Host object-directory counts are not attachment-selection evidence; this browser fixture does not operate the Android picker or camera.
 
 Compatibility changes also run `npm run smoke:dsh-boot -- --legacy-webview`. The `--negative-control-compat` variation must fail with its expected missing-API marker after the compatibility script is blocked; an installation or fixture failure is not a successful negative control.
 

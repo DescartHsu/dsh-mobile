@@ -327,6 +327,142 @@ describe('native mobile presentation', () => {
     expect(dispatchComposerImageDrop(target, [file])).toBe(true)
     expect(events.map(event => event.type)).toEqual(['dragover', 'drop'])
     expect([...(events[1]?.dataTransfer?.files ?? [])]).toEqual([file])
+    const transfer = events[1]?.dataTransfer
+    expect(transfer?.files.item(0)).toBe(file)
+    expect(transfer?.files.item(999)).toBeNull()
+    expect([...transfer?.items ?? []].map(item => ({ kind: item.kind, type: item.type, file: item.getAsFile(), directory: item.webkitGetAsEntry() })))
+      .toEqual([{ kind: 'file', type: 'image/png', file, directory: null }])
+  })
+
+  it('supplies iterable file items to a directory-aware DSH drop consumer', () => {
+    const file = new File(['image'], 'image.png', { type: 'image/png' })
+    const delivered: File[] = []
+    const target = {
+      dispatchEvent(event: Event): boolean {
+        const drag = event as DragEvent
+        if (drag.type === 'dragover' && drag.dataTransfer !== null) drag.dataTransfer.dropEffect = 'copy'
+        if (drag.type === 'drop' && drag.dataTransfer !== null) {
+          for (const item of drag.dataTransfer.items) {
+            if (item.kind === 'file' && item.webkitGetAsEntry() === null) {
+              const selected = item.getAsFile()
+              if (selected !== null) delivered.push(selected)
+            }
+          }
+        }
+        return true
+      },
+    }
+    expect(dispatchComposerImageDrop(target, [file])).toBe(true)
+    expect(delivered).toEqual([file])
+  })
+
+  it('falls back to the complete file payload when exposed browser constructors fail', () => {
+    vi.stubGlobal('DataTransfer', class { constructor() { throw new Error('unsupported transfer constructor') } })
+    vi.stubGlobal('DragEvent', class { constructor() { throw new Error('unsupported drag constructor') } })
+    try {
+      const file = new File(['image'], 'image.png', { type: 'image/png' })
+      const seen: File[][] = []
+      const target = { dispatchEvent: (event: Event) => {
+        const transfer = (event as DragEvent).dataTransfer
+        if (event.type === 'dragover' && transfer !== null) transfer.dropEffect = 'copy'
+        if (event.type === 'drop' && transfer !== null) seen.push([...transfer.files])
+        return true
+      } }
+      expect(dispatchComposerImageDrop(target, [file])).toBe(true)
+      expect(seen).toEqual([[file]])
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('keeps a successful preflight separate from an attachment acknowledgement', () => {
+    const file = new File(['image'], 'image.png', { type: 'image/png' })
+    const target = { dispatchEvent(event: Event): boolean {
+      const drag = event as DragEvent
+      if (event.type === 'dragover' && drag.dataTransfer !== null) drag.dataTransfer.dropEffect = 'copy'
+      return true
+    } }
+    expect(dispatchComposerImageDrop(target, [file])).toBe(true)
+  })
+
+  it('rejects nominal native transfers that refuse items even if their file count appears populated', () => {
+    const file = new File(['image'], 'image.png', { type: 'image/png' })
+    vi.stubGlobal('DataTransfer', class { files = [file]; items = { add: () => null } })
+    try {
+      const received: File[] = []
+      const target = { dispatchEvent(event: Event): boolean {
+        const transfer = (event as DragEvent).dataTransfer
+        if (event.type === 'dragover' && transfer !== null) transfer.dropEffect = 'copy'
+        if (event.type === 'drop' && transfer !== null) for (const item of transfer.items) {
+          const selected = item.getAsFile()
+          if (selected !== null) received.push(selected)
+        }
+        return true
+      } }
+      expect(dispatchComposerImageDrop(target, [file])).toBe(true)
+      expect(received).toEqual([file])
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('falls back when DragEvent ignores its transfer rather than delivering a null payload', () => {
+    vi.stubGlobal('DragEvent', class extends Event { readonly dataTransfer = null })
+    try {
+      const file = new File(['image'], 'image.png', { type: 'image/png' })
+      const received: File[] = []
+      const target = { dispatchEvent(event: Event): boolean {
+        const transfer = (event as DragEvent).dataTransfer
+        if (event.type === 'dragover' && transfer !== null) transfer.dropEffect = 'copy'
+        if (event.type === 'drop' && transfer !== null) received.push(...transfer.files)
+        return true
+      } }
+      expect(dispatchComposerImageDrop(target, [file])).toBe(true)
+      expect(received).toEqual([file])
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('falls back when a native item constructor does not populate its FileList', () => {
+    const file = new File(['image'], 'image.png', { type: 'image/png' })
+    vi.stubGlobal('DataTransfer', class { files: File[] = []; items = { add: () => ({ kind: 'file', getAsFile: () => file }) } })
+    try {
+      let length = 0
+      const target = { dispatchEvent(event: Event): boolean {
+        const transfer = (event as DragEvent).dataTransfer
+        if (event.type === 'dragover' && transfer !== null) transfer.dropEffect = 'copy'
+        if (event.type === 'drop' && transfer !== null) length = transfer.files.length
+        return true
+      } }
+      expect(dispatchComposerImageDrop(target, [file])).toBe(true)
+      expect(length).toBe(1)
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('falls back when native transfer controls ignore writes despite accepting file items', () => {
+    const file = new File(['image'], 'image.png', { type: 'image/png' })
+    for (const locked of ['effectAllowed', 'dropEffect']) {
+      vi.stubGlobal('DataTransfer', class {
+        files: File[] = []
+        items = { add: (selected: File) => { this.files.push(selected); return { kind: 'file', getAsFile: () => selected } } }
+        private effect = 'none'
+        private drop = 'none'
+        get effectAllowed(): string { return this.effect }
+        set effectAllowed(value: string) { if (locked !== 'effectAllowed') this.effect = value }
+        get dropEffect(): string { return this.drop }
+        set dropEffect(value: string) { if (locked !== 'dropEffect') this.drop = value }
+      })
+      try {
+        const received: File[] = []
+        const target = { dispatchEvent(event: Event): boolean {
+          const transfer = (event as DragEvent).dataTransfer
+          if (event.type === 'dragover' && transfer !== null) transfer.dropEffect = 'copy'
+          if (event.type === 'drop' && transfer !== null) for (const item of transfer.items) {
+            const selected = item.getAsFile()
+            if (selected !== null) received.push(selected)
+          }
+          return true
+        } }
+        expect(preflightComposerImageDrop(target, [file]), locked).toBe(true)
+        expect(dispatchComposerImageDrop(target, [file]), locked).toBe(true)
+        expect(received, locked).toEqual([file])
+      } finally { vi.unstubAllGlobals() }
+    }
   })
 
   it('rejects asynchronous media results after session, composer, or lifecycle changes', () => {
@@ -361,13 +497,10 @@ describe('native mobile presentation', () => {
 
   it('places only the camera action in the native Add section and leaves file selection to DSH', () => {
     const source = installNativeMobileSurface.toString()
-    expect(source).toContain('input.addEventListener("change", onChange)')
-    expect(source).toContain('input.addEventListener("cancel", cleanup)')
-    expect(source).toContain('window.addEventListener("focus", scheduleCleanup)')
-    expect(source).toContain('document.addEventListener("visibilitychange", onVisibilityChange)')
-    expect(source).toContain('signal.addEventListener("abort", cleanup')
-    expect(source).toMatch(/window\.setTimeout\(cleanup, (?:300_000|3e5)\)/u)
-    expect(source).toContain('if (cleaned) return')
+    expect(source).toContain('pickBrowserFiles')
+    expect(source).toContain('signal: mediaPickerAbortController.signal')
+    expect(source).not.toContain('scheduleCleanup')
+    expect(source).not.toContain('browserPickerCleanups')
     expect(source).toContain('placeCameraAction(commandMenu)')
     expect(source).toContain('querySelector("[data-trigger-menu]")')
     expect(source).toContain('button[aria-haspopup=\\"listbox\\"][aria-expanded=\\"true\\"]')
@@ -389,6 +522,7 @@ describe('native mobile presentation', () => {
     expect(source).toContain('branchToast.lang = language')
     expect(source).toContain('mediaToast.lang = language')
     expect(source).toContain('dispatchComposerImageDrop(document, files)')
+    expect(source).toContain('if (!dispatchComposerImageDrop(document, files))')
     expect(source).toContain('const attachmentBlocked = !canAcceptComposerDrop()')
     expect(source).toContain('label("Allegati immagine non disponibili", "Image attachments are unavailable", "图片附件不可用")')
     expect(source).not.toContain('AttachmentOwner')

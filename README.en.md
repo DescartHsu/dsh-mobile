@@ -31,7 +31,7 @@
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.6**. Fix captured images not reaching the DSH attachment draft, and improve cancellation and late-result handling in browser file selection. [Changelog](CHANGELOG.md) · [Release downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.6).
+> **Current stable release: 0.6.7**. Add reserved cpolar subdomain configuration, improve narrow-screen sidebar and overlay interaction, and clarify mobile customization ownership, failures and recovery. [Changelog](CHANGELOG.md) · [Release downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.7).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
@@ -212,7 +212,9 @@ It can also drive computer capabilities the phone can use, like reading the mach
 /mobile give the phone a cyberpunk-style computer monitor panel that shows live CPU, memory, and disk usage
 ```
 
-Two kinds of changes are supported: the phone UI itself (theme, layout, buttons), and computer capabilities the phone can use (browsing computer files, running programs on the computer). `/mobile` hands the request to the DSH agent, which edits files under the local DSH configuration directory (`$DSH_HOME/mobile-access/`); the phone client applies them automatically. UI changes live in `mobile.css`/`mobile.js`. Computer capabilities come from extensions under `extensions/`, whose `host.mjs` runs with the local user's privileges on the computer. DeepSeek Harness source is not modified.
+Two kinds of changes are supported: the phone UI itself (theme, layout, buttons), and computer capabilities the phone can use (browsing computer files, running programs on the computer). `/mobile` hands the request to the DSH agent, which edits files under the local DSH configuration directory (`$DSH_HOME/mobile-access/`); paired mobile pages automatically check and apply them. UI changes live in `mobile.css`/`mobile.js`. Computer capabilities come from extensions under `extensions/`, whose `host.mjs` runs with the local user's privileges on the computer. DeepSeek Harness source is not modified.
+
+Open customizations through the **Mobile Access pairing entry**. Opening an ordinary DSH page or selecting a phone-sized browser viewport is not mobile pairing, and a file's presence does not establish that the current page loaded it. If extension requests return `401`, check the entry and pairing state; do not enable anonymous access or share Cookies or Tokens.
 
 Extension manifests, scripts, styles, and assets are revisioned. When the plugin observes a `/mobile` or extension-file change, it notifies authenticated phones to refresh immediately; 45-second visible and 5-minute hidden checks remain only as recovery fallbacks. A failed Host staging pass keeps the current version; if the Host has changed but the new phone UI cannot activate, that extension closes and retries instead of mixing generations.
 
@@ -321,7 +323,7 @@ Selection priority is device choice → computer defaults → plugin configurati
 | Android app | Everyday use | Separate Local and Remote entries at first pairing; LAN discovery, system trust for public remote certificates, and app-pinned CA for the self-signed FRP entry |
 | Mobile browser | Temporary or cross-platform | Open the HTTPS origin shown by Mobile Access; a private LAN certificate may need confirmation, while a public remote certificate should not warn |
 
-The Android app is a thin Kotlin WebView shell and contains no frontend copy; mobile browsers load the same page. Developers can append `?frontend=stock` to an authenticated mobile URL to compare the stock layout. This diagnostic entry bypasses mobile enhancements and module selection; some API operations may be rejected, so it does not replace normal mobile access. See [skins and mobile layout](docs/SKIN_COMPATIBILITY.en.md).
+The Android app is a thin Kotlin WebView shell and contains no frontend copy; mobile browsers load the same page. Developers can append `?frontend=stock` to an authenticated mobile URL to diagnose boot and layout behavior. This entry skips dedicated mobile boot rewriting and module selection, but installed client adaptation and authenticated customizations may still apply. It is not a plugin-free control; some API operations may be rejected, so it does not replace normal mobile access. See [skins and mobile layout](docs/SKIN_COMPATIBILITY.en.md).
 
 In 0.5.5, the dedicated mobile page synchronously loads the authenticated, same-origin `/mobile-access/compat.js` before the first DSH boot script. This bundled core-js compatibility layer supplies `Iterator` / Iterator helpers to WebViews that lack them, preventing the startup error `Iterator is not defined`. It uses feature detection to preserve or repair native helpers, needs no CDN, and does not weaken CSP. The desktop and `?frontend=stock` pages do not load this gateway script.
 

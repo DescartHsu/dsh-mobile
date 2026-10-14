@@ -1446,6 +1446,15 @@ describe('per-extension activation lifecycle', () => {
 })
 
 describe('client extension manifest reconciliation', () => {
+  it('does not clear current extensions or invoke legacy reads for an already aborted missing-manifest refresh', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const clear = vi.fn()
+    const legacy = vi.fn(async () => [true, true])
+    await expect(handleMissingExtensionManifest(clear, legacy, controller.signal)).resolves.toBe(false)
+    expect(clear).not.toHaveBeenCalled()
+    expect(legacy).not.toHaveBeenCalled()
+  })
   it('does not register into the single official attachment slot or shadow its preview UI', () => {
     const source = apply.toString()
     expect(source).not.toContain('conversation.input.attachments')

@@ -14,7 +14,7 @@ If saving reports a dependency conflict, retain the required module or also dese
 
 - Identify the running plugin, App and skin versions; plugin and App versions need not match.
 - Omit the skin only on this device, reopen manually and compare the conversation, composer and sidebar. Recovery points to styles or mounting, not necessarily a network or pairing failure.
-- First compare the normal computer layout. Developers can also open `/?frontend=stock` on the authenticated mobile Origin for layout diagnosis. Gateway authentication and HTTPS checks remain, but mobile enhancements and module selection are bypassed; some API operations may be rejected. It is not a replacement for the normal mobile entry.
+- First compare the normal computer layout. Developers can also open `/?frontend=stock` on the authenticated mobile Origin to diagnose boot and layout behavior. Gateway authentication and HTTPS checks remain; this entry skips dedicated mobile boot rewriting and module selection, but installed client adaptation and authenticated customizations may still apply. It is not a plugin-free control; some API operations may be rejected, so it does not replace normal mobile access.
 - When stock has a background but mobile does not, inspect the skin's mounting container and fallback for other layouts. WebSocket approval, APK reinstallation or making every container transparent cannot guarantee a fix.
 - A see-through sidebar, unreadable text shadows and an empty trace need separate diagnosis, not a single missing-background explanation. For an empty trace, inspect the first client exception, actual layout dimensions and whether its module loaded. A static screenshot does not distinguish rendering failure, occlusion and connection failure.
 

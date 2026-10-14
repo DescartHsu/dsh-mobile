@@ -4,11 +4,11 @@ GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/co
 
 GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-14. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
-## 开发中的代码贡献 / Code contributions in development
+## 0.6.7 代码贡献 / Code contributions in 0.6.7
 
-[@GavinQiEr](https://github.com/GavinQiEr) 在 [#207](https://github.com/saya-ch/dsh-mobile/issues/207) 提出 cpolar 固定子域名支持，并在 [#208](https://github.com/saya-ch/dsh-mobile/pull/208) 提供配置、启动参数和文档实现。本地整合保留原作者提交 [`8dd7574`](https://github.com/saya-ch/dsh-mobile/commit/8dd75749d3823aecafdb6f5d9faccf674577e7b1)，并追加维护者修正；尚未发布。
+[@GavinQiEr](https://github.com/GavinQiEr) 在 [#207](https://github.com/saya-ch/dsh-mobile/issues/207) 提出 cpolar 固定子域名支持，并在 [#208](https://github.com/saya-ch/dsh-mobile/pull/208) 提供配置、启动参数和文档实现。[#211](https://github.com/saya-ch/dsh-mobile/pull/211) 的整合保留原作者提交 [`8dd7574`](https://github.com/saya-ch/dsh-mobile/commit/8dd75749d3823aecafdb6f5d9faccf674577e7b1)，并追加维护者修正，纳入 0.6.7。
 
-[@GavinQiEr](https://github.com/GavinQiEr) requested reserved cpolar subdomains in [#207](https://github.com/saya-ch/dsh-mobile/issues/207) and implemented the configuration, process arguments and guides in [#208](https://github.com/saya-ch/dsh-mobile/pull/208). The local integration retains author commit [`8dd7574`](https://github.com/saya-ch/dsh-mobile/commit/8dd75749d3823aecafdb6f5d9faccf674577e7b1) alongside maintainer corrections; it is not yet released.
+[@GavinQiEr](https://github.com/GavinQiEr) requested reserved cpolar subdomains in [#207](https://github.com/saya-ch/dsh-mobile/issues/207) and implemented the configuration, process arguments and guides in [#208](https://github.com/saya-ch/dsh-mobile/pull/208). Integration [#211](https://github.com/saya-ch/dsh-mobile/pull/211) retains author commit [`8dd7574`](https://github.com/saya-ch/dsh-mobile/commit/8dd75749d3823aecafdb6f5d9faccf674577e7b1) alongside maintainer corrections for 0.6.7.
 
 ## 0.6.4 代码贡献 / Code contributions in 0.6.4
 
@@ -63,6 +63,8 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 [@BlueandwhiteXD](https://github.com/BlueandwhiteXD)'s [#15](https://github.com/saya-ch/dsh-mobile/pull/15) supplied the Android keyboard-overlap fix. It was adapted into [`09ef315`](https://github.com/saya-ch/dsh-mobile/commit/09ef31590219f2a436bd801214703338c215b00d) alongside overlapping status-bar work and credited with `Co-authored-by` in [`04e6a0d`](https://github.com/saya-ch/dsh-mobile/commit/04e6a0da030353d4f0897419d0f692dc538a752d). Its Closed PR status does not mean the code contribution was rejected. @qzyqmzn's [#32](https://github.com/saya-ch/dsh-mobile/pull/32) and [#37](https://github.com/saya-ch/dsh-mobile/pull/37) were superseded by merged [#38](https://github.com/saya-ch/dsh-mobile/pull/38).
 
 ## 问题反馈与建议 / Issue reports and ideas
+
+感谢 [@Dantezcx](https://github.com/Dantezcx) 在 [#209](https://github.com/saya-ch/dsh-mobile/issues/209) 和 [#210](https://github.com/saya-ch/dsh-mobile/issues/210) 提供侧栏命中、短屏布局和定制资源加载的详细诊断。 / Thanks [@Dantezcx](https://github.com/Dantezcx) for the detailed sidebar hit-testing, short-viewport and customization-loading diagnostics in [#209](https://github.com/saya-ch/dsh-mobile/issues/209) and [#210](https://github.com/saya-ch/dsh-mobile/issues/210).
 
 感谢 [@xhwxt](https://github.com/xhwxt) 在 [#203](https://github.com/saya-ch/dsh-mobile/pull/203) 中提出文档选择器改进方案，以及 [@Void-LifeStream](https://github.com/Void-LifeStream) 在 [#205](https://github.com/saya-ch/dsh-mobile/issues/205) 中提供附件选择与回传问题的详细反馈。
 

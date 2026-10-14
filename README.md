@@ -31,7 +31,7 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.6**。修复拍照图片无法进入 DSH 附件草稿的问题，改善浏览器文件选择的取消与迟到结果处理。[更新记录](CHANGELOG.md) · [版本下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.6)。
+> **当前正式版本：0.6.7**。支持 cpolar 预留子域名配置，改善窄屏侧栏与浮层交互，并补全移动定制的入口识别、失败提示和恢复处理。[更新记录](CHANGELOG.md) · [版本下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.7)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
@@ -212,7 +212,9 @@ Tailscale Funnel 覆盖范围广，但在中国大陆网络下可能不稳定。
 /mobile 为手机端添加赛博朋克风格的电脑监控面板，实时显示电脑的 CPU、内存和磁盘占用
 ```
 
-`/mobile` 把需求交给 DSH 对话中的 agent，由它直接修改本机 `$DSH_HOME/mobile-access/` 下的文件，保存后手机端自动生效。改动分两类：界面和交互在 `mobile.css`/`mobile.js`；需要电脑能力时用 `extensions/` 下的扩展，其 `host.mjs` 以本机用户权限在电脑上运行。不修改 DeepSeek Harness 源码。
+`/mobile` 把需求交给 DSH 对话中的 agent，由它直接修改本机 `$DSH_HOME/mobile-access/` 下的文件，已配对的移动页面会自动检查并应用。改动分两类：界面和交互在 `mobile.css`/`mobile.js`；需要电脑能力时用 `extensions/` 下的扩展，其 `host.mjs` 以本机用户权限在电脑上运行。不修改 DeepSeek Harness 源码。
+
+定制需要从 **移动访问的配对入口**进入。直接打开普通 DSH 网页或调整浏览器为手机视口，不等于完成移动配对；文件存在也不代表当前页面已加载。若扩展接口返回 `401`，先核对入口与配对状态，不要开放匿名访问或公开 Cookie、Token。
 
 扩展清单及其脚本、样式和资源按版本标识刷新。插件监听到 `/mobile` 或扩展文件变化后，会通过已认证连接通知手机立即更新；页面可见时每 45 秒、隐藏时每 5 分钟的检查只作为断线兜底。Host 暂存失败会继续使用现有版本；若 Host 已更新但新手机界面激活失败，则关闭该扩展并自动重试，避免混用新旧能力。
 
@@ -321,7 +323,7 @@ excludedClientModules:
 | Android App | 日常使用 | 首次配对时分别提供局域网与远程入口；局域网自动发现，公开远程证书由系统验证，自签 FRP 入口由 App 固定 CA |
 | 手机浏览器 | 临时或跨平台访问 | 打开“移动访问”卡片显示的 HTTPS 地址；局域网私有证书可能需要手动确认，公开远程证书不应出现警告 |
 
-Android App 只是 Kotlin WebView 薄壳，不内置另一份网页；手机浏览器访问的是同一页面。开发者可在已认证移动地址后追加 `?frontend=stock` 对照原生布局；该诊断入口绕过移动增强和模块选择，部分 API 操作可能被拒绝，不能代替正常移动入口。详见[皮肤与移动布局](docs/SKIN_COMPATIBILITY.md)。
+Android App 只是 Kotlin WebView 薄壳，不内置另一份网页；手机浏览器访问的是同一页面。开发者可在已认证移动地址后追加 `?frontend=stock` 诊断启动与布局行为；该入口跳过专用移动启动改写和模块选择，但仍可能加载客户端移动适配及已认证定制，并非不含插件的对照页。部分 API 操作可能被拒绝，不能代替正常移动入口。详见[皮肤与移动布局](docs/SKIN_COMPATIBILITY.md)。
 
 0.5.5 的专用移动页面会在 DSH 的第一个启动脚本之前，同步加载经网关鉴权的同源 `/mobile-access/compat.js`，为缺少 `Iterator` / Iterator helpers 的 WebView 提供随插件打包的 core-js 兼容实现，避免启动时出现 `Iterator is not defined`。兼容层按能力检测保留或修正原生 helper，不依赖 CDN，也不会放宽 CSP；桌面页面与 `?frontend=stock` 页面不会加载这个网关脚本。
 

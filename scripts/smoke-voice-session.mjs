@@ -32,6 +32,12 @@ try {
       }))
       await page.goto(options.admin === true ? 'https://127.0.0.1/' : 'https://voice-session.test/')
       await page.evaluate(options => {
+        if (options.sdkOwner === true) {
+          const marker = document.createElement('meta')
+          marker.name = 'dsh-mobile-gateway'
+          marker.content = 'authenticated'
+          document.head.append(marker)
+        }
         window.wakeRequests = []
         window.wakeLocks = []
         window.fixtureHidden = false
@@ -255,7 +261,9 @@ try {
     assert.equal(await focused(), 'editor-first', 'Active phase changes prevented deliberate composer focus')
   })
   for (const replacement of [false, true]) {
-    await withClient(native, async ({ page }) => {
+    // SDK cancellation requires a Gateway-owned entry; Wake Lock cases above
+    // deliberately retain their unpaired/desktop presentation controls.
+    await withClient({ ...native, sdkOwner: true }, async ({ page }) => {
       await page.evaluate(replacement => {
         window.queuedNativeCalls = []
         window.__DSH_MOBILE_NATIVE__ = { capabilities: () => [], invoke: async action => { window.queuedNativeCalls.push(action); return { ok: true } } }

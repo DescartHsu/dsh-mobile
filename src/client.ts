@@ -19,6 +19,8 @@ import { fireDeviceRevoked, fireTaskNotifyEvent, isDeviceRevokedPayload, parseTa
 import { EXTENSION_RECOVERY_STYLES, installExtensionRecoveryControl } from './extension-recovery-ui.js'
 import { invokeBoundNativeCapability } from './native-capability.js'
 import { pickBrowserFiles } from './browser-file-picker.js'
+import { createMobileAssetLoadReporter, ownsMobileCustomization, readMobileAssetText, type MobileAssetLoadFailure } from './mobile-custom-assets.js'
+import { EXTENSION_LIMITS, LEGACY_CUSTOM_ASSET_LIMIT } from './extension-limits.js'
 
 export { DIAGNOSTIC_REASON_MESSAGES, LOCALIZED_DIAGNOSTIC_COPY, MOBILE_CONTROL_MESSAGES } from './client-messages.js'
 export type { MobileControlLocale } from './client-messages.js'
@@ -3583,6 +3585,7 @@ export async function handleMissingExtensionManifest(
   refreshLegacyResources: () => Promise<readonly boolean[]>,
   signal: AbortSignal,
 ): Promise<boolean> {
+  if (signal.aborted) return false
   clearManifestResources()
   const results = await refreshLegacyResources()
   return !signal.aborted && results.every(Boolean)
@@ -3691,10 +3694,12 @@ export function startExtensionChangeStream(
   },
   onTaskEvent?: (payload: unknown) => void,
   onDeviceRevoked?: () => void,
-): () => void {
+  initiallyEnabled = true,
+): (() => void) & { setEnabled(enabled: boolean): void } {
   let source: ReturnType<ExtensionEventRuntime['create']> | undefined
   let timer: number | undefined
   let disposed = false
+  let enabled = initiallyEnabled
   let retryMs = 1_000
   const clearTimer = (): void => {
     if (timer === undefined) return
@@ -3702,20 +3707,23 @@ export function startExtensionChangeStream(
     timer = undefined
   }
   const connect = (): void => {
-    if (disposed || source !== undefined) return
+    if (disposed || !enabled || source !== undefined) return
     clearTimer()
     const next = runtime.create('/mobile-access/extensions/events')
     source = next
-    next.onopen = () => { retryMs = 1_000 }
-    next.addEventListener('extensions-changed', changed)
+    const current = (): boolean => !disposed && enabled && source === next
+    next.onopen = () => { if (current()) retryMs = 1_000 }
+    next.addEventListener('extensions-changed', () => { if (current()) changed() })
     if (onTaskEvent !== undefined) {
       next.addEventListener('task-notify', (message: Event) => {
+        if (!current()) return
         const data = (message as MessageEvent).data
         onTaskEvent(data)
       })
     }
     if (onDeviceRevoked !== undefined) {
       next.addEventListener('device-revoked', (message: Event) => {
+        if (!current()) return
         const data = (message as MessageEvent).data
         if (isDeviceRevokedPayload(data)) onDeviceRevoked()
       })
@@ -3724,14 +3732,14 @@ export function startExtensionChangeStream(
       if (source !== next) return
       next.close()
       source = undefined
-      if (disposed) return
+      if (disposed || !enabled) return
       const delay = retryMs
       retryMs = Math.min(30_000, retryMs * 2)
       timer = runtime.window.setTimeout(connect, delay)
     }
   }
   const reconnectNow = (): void => {
-    if (disposed) return
+    if (disposed || !enabled) return
     source?.close()
     source = undefined
     retryMs = 1_000
@@ -3739,13 +3747,19 @@ export function startExtensionChangeStream(
   }
   runtime.window.addEventListener('online', reconnectNow)
   connect()
-  return () => {
+  const stop = (): void => {
     disposed = true
     clearTimer()
     source?.close()
     source = undefined
     runtime.window.removeEventListener('online', reconnectNow)
   }
+  return Object.assign(stop, { setEnabled(value: boolean): void {
+    if (disposed || value === enabled) return
+    enabled = value
+    if (value) connect()
+    else { clearTimer(); source?.close(); source = undefined }
+  } })
 }
 
 export interface ActivationWork<T> {
@@ -3871,7 +3885,10 @@ export class PerIdActivationLifecycle<T> {
   }
 }
 
-function installCustomAssets(): () => void {
+/** Install authenticated mobile customization refresh, retaining loaded legacy assets through temporary failures. */
+export function installCustomAssets(): () => void {
+  const reporter = createMobileAssetLoadReporter(selectedMobileControlLocale)
+  const customizationOwner = ownsMobileCustomization(document.querySelector('meta[name="dsh-mobile-gateway"][content="authenticated"]') !== null, window.__DSH_MOBILE_FRONTEND__)
   const legacyStyle = element('style'); legacyStyle.dataset.plugin = 'dsh-mobile-custom'; document.head.append(legacyStyle)
   const legacyCssState = { etag: '', modified: '' }
   const previous = window.dshMobile
@@ -3896,6 +3913,19 @@ function installCustomAssets(): () => void {
   const managedDefinitionIds = new Set<string>()
   let manifestEtag = ''
   let disposed = false
+  let events: ReturnType<typeof startExtensionChangeStream> | undefined
+  const failed = (reason: MobileAssetLoadFailure, signal: AbortSignal): void => {
+    if (disposed || signal.aborted) return
+    reporter.fail(reason, signal)
+    if (reason === 'authentication_required') events?.setEnabled(false)
+  }
+  const unavailable = (response: Response, signal: AbortSignal, fallback: MobileAssetLoadFailure): void => {
+    failed(response.status === 401 || response.status === 403 ? 'authentication_required' : fallback, signal)
+    void response.body?.cancel().catch((error: unknown) => {
+      // Unread rejected bodies are disposed without replacing the reported HTTP failure.
+      void error
+    })
+  }
   let expectedDefinitionId: string | undefined
   const SURFACE_HOST_STYLES: Readonly<Record<string, string>> = {
     'sidebar-action': 'position:fixed;z-index:1100;top:calc(env(safe-area-inset-top) + 8px);left:8px;display:flex;flex-direction:column;gap:6px;pointer-events:none',
@@ -3922,6 +3952,16 @@ function installCustomAssets(): () => void {
     shellLayer().append(node); window.setTimeout(() => node.remove(), 2600)
   }
   const stopNativeBack = installMobileNativeBack(window, document, () => { toast(mobileBackBlockedMessage(selectedMobileControlLocale())) })
+  if (!customizationOwner) {
+    reporter.fail('gateway_required')
+    return () => {
+      disposed = true
+      reporter.dispose()
+      stopNativeBack()
+      legacyStyle.remove()
+      document.querySelector('[data-dsh-mobile-extension-layer]')?.remove()
+    }
+  }
   const materializeNativeFile = (value: unknown): unknown => {
     if (typeof value !== 'object' || value === null || !('base64' in value) || !('name' in value)) return value
     const candidate = value as { base64?: unknown; name?: unknown; type?: unknown }
@@ -4062,10 +4102,10 @@ function installCustomAssets(): () => void {
       if (legacyJsModified !== '') headers['if-modified-since'] = legacyJsModified
       const response = await fetch('/mobile-access/custom.js', { credentials: 'same-origin', cache: 'no-store', headers, signal })
       if (response.status === 304) return true
-      if (!response.ok) return false
+      if (!response.ok) { unavailable(response, signal, 'resource_unavailable'); return false }
       const nextEtag = response.headers.get('etag') ?? ''
       const nextModified = response.headers.get('last-modified') ?? ''
-      const next = await response.text()
+      const next = await readMobileAssetText(response, signal, LEGACY_CUSTOM_ASSET_LIMIT)
       if (refreshAborted(signal)) return false
       if (next === legacySource) { legacyJsEtag = nextEtag; legacyJsModified = nextModified; return true }
       legacyMount = undefined
@@ -4084,7 +4124,7 @@ function installCustomAssets(): () => void {
       legacyDispose?.(); legacyRoot?.remove(); legacyRoot = nextRoot; pendingRoot = undefined; legacyDispose = typeof nextDispose === 'function' ? nextDispose : undefined; legacySource = next
       legacyJsEtag = nextEtag; legacyJsModified = nextModified
       return true
-    } catch { pendingRoot?.remove(); legacyMount = previousMount; return false }
+    } catch { pendingRoot?.remove(); legacyMount = previousMount; failed('resource_unavailable', signal); return false }
   }
   let legacyScriptRevision = ''
   let legacyStyleRevision = ''
@@ -4103,20 +4143,35 @@ function installCustomAssets(): () => void {
       const headers: Record<string, string> = {}
       if (manifestEtag !== '') headers['if-none-match'] = manifestEtag
       const response = await fetch('/mobile-access/extensions/manifest', { credentials: 'same-origin', cache: 'no-store', headers, signal })
+      if (disposed || signal.aborted) {
+        void response.body?.cancel().catch((error: unknown) => {
+          // A withdrawn refresh must not apply a response or replace its cancellation with cleanup failure.
+          void error
+        })
+        return false
+      }
       if (response.status === 404) {
+        unavailable(response, signal, 'manifest_unavailable')
         legacyScriptRevision = ''
         legacyStyleRevision = ''
-        return handleMissingExtensionManifest(
+        const legacyLoaded = await handleMissingExtensionManifest(
           clearManifestExtensions,
-          () => Promise.all([refreshLegacy(signal), refreshCssLegacy(legacyStyle, signal, legacyCssState)]),
+          () => Promise.all([refreshLegacy(signal), refreshCssLegacy(legacyStyle, signal, legacyCssState, unavailable)]),
           signal,
         )
+        if (!legacyLoaded) failed('resource_unavailable', signal)
+        return false
       }
-      if (response.status === 304) return true
-      if (!response.ok) return false
+      if (response.status === 304) { if (!signal.aborted) events?.setEnabled(true); return true }
+      if (!response.ok) { unavailable(response, signal, 'manifest_unavailable'); return false }
       const nextManifestEtag = response.headers.get('etag') ?? ''
-      const payload = parseMobileExtensionManifest(await response.json())
-      if (refreshAborted(signal) || payload === undefined) return false
+      const manifestSource = await readMobileAssetText(response, signal, undefined)
+      let payload: ReturnType<typeof parseMobileExtensionManifest>
+      try { payload = parseMobileExtensionManifest(JSON.parse(manifestSource)) }
+      catch { failed('manifest_invalid', signal); return false }
+      if (refreshAborted(signal)) return false
+      if (payload === undefined) { failed('manifest_invalid', signal); return false }
+      events?.setEnabled(true)
       const entries = payload.extensions
       const seen = new Set(entries.map(entry => entry.id))
       const scriptRevision = payload.legacy.scriptRevision
@@ -4127,8 +4182,8 @@ function installCustomAssets(): () => void {
         else refreshComplete = false
       }
       if (styleRevision === '' || styleRevision !== legacyStyleRevision) {
-        if (await refreshCssLegacy(legacyStyle, signal, legacyCssState)) legacyStyleRevision = styleRevision
-        else refreshComplete = false
+        if (await refreshCssLegacy(legacyStyle, signal, legacyCssState, unavailable)) legacyStyleRevision = styleRevision
+        else { failed('resource_unavailable', signal); refreshComplete = false }
       }
       const commitStyle = (id: string, change: 'retain' | 'remove' | 'replace', css?: string, etag?: string): void => {
         if (change === 'retain') return
@@ -4160,9 +4215,9 @@ function installCustomAssets(): () => void {
             if (storedEtag !== undefined) cssHeaders['if-none-match'] = storedEtag
             const cssResponse = await fetch(cssUrl, { credentials: 'same-origin', cache: 'no-store', headers: cssHeaders, signal })
             if (cssResponse.status !== 304) {
-              if (!cssResponse.ok) throw new Error('mobile extension style failed to load')
+              if (!cssResponse.ok) { unavailable(cssResponse, signal, 'resource_unavailable'); throw new Error('mobile extension style failed to load') }
               pendingStyleEtag = cssResponse.headers.get('etag') ?? undefined
-              pendingCss = await cssResponse.text()
+              pendingCss = await readMobileAssetText(cssResponse, signal, EXTENSION_LIMITS.css)
               styleChange = 'replace'
               if (refreshAborted(signal)) return false
             }
@@ -4185,9 +4240,9 @@ function installCustomAssets(): () => void {
             let nextDigest: string | undefined
             let nextEtag: string | undefined
             if (scriptResponse.status !== 304) {
-              if (!scriptResponse.ok) throw new Error('mobile extension script failed to load')
+              if (!scriptResponse.ok) { unavailable(scriptResponse, signal, 'resource_unavailable'); throw new Error('mobile extension script failed to load') }
               nextEtag = scriptResponse.headers.get('etag') ?? undefined
-              const source = await scriptResponse.text()
+              const source = await readMobileAssetText(scriptResponse, signal, EXTENSION_LIMITS.script)
               if (refreshAborted(signal)) return false
               const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
               if (refreshAborted(signal)) return false
@@ -4240,6 +4295,7 @@ function installCustomAssets(): () => void {
             entry.generation,
             () => { disposeManifestExtension(entry.id) },
           )
+          failed('resource_unavailable', signal)
           refreshComplete = false
         }
       }
@@ -4249,12 +4305,15 @@ function installCustomAssets(): () => void {
         manifestEtag = nextManifestEtag
       } else manifestEtag = ''
       return refreshComplete
-    } catch { return false }
+    } catch { failed('refresh_failed', signal); return false }
   }
   started = true
   for (const definition of definitions.values()) void activateDefinition(definition)
   const stopRefresh = startLifecycleRefreshScheduler(async signal => {
-    await refreshExtensions(signal)
+    if (await refreshExtensions(signal) && !disposed && !signal.aborted) {
+      reporter.recover(signal)
+      events?.setEnabled(true)
+    }
   })
   const stopEvents = startExtensionChangeStream(
     () => { stopRefresh.refresh() },
@@ -4280,12 +4339,14 @@ function installCustomAssets(): () => void {
       })
     },
     () => { fireDeviceRevoked() },
+    false,
   )
-  return () => { disposed = true; stopNativeBack(); stopEvents(); stopRefresh(); started = false; legacyDispose?.(); legacyDispose = undefined; legacyRoot?.remove(); legacyRoot = undefined; legacyStyle.remove(); activations.dispose(); for (const node of styleNodes.values()) node.remove(); styleNodes.clear(); const layer = document.querySelector('[data-dsh-mobile-extension-layer]'); layer?.remove(); for (const host of document.querySelectorAll('[data-dsh-mobile-surface-host]')) host.remove(); if (previous === undefined) delete window.dshMobile; else window.dshMobile = previous }
+  events = stopEvents
+  return () => { disposed = true; reporter.dispose(); stopNativeBack(); stopEvents(); stopRefresh(); started = false; legacyDispose?.(); legacyDispose = undefined; legacyRoot?.remove(); legacyRoot = undefined; legacyStyle.remove(); activations.dispose(); for (const node of styleNodes.values()) node.remove(); styleNodes.clear(); const layer = document.querySelector('[data-dsh-mobile-extension-layer]'); layer?.remove(); for (const host of document.querySelectorAll('[data-dsh-mobile-surface-host]')) host.remove(); if (previous === undefined) delete window.dshMobile; else window.dshMobile = previous }
 }
 
 interface LegacyCssState { etag: string; modified: string }
-async function refreshCssLegacy(style: HTMLStyleElement, signal: AbortSignal, state: LegacyCssState): Promise<boolean> {
+async function refreshCssLegacy(style: HTMLStyleElement, signal: AbortSignal, state: LegacyCssState, unavailable: (response: Response, signal: AbortSignal, reason: MobileAssetLoadFailure) => void): Promise<boolean> {
   try {
     const headers: Record<string, string> = {}
     if (state.etag !== '') headers['if-none-match'] = state.etag
@@ -4300,13 +4361,14 @@ async function refreshCssLegacy(style: HTMLStyleElement, signal: AbortSignal, st
     if (response.ok) {
       const nextEtag = response.headers.get('etag') ?? ''
       const nextModified = response.headers.get('last-modified') ?? ''
-      const css = await response.text()
+      const css = await readMobileAssetText(response, signal, LEGACY_CUSTOM_ASSET_LIMIT)
       if (refreshAborted(signal)) return false
       style.textContent = css
       state.etag = nextEtag
       state.modified = nextModified
       return true
     }
+    unavailable(response, signal, 'resource_unavailable')
     return false
   } catch { return false }
 }
@@ -4361,11 +4423,13 @@ export function apply(ctx: ClientContext): void {
 
   ctx.effect(() => {
     const desktopAdmin = isDesktopAdminSurface(location.hostname, location.search, window.__DSH_MOBILE_FRONTEND__, location.protocol)
+    const gatewayCustomization = ownsMobileCustomization(document.querySelector('meta[name="dsh-mobile-gateway"][content="authenticated"]') !== null, window.__DSH_MOBILE_FRONTEND__)
     const style = element('style'); style.dataset.plugin = 'dsh-mobile'; style.textContent = desktopAdmin
       ? CONTROL_STYLES
       : NATIVE_MOBILE_STYLES
     style.textContent += CLIENT_MODULE_STYLES
     document.head.append(style)
+    const removeCustom = !desktopAdmin || gatewayCustomization ? installCustomAssets() : () => undefined
     const removeVoiceSession = installVoiceSession(!desktopAdmin)
     const removeModuleSettings = ctx.slots.inject('settings.general.item', () => ctx.slots.register({
       name: 'settings.general.item', id: 'dsh-mobile-client-modules', order: 120,
@@ -4391,7 +4455,6 @@ export function apply(ctx: ClientContext): void {
         }, MobileTaskNotificationRow)
         return () => { removeTaskNotifications(); removeSwitchComputer(); removeDisplayScale(); removeFontSize() }
       })
-      const removeCustom = installCustomAssets()
       const removeSurface = installDshLanguageBoundSurface(() => installNativeMobileSurface({
         getLayout: () => ctx.get('layout'),
         getSidebarRight: () => ctx.get('sidebarRight'),
@@ -4426,7 +4489,7 @@ export function apply(ctx: ClientContext): void {
       }, createElement('rect', { x: 4, y: 1, width: 8, height: 14, rx: 2 }), createElement('path', { d: 'M7 12h2' })), wide ? createElement('span', { className: 'dsh-mobile-control__trigger-label' }, t('mobileAccess')) : undefined)))
       return () => { disposeSlot(); control.remove() }
     })
-    return () => { disposeClientModuleDialogs(); removeModuleSettings(); removeControl(); removeVoiceSession(); style.remove() }
+    return () => { disposeClientModuleDialogs(); removeModuleSettings(); removeControl(); removeCustom(); removeVoiceSession(); style.remove() }
   }, 'dsh-mobile: stock mobile adaptation and local control')
 }
 

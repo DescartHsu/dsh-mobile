@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage } from 'node:http'
 import { channel } from 'node:diagnostics_channel'
@@ -19,6 +19,7 @@ import { parseGatewayConfig } from '../src/config.js'
 import { MobileAccessGateway } from '../src/gateway.js'
 import { JsonDeviceStore } from '../src/storage.js'
 import { installedCaddyFixture } from './helpers/caddy-component-fixture.js'
+import { waitForCaddyTls } from './helpers/caddy-tls-ready.js'
 import { remoteGatewayConfig } from '../src/plugin.js'
 import { terminateRemoteProcess } from '../src/remote.js'
 import { CSRF_COOKIE, CSRF_HEADER, DEVICE_COOKIE, SESSION_COOKIE, parseCookies } from '../src/http-security.js'
@@ -139,11 +140,24 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   // The quiet API regression deliberately crosses 60s; setup, three native starts and cleanup retain separate headroom.
   const deadline = setTimeout(() => controller.abort(new Error('Live fixture 180s deadline exceeded')), 180_000)
   const body = async (): Promise<void> => {
+  const childLogs = new Map<string, string>()
+  const diagnostics = (): string => [...childLogs].map(([name, text]) => name + ': ' + text).join('\n').slice(-8192)
+  const captureChild = (name: string, child: ChildProcessWithoutNullStreams): void => {
+    childLogs.set(name, '')
+    child.stdout.resume()
+    child.stderr.on('data', (chunk: Buffer) => { childLogs.set(name, (childLogs.get(name)! + chunk.toString()).slice(-8192)) })
+    child.stdin.end()
+  }
   const step = async <T>(operation: () => Promise<T>): Promise<T> => {
     signal.throwIfAborted()
     const result = await operation()
     signal.throwIfAborted()
     return result
+  }
+  const phaseStep = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
+    try { return await step(operation) } catch (error) {
+      throw new Error('Caddy live phase ' + name + ' failed; owned stderr=' + diagnostics(), { cause: error })
+    }
   }
   signal.throwIfAborted()
   const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-caddy-live-'))
@@ -309,8 +323,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   signal.throwIfAborted()
   const child = spawn(executable, ['run', '--config', testConfig, '--adapter', 'caddyfile'], { env: environment, shell: false, windowsHide: true, stdio: 'pipe' })
   const stopChild = ownChild(child)
-  let childDiagnostics = ''
-  child.stdout.resume(); child.stderr.on('data', (chunk: Buffer) => { childDiagnostics = (childDiagnostics + chunk.toString()).slice(-8192) }); child.stdin.end()
+  captureChild('initial', child)
   await step(() => once(child, 'spawn', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }))
   if (child.pid === undefined) throw new Error('Missing child PID')
   let port = 0
@@ -320,23 +333,25 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
       port = await step(() => ownedPort(child.pid!, signal))
     }, { timeout: 20_000, interval: 100 })
     signal.throwIfAborted()
-  } catch (error) { throw new Error('Caddy listener startup failed: ' + childDiagnostics, { cause: error }) }
+  } catch (error) { throw new Error('Caddy listener startup failed: ' + diagnostics(), { cause: error }) }
   let ca = ''
   await step(() => vi.waitFor(async () => { ca = await step(() => readFile(join(config.dataDirectory, 'pki', 'authorities', 'local', 'root.crt'), 'utf8')) }, { timeout: 10_000 }))
-  const discovery = await step(() => exchange(signal, port, ca, '/mobile-access/discovery'))
+  await phaseStep('initial TLS readiness', () => waitForCaddyTls({ port, ca, servername: 'phone.example.com', signal,
+    timeoutMs: 20_000, intervalMs: 100, isRunning: () => child.exitCode === null && child.signalCode === null }))
+  const discovery = await phaseStep('discovery', () => exchange(signal, port, ca, '/mobile-access/discovery'))
   expect(discovery.status, '[DEBUG-caddy-live] Discovery response=' + responseDiagnostic(discovery)
-    + '; Caddy stderr=' + childDiagnostics).toBe(200)
+    + '; Caddy stderr=' + diagnostics()).toBe(200)
   expect(JSON.parse(discovery.body).instanceId).toBe(gateway.config.instanceId)
-  const unauthenticated = await step(() => exchange(signal, port, ca, '/api/caddy-test-resource'))
+  const unauthenticated = await phaseStep('unauthenticated API', () => exchange(signal, port, ca, '/api/caddy-test-resource'))
   if (unauthenticated.status !== 401) {
     const direct = await step(() => directUnauthenticated(signal, gateway.address().port, '/api/caddy-test-resource')
       .then(responseDiagnostic, (error: unknown) => String(error).slice(0, 2048)))
     throw new Error('[DEBUG-caddy-live] Unauthenticated API expected 401; proxied=' + responseDiagnostic(unauthenticated)
-      + '; direct=' + direct + '; Caddy stderr=' + childDiagnostics)
+      + '; direct=' + direct + '; Caddy stderr=' + diagnostics())
   }
   expect(unauthenticated.status).toBe(401)
   const pairing = await step(() => gateway.access.openPairing())
-  const paired = await step(() => exchange(signal, port, ca, '/mobile-access/auth/pair', 'POST', { 'content-type': 'application/json' }, JSON.stringify({ token: pairing.token, label: 'Isolated Caddy test' })))
+  const paired = await phaseStep('pairing POST', () => exchange(signal, port, ca, '/mobile-access/auth/pair', 'POST', { 'content-type': 'application/json' }, JSON.stringify({ token: pairing.token, label: 'Isolated Caddy test' })))
   expect(paired.status).toBe(201)
   const cookie = paired.headers['set-cookie']?.find(value => value.startsWith(SESSION_COOKIE + '='))?.split(';')[0]
   expect(cookie).toBeDefined()
@@ -344,7 +359,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   const deviceToken = parseCookies(deviceCookie)?.get(DEVICE_COOKIE)
   // The cookie serializer uses a raw base64url value, not percent encoding; never log credentials.
   expect(typeof deviceToken === 'string' && deviceToken.length > 0).toBe(true)
-  const resource = await step(() => exchange(signal, port, ca, '/api/caddy-test-resource', 'GET', { cookie: cookie! }))
+  const resource = await phaseStep('authenticated API', () => exchange(signal, port, ca, '/api/caddy-test-resource', 'GET', { cookie: cookie! }))
   expect(resource.status).toBe(200); expect(resource.rawBody).toEqual(Buffer.from([0, 1, 2, 250]))
   const csrfCookie = paired.headers['set-cookie']?.find(value => value.startsWith(CSRF_COOKIE + '='))?.split(';')[0]
   const csrf = parseCookies(csrfCookie)?.get(CSRF_COOKIE)
@@ -356,7 +371,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
     const phase = protocolPhase.endsWith('headers') ? 'headers' : 'body'
     const id = 'quiet-' + protocolPhase
     const path = '/api/caddy-test-quiet-' + phase + '?requestId=' + id
-    const result = await step(() => protocolPhase.startsWith('h2')
+    const result = await phaseStep('quiet ' + protocolPhase, () => protocolPhase.startsWith('h2')
       ? exchangeHttp2(signal, port, ca, path, quietHeaders, quietBody)
       : exchange(signal, port, ca, path, 'POST', quietHeaders, quietBody, 80_000))
     expect(result.status).toBe(200)
@@ -377,7 +392,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   // Count both hops: success must not be explained by reused sockets or hidden API replay.
   const requestIds = Array.from({ length: 12 }, (_, index) => 'single-use-' + String(index))
   const readResource = async (id: string): Promise<void> => {
-    const result = await step(() => exchange(signal, port, ca, '/api/caddy-test-resource?requestId=' + id, 'GET', { cookie: cookie! }))
+    const result = await phaseStep(id, () => exchange(signal, port, ca, '/api/caddy-test-resource?requestId=' + id, 'GET', { cookie: cookie! }))
     expect(result.status).toBe(200)
     expect(result.rawBody).toEqual(Buffer.from([0, 1, 2, 250]))
   }
@@ -393,7 +408,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   expect(new Set(requestIds.map(id => upstreamSockets.get(id))).size).toBe(requestIds.length)
   for (const method of ['GET', 'POST']) {
     const id = 'reset-after-consumption-' + method
-    const failed = await step(() => exchange(signal, port, ca, '/api/caddy-test-reset?requestId=' + id, method,
+    const failed = await phaseStep(id, () => exchange(signal, port, ca, '/api/caddy-test-reset?requestId=' + id, method,
       { cookie: cookie!, [CSRF_HEADER]: csrf!, 'content-type': 'application/json' }, method === 'POST' ? '{"sideEffect":true}' : ''))
     expect(failed.status).toBe(502)
     expect(JSON.parse(failed.body)).toEqual({ error: 'upstream_unavailable' })
@@ -403,7 +418,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   }
   for (const method of ['GET', 'POST']) {
     const id = 'gateway-reset-after-side-effect-' + method
-    const failed = await step(() => exchange(signal, port, ca, '/api/caddy-test-gateway-reset?requestId=' + id, method,
+    const failed = await phaseStep(id, () => exchange(signal, port, ca, '/api/caddy-test-gateway-reset?requestId=' + id, method,
       { cookie: cookie!, [CSRF_HEADER]: csrf!, 'content-type': 'application/json' }, method === 'POST' ? '{"sideEffect":true}' : ''))
     expect(failed.status).toBe(502)
     expect(gatewayRequests.get(id)).toBe(1)
@@ -417,7 +432,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   signal.throwIfAborted()
   const socket = new WebSocket('wss://127.0.0.1:' + String(port) + '/api/events.mux', socketOptions)
   cleanups.push(async () => { if (socket.readyState !== WebSocket.CLOSED) { const closed = once(socket, 'close', { signal: AbortSignal.timeout(5_000) }); socket.terminate(); await closed } })
-  await step(() => once(socket, 'open', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }))
+  await phaseStep('WSS open', () => once(socket, 'open', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }))
   signal.throwIfAborted()
   const received = once(socket, 'message', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }); socket.send('CADDY_WSS_ROUNDTRIP')
   const [echo] = await received; signal.throwIfAborted(); expect(String(echo)).toBe('CADDY_WSS_ROUNDTRIP')
@@ -433,11 +448,13 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   signal.throwIfAborted()
   const restartedChild = spawn(executable, ['run', '--config', testConfig, '--adapter', 'caddyfile'], { env: environment, shell: false, windowsHide: true, stdio: 'pipe' })
   const stopRestartedChild = ownChild(restartedChild)
-  restartedChild.stdout.resume(); restartedChild.stderr.resume(); restartedChild.stdin.end()
+  captureChild('restart', restartedChild)
   await step(() => once(restartedChild, 'spawn', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }))
   if (restartedChild.pid === undefined) throw new Error('Missing restarted child PID')
-  await step(() => vi.waitFor(async () => { port = await step(() => ownedPort(restartedChild.pid!, signal)) }, { timeout: 20_000, interval: 100 }))
-  expect((await step(() => exchange(signal, port, ca, '/api/caddy-test-resource', 'GET', { cookie: cookie! }))).rawBody).toEqual(Buffer.from([0, 1, 2, 250]))
+  await phaseStep('restart listener', () => vi.waitFor(async () => { port = await step(() => ownedPort(restartedChild.pid!, signal)) }, { timeout: 20_000, interval: 100 }))
+  await phaseStep('restart TLS readiness', () => waitForCaddyTls({ port, ca, servername: 'phone.example.com', signal,
+    timeoutMs: 20_000, intervalMs: 100, isRunning: () => restartedChild.exitCode === null && restartedChild.signalCode === null }))
+  expect((await phaseStep('restart authenticated API', () => exchange(signal, port, ca, '/api/caddy-test-resource', 'GET', { cookie: cookie! }))).rawBody).toEqual(Buffer.from([0, 1, 2, 250]))
   await step(() => stopRestartedChild())
   await step(() => gateway.close())
   const snapshot = await step(() => store.load())
@@ -462,6 +479,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
     await step(() => component.initialize())
     expect(component.status().installed).toBe(true)
     let controlledChild: ChildProcess | undefined
+    let tlsReadyChild: ChildProcess | undefined
     let controlledPort = 0
     const managed = new CaddyController({ component, config, store: createVolatileRemoteControlStore(),
       instanceId: gatewayConfig.instanceId,
@@ -485,13 +503,21 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
       spawnProcess: (binary, args, childEnvironment) => {
         const acquired = spawn(binary, [...args], { env: childEnvironment, shell: false, windowsHide: true, stdio: 'pipe' })
         controlledChild = acquired
+        captureChild('managed', acquired)
         ownChild(acquired)
         return acquired
       },
       probeDiscovery: async (_publicOrigin, expected, probeSignal) => {
-        if (controlledChild?.pid === undefined) return false
-        controlledPort = await ownedPort(controlledChild.pid, probeSignal)
-        const result = await exchange(probeSignal, controlledPort, ca, '/mobile-access/discovery')
+        const activeChild = controlledChild
+        if (activeChild?.pid === undefined) return false
+        controlledPort = await ownedPort(activeChild.pid, probeSignal)
+        if (tlsReadyChild !== activeChild) {
+          await phaseStep('managed TLS readiness', () => waitForCaddyTls({ port: controlledPort, ca, servername: 'phone.example.com',
+            signal: probeSignal, timeoutMs: 20_000, intervalMs: 100,
+            isRunning: () => activeChild.exitCode === null && activeChild.signalCode === null }))
+          tlsReadyChild = activeChild
+        }
+        const result = await phaseStep('managed discovery', () => exchange(probeSignal, controlledPort, ca, '/mobile-access/discovery'))
         if (result.status !== 200) return false
         expect(JSON.parse(result.body).instanceId).toBe(expected)
         return true
@@ -502,7 +528,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
     await step(() => managed.setEnabled(true))
     expect(managed.status()).toMatchObject({ state: 'ready', origin: 'https://phone.example.com' })
     expect(managed.gateway()?.access.authorizeDevice(deviceToken!).deviceId).toBe(pairedBody.deviceId)
-    expect((await step(() => exchange(signal, controlledPort, ca, '/api/caddy-test-resource'))).status).toBe(401)
+    expect((await phaseStep('managed unauthenticated API', () => exchange(signal, controlledPort, ca, '/api/caddy-test-resource'))).status).toBe(401)
     await step(() => managed.close())
     expect(managed.status().state).toBe('off')
     expect(ownedChildren.find(owned => owned.child === controlledChild)?.closed).toBe(true)

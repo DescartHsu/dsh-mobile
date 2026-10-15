@@ -21,7 +21,7 @@ export function releaseIdentity(repository, tag, channel = 'review') {
     reviewTag(tag)
     if (repository !== 'abworks-dev/dsh-mobile') throw new Error('Invalid review repository identity')
   } else if (channel === 'official') {
-    if (repository !== 'saya-ch/dsh-mobile' || tag !== `caddy-component-${lock.core.slice(1)}-tencentcloud-${lock.dns.slice(1)}`) {
+    if (repository !== 'saya-ch/dsh-mobile' || tag !== `caddy-component-${lock.core.slice(1)}-tencentcloud-${lock.dns.slice(1)}-r1`) {
       throw new Error('Invalid official component identity')
     }
   } else throw new Error('Unknown component release channel')

@@ -62,7 +62,7 @@ gh workflow run caddy-component.yml --repo abworks-dev/dsh-mobile --ref caddy-co
 
 正式组件由有仓库发布权限的维护者确认候选后手动发布，单维护者即可完成；不要求第二个人批准，也不要求预先配置 GitHub Environment。两个发布输入默认 false，PR 和普通构建不会发布。贡献者的实测可以按其版本、环境和实际验证范围作为验收依据，不要求在维护者本机重复搭建同一环境；不得将隔离测试或旧候选结果写成新二进制的公网签发、续期验收。
 
-官方发布仅允许公开的 `saya-ch/dsh-mobile` 仓库和版本绑定的非 `v` 标签 `caddy-component-2.11.7-tencentcloud-0.4.3`。维护者在已审核的 main 提交上创建该标签，然后手动运行现有工作流，显式设置 `publish_official_release=true`，保持 review 输入 false。发布器检查标签 SHA 与本次 Actions SHA 相同、提交属于 main，并要求同一次运行的 Windows/Linux 原生双构建、测试和插件构建通过。错误事件、分支、仓库、互斥输入、失败原生任务或不匹配标签均拒绝发布。
+官方发布仅允许公开的 `saya-ch/dsh-mobile` 仓库和版本绑定的非 `v` 标签 `caddy-component-2.11.7-tencentcloud-0.4.3-r1`。维护者在已审核的 main 提交上创建该标签，然后手动运行现有工作流，显式设置 `publish_official_release=true`，保持 review 输入 false。已创建的标签不移动或覆盖；本次发布准备修正使用新的固定 `-r1` 修订标签，原标签保留。发布器检查标签 SHA 与本次 Actions SHA 相同、提交属于 main，并要求同一次运行的 Windows/Linux 原生双构建、测试和插件构建通过。错误事件、分支、仓库、互斥输入、失败原生任务或不匹配标签均拒绝发布。
 
 唯一发布任务使用 `contents: write` 和现有 `GITHUB_TOKEN`，创建非 latest 的正式组件分发，不发布 npm/APK。已占用的 Release 不覆盖；全部 16 个草稿资产下载后逐字节比较，再公开并通过安装器实际 HTTPS 下载链路独立复核公开元数据、大小和哈希。验证失败保留实际已发布状态并使任务失败，不擅自删除或破坏性重试。
 

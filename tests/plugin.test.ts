@@ -21,6 +21,7 @@ import { DSH_MOBILE_VERSION, MINIMUM_ANDROID_APP_VERSION } from '../src/version.
 import { DESKTOP_ADMIN_HEADER, DESKTOP_ADMIN_MARKER } from '../src/local-admin-host.js'
 import { buildExtensionWorkerEntry } from './helpers/extension-worker-build.js'
 import { parseUnavailableExtensionHosts } from '../src/extension-recovery-ui.js'
+import { CaddyComponentManager, CADDY_VERSION, type CaddyArtifact } from '../src/caddy-component.js'
 
 const contexts: Context[] = []
 const temporaryDirectories: string[] = []
@@ -457,6 +458,51 @@ describe('stock DSH lifecycle', () => {
     expect(completed).toEqual(['route', 'remote', 'lan', 'extensions', 'builtin'])
     expect(failure).toBeInstanceOf(AggregateError)
     expect((failure as AggregateError).errors).toHaveLength(2)
+  })
+
+  it('owns an admitted Caddy installation until unload aborts and drains its actual download', async () => {
+    const bytes = Buffer.from('owned plugin component fixture')
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    const artifact: CaddyArtifact = {
+      version: CADDY_VERSION, platform: process.platform, arch: process.arch,
+      downloadUrl: 'https://example.com/fixture/caddy', downloadBytes: bytes.length, downloadSha256: hash,
+      executableName: process.platform === 'win32' ? 'caddy.exe' : 'caddy', executableBytes: bytes.length,
+      executableSha256: hash, dnsPluginVersion: 'v0.4.3',
+    }
+    let enter!: (signal: AbortSignal) => void
+    let release!: (value: Uint8Array) => void
+    const entered = new Promise<AbortSignal>(resolve => { enter = resolve })
+    const download = new Promise<Uint8Array>(resolve => { release = resolve })
+    const inspect = vi.fn(async () => ({ version: 'v' + CADDY_VERSION + ' h1:fixture',
+      modules: 'dns.providers.tencentcloud v0.4.3\nNon-standard modules: 1\n' }))
+    const install = CaddyComponentManager.prototype.install
+    vi.spyOn(CaddyComponentManager.prototype, 'install').mockImplementation(function (this: CaddyComponentManager) {
+      // Only the download/inspection inputs are fixtures; the actual manager queue and close remain in use.
+      Object.defineProperties(this, {
+        artifact: { value: artifact },
+        fetchArtifact: { value: async (_url: string, signal: AbortSignal) => { enter(signal); return download } },
+        inspectExecutable: { value: inspect },
+      })
+      return install.call(this)
+    })
+    const mounted = await mount(false, 3080, {}, () => undefined)
+    const installing = invoke(mounted.route, 'POST', '/api/mobile-access/remote/caddy/component/install', '{"confirm":true}')
+    const signal = await entered
+    const aborted = new Promise<'aborted'>(resolve => { signal.addEventListener('abort', () => resolve('aborted'), { once: true }) })
+    let completed = false
+    const disposing = mounted.context.fiber.dispose().then(() => { completed = true; return 'disposed' as const })
+    try {
+      expect(await Promise.race([aborted, disposing])).toBe('aborted')
+      expect(completed).toBe(false)
+      expect((await invoke(mounted.route, 'POST', '/api/mobile-access/remote/caddy/component/install', '{"confirm":true}')).status).toBe(503)
+    } finally {
+      release(bytes)
+      await Promise.all([installing, disposing])
+    }
+    expect(completed).toBe(true)
+    expect((await installing).status).not.toBe(200)
+    expect(inspect).not.toHaveBeenCalled()
+    await expect(lstat(join(mounted.directory, 'components', 'caddy', CADDY_VERSION))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('keeps a loopback control route available while the LAN listener is stopped', async () => {

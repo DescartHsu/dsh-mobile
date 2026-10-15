@@ -7,8 +7,10 @@ const { CADDY_BUILD_LOCK: lock, caddyBuildEnvironment, verifyCaddyBuild, verifyC
 
 function build(platform = 'win32') {
   return { GoVersion: lock.toolchain, Main: { Path: 'caddy', Version: '(devel)' },
-    Deps: ['caddy', 'tencentcloud'].map(name => ({ Path: lock.sources[name].path,
+    Deps: [...['caddy', 'tencentcloud'].map(name => ({ Path: lock.sources[name].path,
       Version: lock.sources[name].version, Sum: lock.sources[name].sum })),
+    { Path: 'golang.org/x/net', Version: lock.dependencies['golang.org/x/net'].version,
+      Sum: lock.dependencies['golang.org/x/net'].sum }],
     Settings: Object.entries({ '-buildmode': 'exe', '-compiler': 'gc', '-trimpath': 'true', CGO_ENABLED: '0',
       GOOS: platform === 'win32' ? 'windows' : 'linux', GOARCH: 'amd64', GOAMD64: 'v1' })
       .map(([Key, Value]) => ({ Key, Value })),
@@ -28,7 +30,9 @@ describe('pinned native Caddy build inputs', () => {
   it('matches the runtime core and DNS module pins', () => {
     expect(lock.core).toBe('v' + CADDY_VERSION)
     expect(lock.dns).toBe(CADDY_DNS_PLUGIN_VERSION)
-    expect(lock.toolchain).toBe('go1.26.6')
+    expect(lock.toolchain).toBe('go1.26.9')
+    expect(lock.dependencies['golang.org/x/net']).toEqual({ version: 'v0.60.0',
+      sum: 'h1:79p50tfZlm0J9YfoDsSi639qSXNGVwEzOPLCxM2FsYU=' })
   })
   it('binds xcaddy to exactly the selected compiler and strips ambient overrides/secrets', () => {
     const environment = caddyBuildEnvironment({ Path: 'trusted-path', SystemRoot: 'windows', GOPATH: 'cache-path',
@@ -62,6 +66,12 @@ describe('pinned native Caddy build inputs', () => {
   it('rejects an outer compiler check that hides a different inner compiler', () => {
     expect(() => verifyCaddyBuild({ ...build(), GoVersion: 'go1.27.0' }, 'win32', 'x64')).toThrow('metadata changed')
   })
+  it('rejects the pre-security-patch HTTP/2 dependency in an otherwise pinned build', () => {
+    const original = build()
+    expect(() => verifyCaddyBuild({ ...original, Deps: original.Deps.map(item => item.Path === 'golang.org/x/net'
+      ? { ...item, Version: 'v0.59.0', Sum: 'h1:5zfYln+w5XCxwrnMMJPufRgNoXEaGxl0wo5GqPXyues=' } : item) },
+    'win32', 'x64')).toThrow('lock mismatch: golang.org/x/net')
+  })
   it('rejects extra build flags, wrong native settings, replacement and unpinned dependencies', () => {
     const original = build()
     expect(() => verifyCaddyBuild({ ...original, Settings: [...original.Settings, { Key: '-tags', Value: 'custom' }] }, 'win32', 'x64')).toThrow('settings changed')
@@ -80,7 +90,7 @@ describe('pinned native Caddy build inputs', () => {
     const original = sources()
     expect(verifyCaddySources(original)).toEqual(Object.fromEntries(Object.entries(lock.sources)
       .map(([name, pin]) => [name, (pin as { revision: string }).revision])))
-    for (const override of [{ Version: 'v2.11.7' }, { Sum: 'h1:changed' },
+    for (const override of [{ Version: 'v2.11.6' }, { Sum: 'h1:changed' },
       { Origin: { ...original.caddy!.Origin, Hash: 'a'.repeat(40) } },
       { Origin: { ...original.caddy!.Origin, URL: 'https://example.com/other' } },
       { Origin: { ...original.caddy!.Origin, Ref: 'refs/heads/main' } }]) {

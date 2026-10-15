@@ -94,6 +94,8 @@ export async function settleRemoteResources(
 export class RemoteProviderCoordinator {
   private selectedValue: RemoteProvider
   private queue: Promise<void> = Promise.resolve()
+  private closing = false
+  private closeTask: Promise<void> | undefined
 
   constructor(
     selected: RemoteProvider,
@@ -150,10 +152,21 @@ export class RemoteProviderCoordinator {
     })
   }
 
+  /** Stop admitting mutations and wait for accepted work before callers release provider resources. */
+  close(): Promise<void> {
+    this.closing = true
+    this.closeTask ??= this.queue
+    return this.closeTask
+  }
+
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.closing) return Promise.reject(new Error('remote_provider_closed'))
+    const run = (): Promise<T> => this.closing
+      ? Promise.reject(new Error('remote_provider_closed'))
+      : this.runAndEnforce(operation)
     const task = this.queue.then(
-      () => this.runAndEnforce(operation),
-      () => this.runAndEnforce(operation),
+      run,
+      run,
     )
     this.queue = task.then(() => undefined, () => undefined)
     return task

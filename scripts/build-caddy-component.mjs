@@ -26,8 +26,8 @@ const binary = join(output, process.platform === 'win32' ? 'caddy.exe' : 'caddy'
 const go = process.env.GO_BINARY ?? 'go'
 const environment = caddyBuildEnvironment(process.env, { go, tools, temporary, cache, modules: modulesCache })
 const run = promisify(execFile)
-const command = async (file, argv) => (await run(file, argv, {
-  cwd: work, env: environment, windowsHide: true, timeout: 1_200_000, maxBuffer: 32 * 1024 * 1024,
+const command = async (file, argv, { cwd = work, env = environment } = {}) => (await run(file, argv, {
+  cwd, env, windowsHide: true, timeout: 1_200_000, maxBuffer: 32 * 1024 * 1024,
 })).stdout.trim()
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const licensePattern = /^(LICENSE|LICENCE|COPYING|NOTICE|PATENTS)(\..*)?$/i
@@ -41,12 +41,20 @@ try {
   const sourceRevisions = verifyCaddySources(sources)
   await command(go, ['install', 'github.com/caddyserver/xcaddy/cmd/xcaddy@' + XCADDY])
   await command(join(tools, process.platform === 'win32' ? 'xcaddy.exe' : 'xcaddy'),
-    ['build', CORE, '--with', 'github.com/caddy-dns/tencentcloud@' + DNS, '--output', binary])
+    ['build', CORE, '--with', 'github.com/caddy-dns/tencentcloud@' + DNS, '--output', binary],
+    { env: { ...environment, XCADDY_SKIP_BUILD: '1' } })
   const retained = (await readdir(temporary, { withFileTypes: true }))
     .filter(entry => entry.isDirectory() && entry.name.startsWith('buildenv_'))
   if (retained.length !== 1) throw new Error('Missing unique xcaddy build environment')
-  await run(go, ['mod', 'verify'], { cwd: join(temporary, retained[0].name), env: environment,
-    windowsHide: true, timeout: 120_000, maxBuffer: 1024 * 1024 })
+  const staging = join(temporary, retained[0].name)
+  // Pin the patched HTTP/2 module without new imports or module replacements.
+  // Keep core and DNS versions explicit when resolving the updated dependency.
+  await command(go, ['get', 'github.com/caddyserver/caddy/v2@' + CORE,
+    'github.com/caddy-dns/tencentcloud@' + DNS,
+    'golang.org/x/net@' + CADDY_BUILD_LOCK.dependencies['golang.org/x/net'].version], { cwd: staging })
+  await command(go, ['mod', 'tidy'], { cwd: staging })
+  await command(go, ['mod', 'verify'], { cwd: staging })
+  await command(go, ['build', '-trimpath', '-buildvcs=false', '-o', binary], { cwd: staging })
   const build = JSON.parse(await command(go, ['version', '-m', '-json', binary]))
   // Diagnostic metadata is safe to inspect on a rejected build; never treat it as a passing manifest.
   await writeFile(join(output, 'go-build.json'), JSON.stringify(build, null, 2) + '\n')

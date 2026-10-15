@@ -36,7 +36,7 @@ Android App / 浏览器 → 公网 HTTPS 域名（Caddy 终止 TLS）
 
 以下构建和验证工具需在本仓库源码 checkout 中运行；npm 插件包不包含这些维护脚本，也不需要普通用户自行编译 Caddy。
 
-[构建脚本](<../scripts/build-caddy-component.mjs>) 固定 Go 1.26.6、xcaddy v0.4.7、Caddy v2.11.6 和腾讯云 DNS v0.4.3。[输入锁](<../scripts/caddy-component-lock.json>) 固定源码提交和编译依赖版本/校验和。每次构建使用全新的私有编译缓存及模块缓存，执行 Go 校验和、源码来源与保留模块校验；未知依赖、替换模块、编译器或原生设置漂移会在运行生成的 Caddy 前拒绝。
+[构建脚本](<../scripts/build-caddy-component.mjs>) 固定 Go 1.26.9、xcaddy v0.4.7、Caddy v2.11.7、腾讯云 DNS v0.4.3 及 golang.org/x/net v0.60.0。[输入锁](<../scripts/caddy-component-lock.json>) 固定源码提交和编译依赖版本/校验和。每次构建使用全新的私有编译缓存及模块缓存，执行 Go 校验和、源码来源与保留模块校验；未知依赖、替换模块、编译器或原生设置漂移会在运行生成的 Caddy 前拒绝。
 
 选择精确 Go 编译器（可用 `GO_BINARY`），输出目录必须是全新绝对路径：
 
@@ -48,28 +48,26 @@ node scripts/compare-caddy-builds.mjs --first /absolute/new/first --second /abso
 
 Windows 使用原生绝对路径和 `--target win32-x64`。可复现指二进制字节、大小、SHA-256 一致，不保证操作系统镜像或所有元数据/许可证文本逐字一致。[工作流](<../.github/workflows/caddy-component.yml>) 在 Windows/Linux x64 分别独立构建两次，审核完整产物，并使用独立 manifest 测试真正安装后的二进制：默认版本/模块检查、目录提升、无重复下载的重启、损坏下载回滚、TLS/配对/API/WSS、持久设备凭据与停止后清理，保留邻近文件及配对数据。其他架构仍未审核。
 
-PR 和普通手动运行只产生只读审查产物。只有授权的 `abworks-dev/dsh-mobile` fork 上已有 `caddy-component-2.11.6-tencentcloud-0.4.3-review.N` 标签，经明确手动启用且两个原生任务均通过，才发布 **TEST 预发布版**：
+PR 和普通手动运行只产生只读审查产物。只有授权的 `abworks-dev/dsh-mobile` fork 上已有 `caddy-component-2.11.7-tencentcloud-0.4.3-review.N` 标签，经明确手动启用且两个原生任务均通过，才发布 **TEST 预发布版**：
 
 ```sh
-gh workflow run caddy-component.yml --repo abworks-dev/dsh-mobile --ref caddy-component-2.11.6-tencentcloud-0.4.3-review.1 -f publish_review_prerelease=true
+gh workflow run caddy-component.yml --repo abworks-dev/dsh-mobile --ref caddy-component-2.11.7-tencentcloud-0.4.3-review.1 -f publish_review_prerelease=true
 ```
 
 组件标签不以 `v` 开头，避免触发插件正式发布。独立写权限任务拒绝已有 Release，创建非 latest 的预发布草稿，不覆盖资产；下载所有草稿资产与准备字节逐一对比后才公开。产物包括区分平台的原始二进制、manifest、编译/模块/版本/许可证证据、双构建证明、源码提交/运行标识和 SHA256SUMS。[发布后验证器](<../scripts/verify-caddy-release.mjs>) 用 GitHub 元数据及安装器实际 HTTPS/受限重定向下载链路复核 **所有公开资产**，成功后才输出仅供审核的目录。公开后验证失败会保留已公开的标记预发布版、使任务失败且不输出校验目录，不擅自删除或回滚 Release。CI 产物保留 14 天，Release 资产另行保存。
 
 公开定制下载端点曾在请求 v2.11.6 时返回 v2.11.7，动态最新版不能成为信任来源。版本化 GitHub URL 仍可被仓库所有者替换；信任边界是审核过的精确大小/哈希，而非 URL 名称或远端自报校验和。fork 的目录只是审核候选，不会自动写入[生产组件表](<../src/caddy-component.ts>)；正式安装仍等待维护者发布并审核官方分发。
 
-### 官方分发需要独立的两阶段授权
+### 正式分发与安装开放
 
-本次仅准备发布通道，不执行发布。第一阶段要求维护者审核工作流 PR，并合入经过审核、受保护的 `main`。维护者必须预先配置 `caddy-component-release`：必需审核者规则、非空审核者列表和 **禁止自我审核**；管理员不得绕过环境批准。GitHub Actions 在唯一发布任务开始前提供真实人工批准；脚本另外读取实际环境策略，在首次修改 Release 前拒绝缺失、格式错误或未保护的环境。环境名称、main 祖先比较、合成策略测试都不能证明人工审核或批准。
+正式组件由有仓库发布权限的维护者确认候选后手动发布，单维护者即可完成；不要求第二个人批准，也不要求预先配置 GitHub Environment。两个发布输入默认 false，PR 和普通构建不会发布。贡献者的实测可以按其版本、环境和实际验证范围作为验收依据，不要求在维护者本机重复搭建同一环境；不得将隔离测试或旧候选结果写成新二进制的公网签发、续期验收。
 
-官方发布仅允许 **公开** 的 `saya-ch/dsh-mobile` 仓库和已有的固定非 `v` 稳定标签 `caddy-component-2.11.6-tencentcloud-0.4.3`。两个发布输入均默认 false；同时启用会在原生构建前明确失败。错误事件、分支、仓库或通道/标签身份不能发布。发布任务先检查 `/commits/TAG` 的 SHA 与 Actions `GITHUB_SHA` 完全一致，且 `/compare/main...SHA` 状态必须为 `identical` 或 `behind`（只证明属于 main/祖先关系，**不证明代码经过审核**）。准备资产和源码元数据使用同一个 SHA、同一次运行中的两平台原生构建，不复用旧运行的产物。
+官方发布仅允许公开的 `saya-ch/dsh-mobile` 仓库和版本绑定的非 `v` 标签 `caddy-component-2.11.7-tencentcloud-0.4.3`。维护者在已审核的 main 提交上创建该标签，然后手动运行现有工作流，显式设置 `publish_official_release=true`，保持 review 输入 false。发布器检查标签 SHA 与本次 Actions SHA 相同、提交属于 main，并要求同一次运行的 Windows/Linux 原生双构建、测试和插件构建通过。错误事件、分支、仓库、互斥输入、失败原生任务或不匹配标签均拒绝发布。
 
-发布任务仍仅有 `contents: write`，API 使用 `GITHUB_TOKEN`，公开资产不带令牌或 API 请求头。[GitHub Get an environment 文档](<https://docs.github.com/en/rest/deployments/environments?apiVersion=2022-11-28#get-an-environment>) 通常要求 Actions read，但明确允许公开资源在没有该权限时读取。此处只采用公开资源例外作为前提，不声称已验证真实令牌能力：带认证请求的 401/403/404/5xx 或网络失败均在创建 Release 前关闭路径；不重试未认证请求、不提升权限、不增加发布密钥。维护者需确认仓库公开、端点可读以及环境保护配置；认证读取失败应报告缺少读取能力，不放宽策略。fork 审查通道使用 `caddy-component-review`，不要求官方环境策略。
+唯一发布任务使用 `contents: write` 和现有 `GITHUB_TOKEN`，创建非 latest 的正式组件分发，不发布 npm/APK。已占用的 Release 不覆盖；全部 16 个草稿资产下载后逐字节比较，再公开并通过安装器实际 HTTPS 下载链路独立复核公开元数据、大小和哈希。验证失败保留实际已发布状态并使任务失败，不擅自删除或破坏性重试。
 
-满足以上前提并得到明确发布授权后（不是本次准备任务），维护者才可在已有稳定标签上手动启用 `publish_official_release=true`，保持 review 输入 false。仍只使用现有 Windows/Linux x64 原生矩阵：各独立构建两次，验证原生安装/TLS/API/WSS/不导入信任，并运行完整测试与构建。通用发布器使用 `--draft --prerelease=false --latest=false`，拒绝已占用 Release，不更新、覆盖、删除或破坏性重试；上传并下载 **全部 16 个资产**、逐字节比较，再以 `--draft=false --prerelease=false --latest=false` 公开。fork 仍保留预发布且非 latest 的标志。官方验证允许 `/releases/latest` 的 404（确实没有 latest），但拒绝该组件成为 latest，以及其他错误或格式错误的成功响应。组件不替换 latest 插件，不自动发布 npm/APK。公开后验证失败保留公开 Release、任务失败、不产生候选，不进行破坏性回滚。
+prepare/verify CLI 默认 review；尾参数 `--channel official` 选择官方身份校验。官方验证成功后生成 `official-candidate-not-production`，仍保持 `productionCatalogEnabled: false`。正式安装需另行审核实际公开的二进制，在生产目录 PR 中把来源、大小和 SHA-256 固定到 `CADDY_COMPONENT_RELEASES`；远端 JSON 不会自动成为运行时信任配置。当前目录尚未开放时，不能用官方插件替换私有预览后期待托管重启正常。
 
-prepare/verify CLI 原有严格签名默认 review；只有可选尾参数 `--channel official`（或 `--channel review`）选择共享的精确身份校验。官方 `COMPONENT-RELEASE.json` 使用 `managed-caddy-component-official`；全部资产的公开元数据/大小/哈希及实际 HTTPS/受限重定向检查通过后，才生成 `official-candidate-not-production`。两通道索引与候选均保持 `productionCatalogEnabled: false`，输出有界、独占创建且不覆盖。
-
-第二阶段在 **以后** 进行：独立验证实际发布的官方字节，再提交单独审核的目录 PR，将精确来源/大小/哈希硬编码到 `CADDY_COMPONENT_RELEASES`。本次准备中它仍严格为 `Object.freeze({})`。远端候选 JSON 不是运行时信任或配置。仅支持 Windows/Linux x64、腾讯云 DNS；不要把私有预览替换为目录为空的官方插件包后期待托管重启正常工作。人工真实网络证据与最终候选 CI 分开记录；隔离测试或该人工证据都不证明证书续期通过。
+本方案仅支持 Windows/Linux x64 和腾讯云 DNS。Cloudflared 隧道与腾讯云 DNS-01 不是同一项能力；已有 Cloudflared 用户无需迁移 DNS 或关闭当前入口。托管 Caddy 不提供内网穿透。证书签发、证书续期、公网可达和实际页面/API/流传递是不同验收项，按取得的证据分别报告。
 
 隔离测试仅用回环随机端口、私有内部 CA 和 `skip_install_trust`，不修改系统信任、生产 DNS 或现有代理。**不等于真实公网 DNS-01/ACME 签发或公网路由验收**；后者需要另行授权专用测试域名、最小权限 DNS 凭据和可达入口。

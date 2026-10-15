@@ -25,7 +25,7 @@ export function releaseIdentity(repository, tag, channel = 'review') {
       throw new Error('Invalid official component identity')
     }
   } else throw new Error('Unknown component release channel')
-  return { channel, kind: `managed-caddy-component-${channel}`, environment: `caddy-component-${channel === 'official' ? 'release' : 'review'}` }
+  return { channel, kind: `managed-caddy-component-${channel}`, authorization: 'manual-maintainer-dispatch' }
 }
 
 /** Pure validation shared by early native gates and the publisher; absent inputs are read-only. */
@@ -40,20 +40,6 @@ export function publicationRequest({ event, repository, ref, review = 'false', o
   if (nativeResult !== undefined && nativeResult !== 'success') throw new Error('Native gates must succeed')
   if (enabled(official) && repositoryPrivate !== false && repositoryPrivate !== 'false') throw new Error('Official publication requires trusted public repository context')
   return releaseIdentity(repository, ref.slice('refs/tags/'.length), enabled(official) ? 'official' : 'review')
-}
-
-export function verifyOfficialEnvironment(policy) {
-  if (policy?.can_admins_bypass !== false) {
-    throw new Error('Official environment must explicitly prohibit administrator approval bypass')
-  }
-  if (!Array.isArray(policy?.protection_rules) || !policy.protection_rules.some(rule => rule?.type === 'required_reviewers'
-    && Array.isArray(rule.reviewers) && rule.reviewers.length > 0 && rule.prevent_self_review === true
-    && rule.reviewers.every(assignment => assignment !== null && typeof assignment === 'object' && !Array.isArray(assignment)
-      && ['User', 'Team'].includes(assignment.type) && assignment.reviewer !== null
-      && typeof assignment.reviewer === 'object' && !Array.isArray(assignment.reviewer)
-      && Number.isSafeInteger(assignment.reviewer.id) && assignment.reviewer.id > 0))) {
-    throw new Error('Official environment requires nonempty required reviewers and prevention of self review')
-  }
 }
 
 /** Bind local asset bytes and metadata before copying or publishing; never executes a supplied binary. */

@@ -74,11 +74,11 @@ function stepBody(workflow: string, name: string) {
 
 it('evaluates the actual YAML publisher route with exclusive native-success channel predicates', async () => {
   const workflow = (await readFile(new URL('../.github/workflows/caddy-component.yml', import.meta.url), 'utf8')).replaceAll('\r\n', '\n')
-  const expression = /    if: >-\n([\s\S]*?)    environment:/u.exec(workflow)?.[1]?.trim()
+  const expression = /    if: >-\n([\s\S]*?)    runs-on:/u.exec(workflow)?.[1]?.trim()
   if (!expression) throw new Error('Publisher predicate missing')
   const route = new Function('github', 'inputs', 'needs', 'startsWith', 'toJSON', 'return (' + expression.replaceAll('needs.caddy-review-artifact', 'needs.native') + ')')
   const base = { event_name: 'workflow_dispatch', repository: 'saya-ch/dsh-mobile',
-    ref: 'refs/tags/caddy-component-2.11.6-tencentcloud-0.4.3', event: { repository: { private: false } } }
+    ref: 'refs/tags/caddy-component-2.11.7-tencentcloud-0.4.3', event: { repository: { private: false } } }
   const inputs = { publish_official_release: true, publish_review_prerelease: false }
   const run = (github: Omit<typeof base, 'event'> & { event: { repository: { private?: unknown } } } = base, flags = inputs, result = 'success') =>
     route(github, flags, { native: { result } }, (value: string, prefix: string) => value.startsWith(prefix), JSON.stringify)
@@ -106,6 +106,8 @@ it('executes actual publisher shell with fake gh and fails closed before public 
   expect(workflow).toContain('default: false')
   expect(workflow).toContain('needs: caddy-review-artifact')
   expect(workflow).toContain('persist-credentials: false')
+  expect(workflow).not.toContain('verifyOfficialEnvironment')
+  expect(workflow).not.toMatch(/^    environment:/mu)
   const body = stepBody(workflow, 'Create new draft component distribution without overwriting releases or assets') + '\n' +
     stepBody(workflow, 'Publish component then verify all public HTTPS assets and emit non-production candidate')
   const root = await mkdtemp(join(tmpdir(), 'caddy-publish-test-')); roots.push(root)
@@ -117,37 +119,6 @@ printf '%s\\n' "$*" >> "$CALL_LOG"
 if [[ "$1" == api ]]; then
   if [[ "$*" == *'/commits/'* ]]; then
     if [[ "$CASE" == wrong-tag ]]; then printf '%040d\\n' 0; else printf '%s\\n' "$SOURCE_COMMIT"; fi
-    exit 0
-  fi
-  if [[ "$*" == *'/environments/'* ]]; then
-    case "$CASE" in
-      policy401|policy403|policy404|policy500|policy-network) exit 1;;
-      policy-json) printf 'not-json';;
-      policy-missing) printf '{}';;
-      policy-malformed) printf '{"protection_rules":{}}';;
-      policy-empty) printf '{"protection_rules":[{"type":"required_reviewers","reviewers":[],"prevent_self_review":true}]}';;
-      policy-self) printf '{"protection_rules":[{"type":"required_reviewers","reviewers":[{}],"prevent_self_review":false}]}';;
-      policy-bypass) printf '{"can_admins_bypass":true,"protection_rules":[{"type":"required_reviewers","reviewers":[{"type":"User","reviewer":{"id":1}}],"prevent_self_review":true}]}';;
-      policy-bypass-missing) printf '{"protection_rules":[{"type":"required_reviewers","reviewers":[{"type":"User","reviewer":{"id":1}}],"prevent_self_review":true}]}';;
-      policy-reviewer-*)
-        case "$CASE" in
-          policy-reviewer-null) assignments='null';;
-          policy-reviewer-empty) assignments='{}';;
-          policy-reviewer-type) assignments='{"type":"Other","reviewer":{"id":1}}';;
-          policy-reviewer-missing) assignments='{"type":"User","reviewer":{}}';;
-          policy-reviewer-null-object) assignments='{"type":"User","reviewer":null}';;
-          policy-reviewer-array) assignments='{"type":"Team","reviewer":[]}';;
-          policy-reviewer-zero) assignments='{"type":"User","reviewer":{"id":0}}';;
-          policy-reviewer-negative) assignments='{"type":"User","reviewer":{"id":-1}}';;
-          policy-reviewer-fraction) assignments='{"type":"Team","reviewer":{"id":1.5}}';;
-          policy-reviewer-unsafe) assignments='{"type":"User","reviewer":{"id":9007199254740992}}';;
-          policy-reviewer-string) assignments='{"type":"Team","reviewer":{"id":"1"}}';;
-          policy-reviewer-mixed) assignments='{"type":"User","reviewer":{"id":1}},{}';;
-          *) exit 9;;
-        esac
-        printf '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","reviewers":[%s],"prevent_self_review":true}]}' "$assignments";;
-      *) printf '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","reviewers":[{"type":"User","reviewer":{"id":1}},{"type":"Team","reviewer":{"id":2}}],"prevent_self_review":true}]}';;
-    esac
     exit 0
   fi
   if [[ "$*" == *'/compare/'* ]]; then
@@ -190,17 +161,14 @@ printf '{}' > "$RUNNER_TEMP/caddy-review-catalog.json"
     ['fail-create', 7], ['fail-upload', 7], ['fail-download', 7], ['diff', 1], ['fail-edit', 7],
     ['verify-fail', 8], ['valid', 0],
     ['official-valid', 0], ['official-main-identical', 0],
-    ...['policy401', 'policy403', 'policy404', 'policy500', 'policy-network', 'policy-json', 'policy-missing',
-      'policy-malformed', 'policy-empty', 'policy-self', 'policy-bypass', 'policy-bypass-missing',
-      ...['null', 'empty', 'type', 'missing', 'null-object', 'array', 'zero', 'negative', 'fraction', 'unsafe', 'string', 'mixed'].map(value => 'policy-reviewer-' + value),
-      'main-ahead', 'main-diverged', 'main-malformed', 'main-error',
+    ...['main-ahead', 'main-diverged', 'main-malformed', 'main-error',
       'wrong-tag', 'native-failure', 'no-input', 'double-input', 'wrong-event', 'wrong-repo', 'wrong-ref', 'wrong-component-tag', 'wrong-channel', 'private-repo', 'malformed-private']
       .map(mode => ['official-' + mode, 1]),
   ] as [string, number][]
   for (const [scenario, expectedExitCode] of scenarios) {
     const official = scenario.startsWith('official-')
     const mode = official ? scenario.slice(9) : scenario
-    const tag = official ? 'caddy-component-2.11.6-tencentcloud-0.4.3' : 'caddy-component-2.11.6-tencentcloud-0.4.3-review.1'
+    const tag = official ? 'caddy-component-2.11.7-tencentcloud-0.4.3' : 'caddy-component-2.11.7-tencentcloud-0.4.3-review.1'
     const work = join(root, scenario); await mkdir(work)
     await mkdir(join(work, 'component-release')); await writeFile(join(work, 'component-release', 'asset'), 'known reviewed bytes')
     const log = join(work, 'calls'); await writeFile(log, '')
@@ -217,7 +185,7 @@ printf '{}' > "$RUNNER_TEMP/caddy-review-catalog.json"
     } catch (error) { exitCode = deliberateExitCode(error) }
     const calls = await readFile(log, 'utf8')
     expect(exitCode, scenario).toBe(expectedExitCode)
-    if (mode.startsWith('policy')) expect(calls, scenario).not.toContain('release ')
+    expect(calls, scenario).not.toContain('/environments/')
     const reachedPublicEdit = ['valid', 'official-valid', 'official-main-identical', 'fail-edit', 'verify-fail'].includes(scenario)
     expect(calls.includes('release edit '), scenario).toBe(reachedPublicEdit)
     expect(calls.includes('verify\n'), scenario).toBe(['valid', 'official-valid', 'official-main-identical', 'verify-fail'].includes(scenario))

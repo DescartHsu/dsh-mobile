@@ -56,10 +56,10 @@ async function provedFixture(platform: string) {
 
 describe('review component artifact binding', () => {
   it('shares strict channel identity and exclusive publication request validation', () => {
-    const officialTag = 'caddy-component-2.11.6-tencentcloud-0.4.3'
+    const officialTag = 'caddy-component-2.11.7-tencentcloud-0.4.3'
     const request = { event: 'workflow_dispatch', repository: 'saya-ch/dsh-mobile', ref: 'refs/tags/' + officialTag,
       official: 'true', review: 'false', nativeResult: 'success', repositoryPrivate: false }
-    expect(helpers.publicationRequest(request)).toMatchObject({ channel: 'official', environment: 'caddy-component-release' })
+    expect(helpers.publicationRequest(request)).toMatchObject({ channel: 'official', authorization: 'manual-maintainer-dispatch' })
     expect(helpers.publicationRequest({ event: 'pull_request' })).toBeNull()
     expect(helpers.publicationRequest({ ...request, review: '', official: '' })).toBeNull()
     for (const override of [{ review: 'true' }, { event: 'pull_request' }, { ref: 'refs/heads/main' }, { ref: 'refs/tags/v0.6.2' },
@@ -70,34 +70,13 @@ describe('review component artifact binding', () => {
     expect(() => helpers.releaseIdentity(request.repository, officialTag, 'unknown')).toThrow('channel')
     expect(() => helpers.releaseIdentity('saya-ch/dsh-mobile', officialTag + '-review.1')).toThrow('repository')
     expect(() => helpers.releaseIdentity('abworks-dev/dsh-mobile', officialTag, 'official')).toThrow('identity')
-    for (const policy of [null, {}, { protection_rules: {} }, { protection_rules: [] },
-      { protection_rules: [{ type: 'required_reviewers', reviewers: [{}], prevent_self_review: 'true' }] },
-      { protection_rules: [{ type: 'wait_timer', reviewers: [{}], prevent_self_review: true }] }]) {
-      expect(() => helpers.verifyOfficialEnvironment(policy)).toThrow()
-    }
-  })
-  it('requires every official reviewer assignment to identify a supported User or Team', () => {
-    const user = { type: 'User', reviewer: { id: 1 } }
-    const team = { type: 'Team', reviewer: { id: 2 } }
-    const policy = (reviewers: unknown[]) => ({ can_admins_bypass: false, protection_rules: [{ type: 'required_reviewers', reviewers, prevent_self_review: true }] })
-    for (const reviewers of [[user], [team], [user, team]]) expect(() => helpers.verifyOfficialEnvironment(policy(reviewers))).not.toThrow()
-    for (const assignment of [null, {}, [], true, { type: 'Other', reviewer: { id: 1 } }, { type: 'User' },
-      { type: 'User', reviewer: null }, { type: 'User', reviewer: [] }, { type: 'Team', reviewer: {} },
-      ...[0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1'].map(id => ({ type: 'User', reviewer: { id } }))]) {
-      expect(() => helpers.verifyOfficialEnvironment(policy([assignment]))).toThrow()
-      expect(() => helpers.verifyOfficialEnvironment(policy([user, assignment]))).toThrow()
-    }
-  })
-  it('accepts official approval only with an explicit administrator-bypass prohibition', () => {
-    const policy = { protection_rules: [{ type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { id: 1 } }], prevent_self_review: true }] }
-    expect(() => helpers.verifyOfficialEnvironment({ ...policy, can_admins_bypass: false })).not.toThrow()
-    expect(() => helpers.verifyOfficialEnvironment({ ...policy, can_admins_bypass: true })).toThrow('administrator')
-    expect(() => helpers.verifyOfficialEnvironment(policy)).toThrow('administrator')
+    expect(helpers.publicationRequest(request)).toMatchObject({ authorization: 'manual-maintainer-dispatch' })
+    expect(helpers.publicationRequest(request)).not.toHaveProperty('environment')
   })
   it('requires exact version-bound review tags that cannot trigger v* plugin releases', () => {
-    expect(reviewTag('caddy-component-2.11.6-tencentcloud-0.4.3-review.1')).toContain('-review.1')
-    for (const tag of ['v0.6.1', 'latest', 'caddy-component-2.11.7-tencentcloud-0.4.3-review.1',
-      'caddy-component-2.11.6-tencentcloud-0.4.3-review.0', 'caddy-component-2.11.6-tencentcloud-0.4.3-review.01']) {
+    expect(reviewTag('caddy-component-2.11.7-tencentcloud-0.4.3-review.1')).toContain('-review.1')
+    for (const tag of ['v0.6.1', 'latest', 'caddy-component-2.11.8-tencentcloud-0.4.3-review.1',
+      'caddy-component-2.11.7-tencentcloud-0.4.3-review.0', 'caddy-component-2.11.7-tencentcloud-0.4.3-review.01']) {
       expect(() => reviewTag(tag)).toThrow('review tag')
     }
   })
@@ -107,7 +86,7 @@ describe('review component artifact binding', () => {
   })
   it('rejects incorrect size/hash, metadata, target, source revision and build lock', () => {
     const { manifest, build, binary } = fixture()
-    for (const override of [{ version: '2.11.7' }, { sourceProvenanceVerified: false }, { platform: 'linux' },
+    for (const override of [{ version: '2.11.8' }, { sourceProvenanceVerified: false }, { platform: 'linux' },
       { executableName: 'renamed.exe' }, { downloadBytes: binary.length + 1 }, { executableSha256: 'a'.repeat(64) },
       { buildLockSha256: 'a'.repeat(64) }, { sourceRevisions: {} }, { publication: 'published' }, { dependencies: [] }]) {
       expect(() => verifyArtifact({ ...manifest, ...override }, build, binary, 'win32-x64')).toThrow()
@@ -180,13 +159,13 @@ describe('review component artifact binding', () => {
     }
     const output = join(wrapper, 'prepared')
     const args = ['--input-dir', input, '--output-dir', output, '--repository', 'abworks-dev/dsh-mobile',
-      '--tag', 'caddy-component-2.11.6-tencentcloud-0.4.3-review.1', '--commit', 'b'.repeat(40), '--run-id', '123', '--run-attempt', '1']
+      '--tag', 'caddy-component-2.11.7-tencentcloud-0.4.3-review.1', '--commit', 'b'.repeat(40), '--run-id', '123', '--run-attempt', '1']
     await cli('prepare-caddy-release.mjs', args)
     const index = JSON.parse(await readFile(join(output, 'COMPONENT-RELEASE.json'), 'utf8'))
     expect(Object.keys(index.binaryAssets).sort()).toEqual(['linux-x64', 'win32-x64'])
     expect(index.productionCatalogEnabled).toBe(false)
     const verifyArgs = ['--directory', output, '--repository', 'abworks-dev/dsh-mobile',
-      '--tag', 'caddy-component-2.11.6-tencentcloud-0.4.3-review.1', '--commit', 'c'.repeat(40),
+      '--tag', 'caddy-component-2.11.7-tencentcloud-0.4.3-review.1', '--commit', 'c'.repeat(40),
       '--run-id', '123', '--run-attempt', '1', '--candidate-output', join(wrapper, 'candidate.json')]
     // Must reject mismatched provenance BEFORE any GitHub lookup or public asset request.
     await expect(cli('verify-caddy-release.mjs', verifyArgs)).rejects.toThrow('Downloaded release identity mismatch')
@@ -220,7 +199,7 @@ describe('review component artifact binding', () => {
     }
     const directory = join(wrapper, 'prepared')
     const repository = channel === 'official' ? 'saya-ch/dsh-mobile' : 'abworks-dev/dsh-mobile'
-    const tag = 'caddy-component-2.11.6-tencentcloud-0.4.3' + (channel === 'review' ? '-review.1' : '')
+    const tag = 'caddy-component-2.11.7-tencentcloud-0.4.3' + (channel === 'review' ? '-review.1' : '')
     const commit = 'b'.repeat(40)
     await cli('prepare-caddy-release.mjs', ['--input-dir', input, '--output-dir', directory,
       '--repository', repository, '--tag', tag, '--commit', commit, '--run-id', '123', '--run-attempt', '1', '--channel', channel])

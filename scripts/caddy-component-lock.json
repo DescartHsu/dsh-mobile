@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "core": "v2.11.6",
+  "core": "v2.11.7",
   "dns": "v0.4.3",
   "xcaddy": "v0.4.7",
-  "toolchain": "go1.26.6",
+  "toolchain": "go1.26.9",
   "sources": {
     "caddy": {
       "path": "github.com/caddyserver/caddy/v2",
-      "version": "v2.11.6",
-      "sum": "h1:sWxeamdlCZvcH4qeDz8bB0mdxgfYTeqV7HxOjXyIRas=",
-      "revision": "ac834b5dc70a17dca296f47c78c64587d6631cbb"
+      "version": "v2.11.7",
+      "sum": "h1:yj0Y4fYZGPkSvibBJ1sTWE33xC0fxztVyXEW5iIdUT4=",
+      "revision": "72dd0fb067f6d7826c7f79907670ba4a713bfe37"
     },
     "tencentcloud": {
       "path": "github.com/caddy-dns/tencentcloud",
@@ -90,8 +90,8 @@
       "sum": "h1:cN4S6No8bvxmp4DaoI1PCZ7NqzXMP+VNHrmJ63R4+Co="
     },
     "github.com/caddyserver/caddy/v2": {
-      "version": "v2.11.6",
-      "sum": "h1:sWxeamdlCZvcH4qeDz8bB0mdxgfYTeqV7HxOjXyIRas="
+      "version": "v2.11.7",
+      "sum": "h1:yj0Y4fYZGPkSvibBJ1sTWE33xC0fxztVyXEW5iIdUT4="
     },
     "github.com/caddyserver/certmagic": {
       "version": "v0.25.6",
@@ -160,6 +160,10 @@
     "github.com/dunglas/go-urlpattern": {
       "version": "v1.0.0",
       "sum": "h1:AmMwIDXWJFezeE1v38rxvQRGvvzTlityFuifLLVfoQQ="
+    },
+    "github.com/dunglas/httpsfv": {
+      "version": "v1.1.1",
+      "sum": "h1:HoSs101zIE9I23DlqlmljJ/OIi7ILwrH347pXhRZdxI="
     },
     "github.com/dustin/go-humanize": {
       "version": "v1.1.0",
@@ -626,8 +630,8 @@
       "sum": "h1:Ck8QetSgk912qxWLMCKxd0in+aiyBQyDSMae6e/xmpU="
     },
     "golang.org/x/net": {
-      "version": "v0.59.0",
-      "sum": "h1:5zfYln+w5XCxwrnMMJPufRgNoXEaGxl0wo5GqPXyues="
+      "version": "v0.60.0",
+      "sum": "h1:79p50tfZlm0J9YfoDsSi639qSXNGVwEzOPLCxM2FsYU="
     },
     "golang.org/x/oauth2": {
       "version": "v0.37.0",

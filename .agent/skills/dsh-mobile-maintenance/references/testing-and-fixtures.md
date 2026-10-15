@@ -29,6 +29,8 @@ Wait for an observable readiness or completion signal: a listening event, real h
 
 A TLS listener and an internal CA file do not establish that an asynchronously managed leaf certificate is cached. The [Caddy TLS fixture](../../../../tests/helpers/caddy-tls-ready.ts) waits for a real CA- and hostname-verified handshake before issuing HTTP requests. Its bounded readiness probe retries only the identified startup alert, closes every socket and rejects trust/name failures; do not extend that retry to API calls or writes. [Controlled TLS cases](../../../../tests/caddy-tls-ready.test.ts) distinguish a held startup certificate from readiness, certificate rejection, abort and deadline failure.
 
+For Caddy's port-zero fixture, observe the spawned process's [actual-listener INFO record](../../../../tests/helpers/caddy-listener.ts) instead of querying every system socket through a separate OS process. Capture it before awaiting startup so fast records are not lost. Listener discovery does not replace the verified TLS handshake or authenticated discovery request.
+
 For a race, hold the old operation at an explicit barrier, change its owner, then release it and observe what it can still do. Verify that stale success, failure and queued callbacks cannot mutate the new owner, and that current work still completes. The [download cancellation tests](../../../../tests/component-download.test.ts) and [native restore-gate tests](../../../../apps/mobile/android/app/src/test/java/io/github/sayach/dshmobile/RestoreAttemptGateTest.kt) provide repository examples without requiring real credentials.
 
 Use the owning lane's case and hook budgets. A deadline regression needs an outer wait that cannot race the deadline under test. Report timeout, signal and exit independently: a terminated process can return zero, and a nonzero exit can come from setup rather than the intended fault.
@@ -36,6 +38,8 @@ Use the owning lane's case and hook budgets. A deadline regression needs an oute
 ## Clean up and verify failures
 
 Stop new work and detach callbacks before teardown; await the owned close, exit or termination signal before removing its resources. Calling `abort()`, `destroy()` or `kill()` alone does not prove cleanup completed. Cover resources rejected before a consumer takes ownership, as described in [runtime stream cleanup](runtime-ui-android.md#connection-ownership-and-security).
+
+A timed-out asynchronous test body can continue creating files or subprocesses. Bind subprocess work to test cancellation, drain the whole body, and await actual child close before taking the fixture-directory cleanup snapshot. An `execFile` abort callback does not establish that the child closed. [Artifact CLI tests](../../../../tests/caddy-artifacts.test.ts) cover cancellation before subsequent commands and writes; multi-command resource cases need a budget larger than a single command's deadline and a matching cleanup budget.
 
 Negative controls must fail for the deliberately introduced condition, not an install error, missing browser, generic timeout or teardown fault. Independently observe that condition, and emit an expected-failure marker only when required evidence capture and cleanup have succeeded. The [existing negative-control guidance](../../../../CONTRIBUTING.md#select-behavior-checks) and [diagnostic helper tests](../../../../tests/mobile-boot-diagnostics.test.ts) own these acceptance details; do not treat any nonzero exit or an early marker in a later aggregate error as passing.
 

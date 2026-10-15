@@ -2,16 +2,84 @@ import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/pr
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { execFileText } from '../src/exec-file.js'
+import { execFile, type ChildProcess, type ExecFileOptions } from 'node:child_process'
 import { CADDY_COMPONENT_RELEASES } from '../src/caddy-component.js'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 const inputHelpers = await import(new URL('../scripts/caddy-component-build-inputs.mjs', import.meta.url).href)
 const helpers = await import(new URL('../scripts/caddy-component-artifacts.mjs', import.meta.url).href)
 const lock = inputHelpers.CADDY_BUILD_LOCK
 const { sha256, buildLockSha256, reviewTag, verifyArtifact, readArtifact } = helpers
-const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+type CliOptions = Omit<ExecFileOptions, 'encoding' | 'signal'>
+
+class ArtifactFixtureOwner {
+  readonly controller = new AbortController()
+  readonly signal: AbortSignal
+  readonly roots: string[] = []
+  readonly children = new Set<Promise<void>>()
+  readonly interruptedCommands: Error[] = []
+  body: Promise<void> | undefined
+
+  constructor(testSignal?: AbortSignal) {
+    this.signal = testSignal === undefined ? this.controller.signal : AbortSignal.any([testSignal, this.controller.signal])
+  }
+
+  async node(args: string[], options: CliOptions, observe?: (child: ChildProcess) => void) {
+    this.signal.throwIfAborted()
+    const result = Promise.withResolvers<{ stdout: string; stderr: string }>()
+    const child = execFile(process.execPath, args, { ...options, windowsHide: true, encoding: 'utf8', signal: this.signal }, (error, stdout, stderr) => {
+      if (error !== null) { Object.assign(error, { stdout, stderr }); result.reject(error); return }
+      result.resolve({ stdout, stderr })
+    })
+    const closed = new Promise<void>(resolve => child.once('close', () => resolve()))
+    this.children.add(closed)
+    observe?.(child)
+    let output: { stdout: string; stderr: string }
+    try { output = await result.promise } finally { await closed; this.children.delete(closed) }
+    this.signal.throwIfAborted()
+    return output
+  }
+
+  async command(args: string[], options: CliOptions, observe?: (child: ChildProcess) => void) {
+    this.signal.throwIfAborted()
+    try { return await this.node(args, options, observe) } catch (error) {
+      const failure = error as Error & { killed?: boolean; signal?: string; code?: string }
+      // A killed child is not an expected CLI refusal, even when an assertion accepts any rejection.
+      if (this.signal.aborted || failure.killed || failure.signal || failure.code === 'ABORT_ERR'
+        || failure.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') this.interruptedCommands.push(failure)
+      throw error
+    }
+  }
+
+  async drain() {
+    this.controller.abort(new Error('Artifact fixture teardown'))
+    // Vitest reports the body failure; teardown must still wait for its late filesystem work.
+    try { await this.body } catch (_error) { /* The owning test reports its body failure. */ }
+    await Promise.all(this.children)
+  }
+}
+
+let owner: ArtifactFixtureOwner
+beforeEach(context => { owner = new ArtifactFixtureOwner(context.signal) })
+afterEach(async () => {
+  await owner.drain()
+  const errors: Error[] = [...owner.interruptedCommands]
+  for (const root of owner.roots.splice(0)) {
+    try { await rm(root, { recursive: true, force: true }) } catch (error) { errors.push(error as Error) }
+  }
+  if (errors.length > 0) throw new AggregateError(errors, 'Artifact fixture command or cleanup failed')
+}, 60_000)
+
+function owned<Args extends unknown[]>(body: (...args: Args) => Promise<void>) {
+  return async (...args: Args) => { owner.body = body(...args); await owner.body }
+}
+
+async function temporaryDirectory(prefix: string) {
+  owner.signal.throwIfAborted()
+  const root = await mkdtemp(join(tmpdir(), prefix)); owner.roots.push(root)
+  owner.signal.throwIfAborted()
+  return root
+}
 
 function fixture(platform = 'win32') {
   const binary = Buffer.from('pinned-test-byte')
@@ -30,7 +98,7 @@ function fixture(platform = 'win32') {
 }
 
 async function diskFixture(platform = 'win32') {
-  const root = await mkdtemp(join(tmpdir(), 'caddy-artifact-test-')); roots.push(root)
+  const root = await temporaryDirectory('caddy-artifact-test-')
   const data = fixture(platform)
   const licenses = ['DSH Mobile optional managed Caddy - embedded dependency licenses', '',
     ...data.manifest.dependencies.map(dep => `${dep.path}@${dep.version} / LICENSE\nSHA-256: ${'a'.repeat(64)}\nfixture license`),
@@ -44,7 +112,11 @@ async function diskFixture(platform = 'win32') {
 }
 
 async function cli(name: string, args: string[]) {
-  return execFileText(process.execPath, [fileURLToPath(new URL('../scripts/' + name, import.meta.url)), ...args], { timeout: 15_000 })
+  return command([fileURLToPath(new URL('../scripts/' + name, import.meta.url)), ...args], { timeout: 15_000 })
+}
+
+async function command(args: string[], options: CliOptions) {
+  return owner.command(args, options)
 }
 
 async function provedFixture(platform: string) {
@@ -54,7 +126,75 @@ async function provedFixture(platform: string) {
   return first
 }
 
+async function releaseFixture() {
+  const wrapper = await temporaryDirectory('caddy-release-input-')
+  const input = join(wrapper, 'input'); await mkdir(input)
+  for (const platform of ['linux', 'win32']) {
+    const proved = await provedFixture(platform)
+    await cp(proved.root, join(input, 'managed-caddy-review-' + platform + '-x64'), { recursive: true })
+  }
+  const output = join(wrapper, 'prepared')
+  const args = ['--input-dir', input, '--output-dir', output, '--repository', 'abworks-dev/dsh-mobile',
+    '--tag', 'caddy-component-2.11.7-tencentcloud-0.4.3-review.1', '--commit', 'b'.repeat(40), '--run-id', '123', '--run-attempt', '1']
+  return { wrapper, input, output, args }
+}
+
 describe('review component artifact binding', () => {
+  it('rejects cancellation at child close even after its successful output callback', owned(async () => {
+    const localOwner = new ArtifactFixtureOwner(owner.signal)
+    let output = ''
+    let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined
+    try {
+      const result = localOwner.command(['-e', 'process.stdout.write("FINISHED\\n")'], { timeout: 15_000 }, child => {
+        child.stdout!.on('data', chunk => { output += String(chunk) })
+        child.once('close', (code, signal) => {
+          exit = { code, signal }
+          localOwner.controller.abort(new Error('Canceled at child close'))
+        })
+      })
+      await expect(result).rejects.toThrow('Canceled at child close')
+      expect(output).toBe('FINISHED\n')
+      expect(exit).toEqual({ code: 0, signal: null })
+      expect(localOwner.children.size).toBe(0)
+      expect(localOwner.interruptedCommands).toHaveLength(1)
+    } finally { await localOwner.drain() }
+  }), 60_000)
+  it('drains a held child and its entire body before cleanup, without launching later work', owned(async () => {
+    const root = await temporaryDirectory('caddy-artifact-owner-')
+    const lateWrite = join(root, 'late-write')
+    const nextCommand = join(root, 'next-command')
+    const localOwner = new ArtifactFixtureOwner(owner.signal)
+    const ready = Promise.withResolvers<void>()
+    const events: string[] = []
+    let commands = 0
+    localOwner.body = (async () => {
+      try {
+        commands++
+        await localOwner.command(['-e', 'process.stdout.write("READY\\n"); process.stdin.resume()'], { timeout: 15_000 }, child => {
+          let output = ''
+          child.stdout!.on('data', chunk => { output += String(chunk); if (output.includes('READY\n')) ready.resolve() })
+          child.once('error', ready.reject)
+          child.once('close', () => { events.push('child-close'); ready.reject(new Error('Held child closed before readiness')) })
+        })
+        await writeFile(lateWrite, 'must not be written')
+        commands++
+        await localOwner.node(['-e', `require('node:fs').writeFileSync(${JSON.stringify(nextCommand)}, 'must not run')`], { timeout: 15_000 })
+      } finally { events.push('body-settled') }
+    })()
+    const result = localOwner.body.then(() => undefined, error => error as Error)
+    try {
+      await ready.promise
+      await localOwner.drain()
+      events.push('drained')
+      expect(await result).toMatchObject({ name: 'AbortError' })
+      expect(events).toEqual(['child-close', 'body-settled', 'drained'])
+      expect(localOwner.children.size).toBe(0)
+      expect(localOwner.interruptedCommands).toEqual([await result])
+      expect(commands).toBe(1)
+      await expect(readFile(lateWrite)).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(nextCommand)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await localOwner.drain() }
+  }), 60_000)
   it('shares strict channel identity and exclusive publication request validation', () => {
     const officialTag = 'caddy-component-2.11.7-tencentcloud-0.4.3-r1'
     const request = { event: 'workflow_dispatch', repository: 'saya-ch/dsh-mobile', ref: 'refs/tags/' + officialTag,
@@ -101,26 +241,26 @@ describe('review component artifact binding', () => {
     expect(() => verifyArtifact(manifest, build, corrupted, 'win32-x64')).toThrow('SHA-256 mismatch')
     expect(() => verifyArtifact(manifest, build, binary, 'darwin-x64')).toThrow()
   })
-  it('reads a complete bounded artifact without executing fake bytes', async () => {
+  it('reads a complete bounded artifact without executing fake bytes', owned(async () => {
     const { root, data } = await diskFixture()
     const result = await readArtifact(root, 'win32-x64')
     expect(result.files.get('caddy.exe')).toEqual(data.binary)
-  })
-  it('rejects missing independent-build evidence in a publication input', async () => {
+  }))
+  it('rejects missing independent-build evidence in a publication input', owned(async () => {
     const { root } = await diskFixture()
     await expect(readArtifact(root, 'win32-x64', true)).rejects.toThrow('Unexpected')
-  })
-  it('rejects false independent-build proof even when binary hashes agree', async () => {
+  }))
+  it('rejects false independent-build proof even when binary hashes agree', owned(async () => {
     const { root, data } = await diskFixture()
     await writeFile(join(root, 'reproducibility.json'), JSON.stringify({ schemaVersion: 1, target: 'win32-x64', independentBuilds: 1,
       buildLockSha256: buildLockSha256(), bytes: data.binary.length, firstSha256: sha256(data.binary), secondSha256: sha256(data.binary) }))
     await expect(readArtifact(root, 'win32-x64', true)).rejects.toThrow('reproducibility evidence mismatch')
-  })
-  it('rejects unexpected file or remaining work directories', async () => {
+  }))
+  it('rejects unexpected file or remaining work directories', owned(async () => {
     const { root } = await diskFixture(); await mkdir(join(root, '.build-leftover'))
     await expect(readArtifact(root, 'win32-x64')).rejects.toThrow('Unexpected')
-  })
-  it('rejects forged version, module and missing license evidence', async () => {
+  }))
+  it('rejects forged version, module and missing license evidence', owned(async () => {
     const { root } = await diskFixture()
     const original = await readFile(join(root, 'version.txt'))
     await writeFile(join(root, 'version.txt'), 'v2.11.7 fake')
@@ -131,16 +271,16 @@ describe('review component artifact binding', () => {
     await writeFile(join(root, 'modules.txt'), 'tls.issuance.internal ' + lock.core + '\n  Standard modules: 1\n\ndns.providers.tencentcloud ' + lock.dns + '\n  Non-standard modules: 1\n')
     await writeFile(join(root, 'THIRD_PARTY_LICENSES.txt'), 'missing licenses')
     await expect(readArtifact(root, 'win32-x64')).rejects.toThrow('license evidence')
-  })
-  it('rejects extra nonstandard modules even with a forged count of one', async () => {
+  }))
+  it('rejects extra nonstandard modules even with a forged count of one', owned(async () => {
     const { root } = await diskFixture()
     const original = await readFile(join(root, 'modules.txt'), 'utf8')
     for (const addition of ['dns.providers.cloudflare v1.0.0\n', 'Non-standard modules: 1\n', 'Standard modules: 1\n']) {
       await writeFile(join(root, 'modules.txt'), original + addition)
       await expect(readArtifact(root, 'win32-x64')).rejects.toThrow('DNS module evidence')
     }
-  })
-  it('rejects empty license sections, malformed digests and duplicate headings', async () => {
+  }))
+  it('rejects empty license sections, malformed digests and duplicate headings', owned(async () => {
     const { root } = await diskFixture()
     const original = await readFile(join(root, 'THIRD_PARTY_LICENSES.txt'), 'utf8')
     for (const changed of [original.replaceAll('fixture license', ''), original.replaceAll('a'.repeat(64), 'invalid'),
@@ -148,55 +288,61 @@ describe('review component artifact binding', () => {
       await writeFile(join(root, 'THIRD_PARTY_LICENSES.txt'), changed)
       await expect(readArtifact(root, 'win32-x64')).rejects.toThrow('license evidence')
     }
-  })
-  it('runs the actual comparison CLI and rejects identical directories or a previous report', async () => {
+  }))
+  // These cases start several independent Node processes; their child deadline is 15 seconds.
+  it('runs the actual comparison CLI and rejects identical directories or a previous report', owned(async () => {
     const first = await provedFixture('win32')
     expect((await readArtifact(first.root, 'win32-x64', true)).manifest.executableSha256).toBe(sha256(first.data.binary))
     await expect(cli('compare-caddy-builds.mjs', ['--first', first.root, '--second', first.root, '--target', 'win32-x64'])).rejects.toThrow('Independent')
     const second = await diskFixture()
     await expect(cli('compare-caddy-builds.mjs', ['--first', first.root, '--second', second.root, '--target', 'win32-x64'])).rejects.toThrow('Unexpected')
-  })
-  it('prepares exactly both platform proofs through the real CLI and never overwrites existing output', async () => {
-    const wrapper = await mkdtemp(join(tmpdir(), 'caddy-release-input-')); roots.push(wrapper)
-    const input = join(wrapper, 'input'); await mkdir(input)
-    for (const platform of ['linux', 'win32']) {
-      const proved = await provedFixture(platform)
-      await cp(proved.root, join(input, 'managed-caddy-review-' + platform + '-x64'), { recursive: true })
-    }
-    const output = join(wrapper, 'prepared')
-    const args = ['--input-dir', input, '--output-dir', output, '--repository', 'abworks-dev/dsh-mobile',
-      '--tag', 'caddy-component-2.11.7-tencentcloud-0.4.3-review.1', '--commit', 'b'.repeat(40), '--run-id', '123', '--run-attempt', '1']
+  }), 60_000)
+  it('prepares both platform proofs and treats explicit review as the default through the real CLI', owned(async () => {
+    const { wrapper, output, args } = await releaseFixture()
     await cli('prepare-caddy-release.mjs', args)
     const index = JSON.parse(await readFile(join(output, 'COMPONENT-RELEASE.json'), 'utf8'))
     expect(Object.keys(index.binaryAssets).sort()).toEqual(['linux-x64', 'win32-x64'])
     expect(index.productionCatalogEnabled).toBe(false)
+    const explicitReview = [...args]; explicitReview[3] = join(wrapper, 'explicit-review')
+    await cli('prepare-caddy-release.mjs', [...explicitReview, '--channel', 'review'])
+    expect(await readFile(join(explicitReview[3]!, 'COMPONENT-RELEASE.json'))).toEqual(await readFile(join(output, 'COMPONENT-RELEASE.json')))
+  }), 60_000)
+  it('rejects mismatched downloaded identity and invalid preparation identity through the real CLIs', owned(async () => {
+    const { wrapper, output, args } = await releaseFixture()
+    await cli('prepare-caddy-release.mjs', args)
     const verifyArgs = ['--directory', output, '--repository', 'abworks-dev/dsh-mobile',
       '--tag', 'caddy-component-2.11.7-tencentcloud-0.4.3-review.1', '--commit', 'c'.repeat(40),
       '--run-id', '123', '--run-attempt', '1', '--candidate-output', join(wrapper, 'candidate.json')]
     // Must reject mismatched provenance BEFORE any GitHub lookup or public asset request.
     await expect(cli('verify-caddy-release.mjs', verifyArgs)).rejects.toThrow('Downloaded release identity mismatch')
-    const explicitReview = [...args]; explicitReview[3] = join(wrapper, 'explicit-review')
-    await cli('prepare-caddy-release.mjs', [...explicitReview, '--channel', 'review'])
-    expect(await readFile(join(explicitReview[3]!, 'COMPONENT-RELEASE.json'))).toEqual(await readFile(join(output, 'COMPONENT-RELEASE.json')))
+    await expect(readFile(join(wrapper, 'candidate.json'))).rejects.toMatchObject({ code: 'ENOENT' })
     const invalidChannel = [...args]; invalidChannel[3] = join(wrapper, 'invalid-channel')
     await expect(cli('prepare-caddy-release.mjs', [...invalidChannel, '--channel', 'unknown'])).rejects.toThrow('channel')
     await expect(readFile(join(invalidChannel[3]!, 'COMPONENT-RELEASE.json'))).rejects.toMatchObject({ code: 'ENOENT' })
-    const original = await readFile(join(output, 'SHA256SUMS'))
-    await expect(cli('prepare-caddy-release.mjs', args)).rejects.toThrow()
-    expect(await readFile(join(output, 'SHA256SUMS'))).toEqual(original)
     const bad = [...args]; bad[5] = '../foreign/repo'
     await expect(cli('prepare-caddy-release.mjs', bad)).rejects.toThrow('identity')
     const wrongTag = [...args]; wrongTag[7] = 'v0.6.1'
     await expect(cli('prepare-caddy-release.mjs', wrongTag)).rejects.toThrow('review tag')
-    const missing = await mkdtemp(join(tmpdir(), 'caddy-release-missing-')); roots.push(missing)
+  }), 60_000)
+  it('never overwrites existing prepared output through the real CLI', owned(async () => {
+    const { output, args } = await releaseFixture()
+    await cli('prepare-caddy-release.mjs', args)
+    const original = await readFile(join(output, 'SHA256SUMS'))
+    await expect(cli('prepare-caddy-release.mjs', args)).rejects.toThrow('EEXIST')
+    expect(await readFile(join(output, 'SHA256SUMS'))).toEqual(original)
+  }), 60_000)
+  it('requires exactly both native platform inputs through the real CLI', owned(async () => {
+    const { input, args, output } = await releaseFixture()
+    const missing = await temporaryDirectory('caddy-release-missing-')
     await cp(join(input, 'managed-caddy-review-win32-x64'), join(missing, 'managed-caddy-review-win32-x64'), { recursive: true })
     const missingArgs = [...args]; missingArgs[1] = missing
     await expect(cli('prepare-caddy-release.mjs', missingArgs)).rejects.toThrow('both native platform')
     await mkdir(join(input, 'foreign-target'))
     await expect(cli('prepare-caddy-release.mjs', args)).rejects.toThrow('both native platform')
-  })
-  it.each(['review', 'official'])('executes the %s verifier offline against all 16 assets and adversarial API/public bytes', async channel => {
-    const wrapper = await mkdtemp(join(tmpdir(), 'caddy-verifier-execution-')); roots.push(wrapper)
+    await expect(readFile(join(output, 'COMPONENT-RELEASE.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  }), 60_000)
+  it.each(['review', 'official'])('executes the %s verifier offline against all 16 assets and adversarial API/public bytes', owned(async (channel: string) => {
+    const wrapper = await temporaryDirectory('caddy-verifier-execution-')
     const input = join(wrapper, 'input'); await mkdir(input)
     for (const platform of ['linux', 'win32']) {
       const proved = await provedFixture(platform)
@@ -263,7 +409,7 @@ describe('review component artifact binding', () => {
       for (const key of ['SystemRoot', 'WINDIR', 'PATH', 'TEMP', 'TMP']) if (process.env[key]) env[key] = process.env[key]
       let stdout = ''; let stderr = ''; let rejection: Error | undefined
       try {
-        ({ stdout, stderr } = await execFileText(process.execPath, [
+        ({ stdout, stderr } = await command([
           '--import', new URL('./helpers/caddy-release-fetch-preload.mjs', import.meta.url).href,
           fileURLToPath(new URL('../scripts/verify-caddy-release.mjs', import.meta.url)),
           '--directory', directory, '--repository', repository, '--tag', tag, '--commit', commit,
@@ -320,12 +466,12 @@ describe('review component artifact binding', () => {
     }
     expect(CADDY_COMPONENT_RELEASES).toEqual(catalogBefore)
     expect(await readFile(fileURLToPath(new URL('../src/caddy-component.ts', import.meta.url)))).toEqual(productionBefore)
-  }, 60_000)
-  it.runIf(process.platform !== 'win32')('refuses symlinked metadata rather than reading its target', async () => {
+  }), 60_000)
+  it.runIf(process.platform !== 'win32')('refuses symlinked metadata rather than reading its target', owned(async () => {
     const { root } = await diskFixture()
     const outside = join(root, 'outside.json')
     await writeFile(outside, '{}'); await rm(join(root, 'manifest.json'))
     await symlink(outside, join(root, 'manifest.json')); await rm(outside)
     await expect(readArtifact(root, 'win32-x64')).rejects.toThrow('Invalid')
-  })
+  }))
 })

@@ -2,7 +2,7 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
-## 0.6.8 - Unreleased
+## 0.6.8 - 2026-10-15
 
 - Fix remote pairing on computers with the same default state path overwriting one another in the Android device list. Automatically identified entries without a pairing CA use their persisted random installation identifier for new pairings; explicit operator IDs, LAN CA fingerprints and self-signed FRP CA fingerprints remain unchanged.
 - Read both device-state versions and write version 2 on the next mutation, preserving each new credential's pairing identity. Existing credentials keep their previous native renewal/probe identity during ordinary upgrades with the same state path and gateway configuration, with no wire-protocol change or required Android App update. See [upgrade and downgrade precautions](SECURITY.md#installation-identity-and-device-state-upgrades).

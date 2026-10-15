@@ -25,13 +25,13 @@
   <a href="#security">Security</a> ·
   <a href="#compatibility">Compatibility</a> ·
   <a href="#contributors">Contributors</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.7">Release notes</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.8">Release notes</a> ·
   <a href="README.md">简体中文</a>
 </p>
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.7**. Add reserved cpolar subdomain configuration, improve narrow-screen sidebar and overlay interaction, and clarify mobile customization ownership, failures and recovery. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.7) · [Full changelog](CHANGELOG.md).
+> **Current stable release: 0.6.8**. Fix computers with the same default state path overwriting one another in the App device list, adapt to DSH 0.2.1-alpha.3, and add remote-channel selection guidance. Working pairings stay valid; an App update is not required. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.8) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
@@ -365,7 +365,7 @@ See [SECURITY.md](SECURITY.md).
 
 ## Troubleshooting
 
-- **Pairing a second computer overwrites the first**: see [#213](https://github.com/saya-ch/dsh-mobile/issues/213); the 0.6.8 fix is not published yet. Follow the [changelog](CHANGELOG.md) for progress. After installing the fixed plugin and restarting DSH normally, scan each computer's current QR code. An App credential already overwritten cannot be recovered automatically; working old rows need no re-pairing. If the same address has both an old and a new row, confirm the new one works, then delete only the extra local App row. Do not reset remote access.
+- **Pairing a second computer overwrites the first**: see [#213](https://github.com/saya-ch/dsh-mobile/issues/213). Update to plugin 0.6.8 or newer, restart DSH normally, then scan each affected computer's current QR code. An App credential already overwritten cannot be recovered automatically; working old rows need no re-pairing. If the same address has both an old and a new row, confirm the new one works, then delete only the extra local App row. Do not reset remote access. Read the [device-state backup and downgrade precautions](SECURITY.md#installation-identity-and-device-state-upgrades) before upgrading.
 - **Pairing succeeds but renewal returns `401` or repeatedly asks to pair again**: other services on the same hostname or stale Cookies may interfere with authentication. Update to the latest plugin and app, then retry through the current Mobile Access entry. In a browser, scanning the current QR code again refreshes this plugin's authentication Cookies without clearing all website data. If it still fails, inspect the failed request and sanitized logs; other authentication or proxy errors can also return `401`.
 - **The testing notice cannot be confirmed or settings cannot be saved**: open DSH directly at its local address on the computer, then inspect the terminal log or the failed settings request in the browser's Network panel. Connection diagnostics do not test settings writes. Keep the existing configuration and `settings.yaml.imported`, and investigate the specific error; the same UI message can have different causes. See [DSH #860](https://github.com/deepseek-ai/deepseek-harness/discussions/860).
 - **A settings request returns HTTP `403`**: first inspect DSH's Host/Origin trust checks and any proxy response. Check whether an iframe, proxy, or browser extension changes the request's origin, and verify direct local access. Keep the trust checks enabled.
@@ -404,7 +404,7 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 | `0.6.4` | `0.2.0-rc.2` (packed installation, isolated pairing, mobile boot and WebSocket Workspace reads); additionally 72 real public-slot composer layouts, Windows Desktop directory-picker composition and cross-platform regressions. The reported remote timeout in community Desktop 2.0.17 remains unclaimed as accepted |
 | `0.6.5` | Packed module-management and mobile-settings regressions on `0.2.0-rc.2` and `0.2.1-alpha.2`; additionally Windows cpolar extraction and populated Trajectory layout with published `maid-atelier` 0.1.7. This does not establish acceptance of every third-party skin or reporter device |
 | `0.6.6` | Packed attachment intake and decoded-preview regressions on `0.2.0-rc.2` and `0.2.1-alpha.2`, covering multiple images, cancellation, late results and superseded requests. Android system-picker changes are released independently, not through the npm update |
-| `0.6.8` (local candidate, unpublished) | Packed mobile boot, legacy-WebView API simulation, WebSocket Workspace reads, mobile settings, module management, sidebar and composer regressions on `0.2.1-alpha.3`; separate real HTTP/TLS and legacy-credential upgrade tests cover the identity fix. The local official Desktop `0.2.0-rc.2` loads the candidate with existing pairings preserved. This does not establish phone cellular or every third-party plugin combination |
+| `0.6.8` | Packed mobile boot, legacy-WebView API simulation, WebSocket Workspace reads, mobile settings, module management, sidebar and composer regressions on `0.2.1-alpha.3`; separate real HTTP/TLS and legacy-credential upgrade tests cover the identity fix. The local official Desktop `0.2.0-rc.2` loads this plugin version with existing pairings preserved. This does not establish phone cellular or every third-party plugin combination |
 
 <details>
 <summary>Historical version checks</summary>

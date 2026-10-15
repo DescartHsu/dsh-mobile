@@ -25,13 +25,13 @@
   <a href="#安全">安全</a> ·
   <a href="#兼容性">兼容性</a> ·
   <a href="#贡献者">贡献者</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.7">更新记录</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.8">更新记录</a> ·
   <a href="README.en.md">English</a>
 </p>
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.7**。支持 cpolar 预留子域名配置，改善窄屏侧栏与浮层交互，并补全移动定制的入口识别、失败提示和恢复处理。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.7) · [完整更新记录](CHANGELOG.md)。
+> **当前正式版本：0.6.8**。修复相同默认状态路径的电脑在 App 设备列表中相互覆盖的问题，适配 DSH 0.2.1-alpha.3，并补充远程通道选择建议。已有正常配对无需重建，也不需要升级 App。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.8) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
@@ -366,7 +366,7 @@ flowchart LR
 
 ## 故障排查
 
-- **配对第二台电脑后，第一台被覆盖**：见 [#213](https://github.com/saya-ch/dsh-mobile/issues/213)；0.6.8 修复尚未发布，进度见[更新记录](CHANGELOG.md)。使用修复版插件并正常重启 DSH 后，分别扫描两台电脑当前的二维码。已经被覆盖的 App 本地凭据不能自动找回；仍可连接的旧条目无需重配。若同一地址出现新旧两条记录，确认新条目正常后，只删除 App 中多余的本地条目，不要重置远程访问。
+- **配对第二台电脑后，第一台被覆盖**：见 [#213](https://github.com/saya-ch/dsh-mobile/issues/213)；请升级至插件 0.6.8 或更新版本并正常重启 DSH，再分别扫描受影响电脑当前的二维码。已经被覆盖的 App 本地凭据不能自动找回；仍可连接的旧条目无需重配。若同一地址出现新旧两条记录，确认新条目正常后，只删除 App 中多余的本地条目，不要重置远程访问。升级前请阅读[设备状态备份与降级注意事项](SECURITY.md#installation-identity-and-device-state-upgrades)。
 - **配对成功后仍反复提示重新配对或续期 `401`**：同一域名上的其他服务或旧 Cookie 可能干扰认证。更新至最新插件及 App，再从当前移动访问入口重试；浏览器重新扫描当前二维码可更新本插件的认证 Cookie，无需清除所有网站数据。若仍失败，查看失败请求与脱敏日志，其他认证或代理错误也可能返回 `401`。
 - **内测声明无法确认或设置无法保存**：先在电脑端直接打开 DSH 的本机地址，查看终端日志或浏览器 Network 中失败的设置请求。连接诊断不检查设置写入；保留现有配置及 `settings.yaml.imported`，按具体错误排查。相同界面提示可能有不同原因，见 [DSH #860](https://github.com/deepseek-ai/deepseek-harness/discussions/860)。
 - **设置请求返回 HTTP `403`**：先检查 DSH 的 Host/Origin 信任校验及代理响应。检查 iframe、代理和浏览器扩展是否改变请求来源，使用本机直接访问验证；保持信任检查启用。
@@ -405,7 +405,7 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 | `0.6.4` | `0.2.0-rc.2`（打包安装、隔离配对、移动页面与 WebSocket 工作区读取）；另验证 72 组真实公共插槽输入栏布局、Windows Desktop 目录选择器组合及跨平台回归。社区 Desktop 2.0.17 的原报告远程超时仍未宣称验收 |
 | `0.6.5` | `0.2.0-rc.2`、`0.2.1-alpha.2` 的打包模块管理与移动设置回归；另验证 Windows cpolar 解包及正式 `maid-atelier` 0.1.7 下有内容轨迹的布局修复。不代表全部第三方皮肤或报告者设备已验收 |
 | `0.6.6` | `0.2.0-rc.2`、`0.2.1-alpha.2` 的打包附件接收与图片预览回归，覆盖多图、取消、迟到结果和旧请求；Android 系统选择器改进独立发布，不包含在 npm 更新中 |
-| `0.6.8`（本地候选，未发布） | `0.2.1-alpha.3` 的打包移动页面、旧 WebView API 模拟、WebSocket 工作区读取、移动设置、模块管理、侧栏及输入栏回归；身份修复另有真实 HTTP/TLS 与旧凭据升级测试。本机官方 Desktop `0.2.0-rc.2` 已加载候选插件，原配对保留；不代表手机 5G 或全部第三方插件组合已验收 |
+| `0.6.8` | `0.2.1-alpha.3` 的打包移动页面、旧 WebView API 模拟、WebSocket 工作区读取、移动设置、模块管理、侧栏及输入栏回归；身份修复另有真实 HTTP/TLS 与旧凭据升级测试。本机官方 Desktop `0.2.0-rc.2` 已加载该版本插件，原配对保留；不代表手机 5G 或全部第三方插件组合已验收 |
 
 <details>
 <summary>历史版本验证记录</summary>

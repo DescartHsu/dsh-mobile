@@ -228,6 +228,39 @@ describe('remote provider selection', () => {
     expect(completed).toBe(true)
   })
 
+  it('drains the accepted mutation while rejecting queued and new work before provider cleanup', async () => {
+    const controllers = { tailscale: new FakeRemoteController(), cpolar: new FakeRemoteController(), cloudflared: new FakeRemoteController(), frp: new FakeRemoteController(), origin: new FakeRemoteController() }
+    const save = vi.fn(async () => {})
+    const coordinator = new RemoteProviderCoordinator('origin', controllers, { save })
+    let enter!: () => void
+    let release!: () => void
+    const entered = new Promise<void>(resolve => { enter = resolve })
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    const accepted = coordinator.mutate(async controller => {
+      enter()
+      await barrier
+      return controller.setEnabled(true)
+    })
+    await entered
+    const queued = vi.fn(async () => undefined)
+    const queueResult = coordinator.mutate(queued).catch((error: unknown) => error)
+    let completed = false
+    const closing = coordinator.close()
+    void closing.then(() => { completed = true })
+    expect(coordinator.close()).toBe(closing)
+    await expect(coordinator.select('cpolar')).rejects.toThrow('remote_provider_closed')
+    await expect(coordinator.mutateSelected('origin', queued)).rejects.toThrow('remote_provider_closed')
+    expect(completed).toBe(false)
+    release()
+    expect((await accepted).enabled).toBe(true)
+    expect(await queueResult).toMatchObject({ message: 'remote_provider_closed' })
+    await closing
+    expect(completed).toBe(true)
+    expect(queued).not.toHaveBeenCalled()
+    expect(save).not.toHaveBeenCalled()
+    expect(controllers.origin.enabled).toBe(true)
+  })
+
   it('does not wait again after a process has already exited by signal', async () => {
     const process = new EventEmitter() as EventEmitter & {
       exitCode: number | null

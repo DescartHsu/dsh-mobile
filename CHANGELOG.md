@@ -2,6 +2,14 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## Unreleased
+
+- Refresh managed Caddy component inputs to Caddy 2.11.7, Go 1.26.9 and an explicit golang.org/x/net 0.60.0 pin, retaining exact source, checksum and embedded dependency checks.
+- Use explicit single-maintainer manual component publication instead of mandatory second-person approval. Preserve exact tag/source binding, same-run Windows/Linux native gates, draft/public asset verification and occupied-release protection; component publication does not publish npm or Android automatically.
+- Cancel and drain accepted Caddy component work during plugin unload, retain recoverable files on failure, and wait for the owned Caddy process's actual close event before releasing it. Failed cleanup remains visible and retryable.
+- Document scoped custom CSS selectors and same-page comparisons before applying older overrides. Current header behavior is retained rather than hiding working actions. Thanks @Void-LifeStream for [#219](https://github.com/saya-ch/dsh-mobile/issues/219).
+- Android App remains the independently published 0.6.4 (build 80); these changes do not require another APK.
+
 ## 0.6.8 - 2026-10-15
 
 - Fix remote pairing on computers with the same default state path overwriting one another in the Android device list. Automatically identified entries without a pairing CA use their persisted random installation identifier for new pairings; explicit operator IDs, LAN CA fingerprints and self-signed FRP CA fingerprints remain unchanged.
@@ -10,7 +18,7 @@ Notable changes are recorded here. GitHub Releases provide the downloadable pack
 - Keep working pairings without re-pairing. A local App credential already overwritten by the collision cannot be recovered automatically: update and restart the plugin, then pair each affected computer again. Usable old rows remain valid; any duplicate local row can be removed explicitly without computer-side revocation.
 - Adapt compatibility checks to DSH 0.2.1-alpha.3's authenticated Host-backed settings while retaining the Remote/Connection dependency checks and earlier settings policies. Mobile typography remains local to its Origin. Extend the browser test matrix to alpha.3 and recognize its first-run account dialog without submitting credentials.
 - Add bilingual remote-channel selection notes distinguishing the maintainer's long-term network experience from provider limits and conditional self-hosted deployment characteristics.
-- Android App 0.6.3 remains the published native release. The pending Android file-picker changes below are not part of this plugin fix. Thanks @Yurzi for reporting [#213](https://github.com/saya-ch/dsh-mobile/issues/213).
+- At this plugin release, Android App 0.6.3 was still the published native version; Android 0.6.4 was published independently later on the same day. Its file-picker changes are not part of this plugin fix. Thanks @Yurzi for reporting [#213](https://github.com/saya-ch/dsh-mobile/issues/213).
 
 ## 0.6.7 - 2026-10-14
 

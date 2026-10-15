@@ -218,6 +218,8 @@ Two kinds of changes are supported: the phone UI itself (theme, layout, buttons)
 
 Open customizations through the **Mobile Access pairing entry**. Opening an ordinary DSH page or selecting a phone-sized browser viewport is not mobile pairing, and a file's presence does not establish that the current page loaded it. If extension requests return `401`, check the entry and pairing state; do not enable anonymous access or share Cookies or Tokens.
 
+An old `mobile.css` patch can override a newer built-in fix. Back up that file and compare the same session, orientation and font settings with and without its styles before adding more rules. Scope CSS Modules selectors to an inspected ancestor, such as `[data-dsh-mobile-header] [class*="_titleRow"]`, rather than matching bare class suffixes/substrings across the page. Hiding an action area with `display: none` removes access to its controls; it is not a collapsible presentation. Thanks for the controlled comparison in [#219](https://github.com/saya-ch/dsh-mobile/issues/219).
+
 Extension manifests, scripts, styles, and assets are revisioned. When the plugin observes a `/mobile` or extension-file change, it notifies authenticated phones to refresh immediately; 45-second visible and 5-minute hidden checks remain only as recovery fallbacks. A failed Host staging pass keeps the current version; if the Host has changed but the new phone UI cannot activate, that extension closes and retries instead of mixing generations.
 
 An extension action's `input` may use a callable Schemastery schema such as `api.schema.object(...)` or an adapter with `parse(value)`; mobile `api.host.invoke()` sends JSON explicitly, and the input is validated and normalized before the computer-side action runs.

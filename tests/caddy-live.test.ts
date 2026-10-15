@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage } from 'node:http'
 import { channel } from 'node:diagnostics_channel'
 import { request } from 'node:https'
+import { connect as connectHttp2, type ClientHttp2Stream } from 'node:http2'
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,7 +12,9 @@ import WebSocket, { WebSocketServer } from 'ws'
 import { afterEach, expect, it, vi } from 'vitest'
 import { execFileText } from '../src/exec-file.js'
 import { CaddyConfigStore, parseCaddySettings, renderCaddyfile } from '../src/caddy-config.js'
-import { caddyProcessEnvironment } from '../src/caddy.js'
+import { CaddyController, caddyProcessEnvironment } from '../src/caddy.js'
+import { CaddyComponentManager, type CaddyArtifact } from '../src/caddy-component.js'
+import { createVolatileRemoteControlStore } from '../src/managed-origin.js'
 import { parseGatewayConfig } from '../src/config.js'
 import { MobileAccessGateway } from '../src/gateway.js'
 import { JsonDeviceStore } from '../src/storage.js'
@@ -57,19 +60,52 @@ async function ownedPort(pid: number, signal: AbortSignal): Promise<number> {
   return port
 }
 
-function exchange(signal: AbortSignal, port: number, ca: string, path: string, method = 'GET', headers: Record<string, string> = {}, body = ''): Promise<{ status: number; headers: IncomingHttpHeaders; body: string; rawBody: Buffer }> {
+function exchange(signal: AbortSignal, port: number, ca: string, path: string, method = 'GET', headers: Record<string, string> = {}, body = '', idleTimeoutMs = 10_000): Promise<{ status: number; headers: IncomingHttpHeaders; body: string; rawBody: Buffer; receivedAt: number[] }> {
   return new Promise((resolve, reject) => {
     const outgoing = request({ host: '127.0.0.1', port, servername: 'phone.example.com', ca, agent: false, method, path, signal,
       headers: { host: 'phone.example.com', origin: 'https://phone.example.com', 'sec-fetch-site': 'same-origin', ...headers },
     }, incoming => {
       const chunks: Buffer[] = []
-      incoming.on('data', (chunk: Buffer) => chunks.push(chunk))
-      incoming.once('end', () => { const rawBody = Buffer.concat(chunks); resolve({ status: incoming.statusCode ?? 0, headers: incoming.headers, body: rawBody.toString(), rawBody }) })
+      const receivedAt: number[] = []
+      incoming.on('data', (chunk: Buffer) => { chunks.push(chunk); receivedAt.push(performance.now()) })
+      incoming.once('end', () => { const rawBody = Buffer.concat(chunks); resolve({ status: incoming.statusCode ?? 0, headers: incoming.headers, body: rawBody.toString(), rawBody, receivedAt }) })
       incoming.once('error', reject)
     })
-    outgoing.setTimeout(10_000, () => outgoing.destroy(new Error('TLS request timeout: ' + method + ' ' + path.split('?', 1)[0])))
+    outgoing.setTimeout(idleTimeoutMs, () => outgoing.destroy(new Error('TLS request timeout: ' + method + ' ' + path.split('?', 1)[0])))
     outgoing.once('error', reject); outgoing.end(body)
   })
+}
+
+async function exchangeHttp2(signal: AbortSignal, port: number, ca: string, path: string, headers: Record<string, string>, body: string): Promise<{ status: number; body: string; receivedAt: number[] }> {
+  signal.throwIfAborted()
+  const client = connectHttp2('https://127.0.0.1:' + String(port), { ca, servername: 'phone.example.com' })
+  const closed = new Promise<void>(resolve => { client.once('close', resolve) })
+  let stream: ClientHttp2Stream | undefined
+  const abort = (): void => { client.destroy(new Error('Quiet HTTP/2 request aborted')) }
+  signal.addEventListener('abort', abort, { once: true })
+  try {
+    return await new Promise((resolve, reject) => {
+      client.on('error', reject)
+      stream = client.request({ ':method': 'POST', ':path': path, ':authority': 'phone.example.com',
+        origin: 'https://phone.example.com', 'sec-fetch-site': 'same-origin', ...headers })
+      const chunks: Buffer[] = []
+      const receivedAt: number[] = []
+      let status = 0
+      let ended = false
+      stream.once('response', responseHeaders => { status = Number(responseHeaders[':status']) })
+      stream.on('data', (chunk: Buffer) => { chunks.push(chunk); receivedAt.push(performance.now()) })
+      stream.once('error', reject)
+      stream.once('end', () => { ended = true; resolve({ status, body: Buffer.concat(chunks).toString(), receivedAt }) })
+      stream.once('close', () => { if (!ended) reject(new Error('Quiet HTTP/2 stream closed before EOF')) })
+      stream.setTimeout(80_000, () => { client.destroy(new Error('Quiet HTTP/2 stream timed out')) })
+      stream.end(body)
+    })
+  } finally {
+    signal.removeEventListener('abort', abort)
+    stream?.close()
+    client.destroy()
+    await closed
+  }
 }
 
 /** One direct, cookie-free boundary probe; never follows redirects or proxy environment. */
@@ -100,7 +136,8 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   fixtureController = new AbortController()
   const signal = fixtureController.signal
   const controller = fixtureController
-  const deadline = setTimeout(() => controller.abort(new Error('Live fixture 90s deadline exceeded')), 90_000)
+  // The quiet API regression deliberately crosses 60s; setup, three native starts and cleanup retain separate headroom.
+  const deadline = setTimeout(() => controller.abort(new Error('Live fixture 180s deadline exceeded')), 180_000)
   const body = async (): Promise<void> => {
   const step = async <T>(operation: () => Promise<T>): Promise<T> => {
     signal.throwIfAborted()
@@ -141,6 +178,8 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   const upstreamSockets = new Map<string, IncomingMessage['socket']>()
   const upstreamConnections = new Map<string, string | undefined>()
   const consumedBodies = new Map<string, Buffer>()
+  const quietTimers = new Set<NodeJS.Timeout>()
+  const quietRequests = new Map<string, { started: number; completed?: number }>()
   const gatewayRequests = new Map<string, number>()
   const gatewaySockets = new Map<string, IncomingMessage['socket']>()
   const gatewayVersions = new Map<string, string>()
@@ -151,6 +190,31 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
       upstreamRequests.set(id, (upstreamRequests.get(id) ?? 0) + 1)
       upstreamSockets.set(id, incoming.socket)
       upstreamConnections.set(id, incoming.headers.connection)
+    }
+    if (target.pathname === '/api/caddy-test-quiet-headers' || target.pathname === '/api/caddy-test-quiet-body') {
+      if (id === null || incoming.method !== 'POST') { outgoing.writeHead(400); outgoing.end(); return }
+      const chunks: Buffer[] = []
+      incoming.on('error', () => { outgoing.destroy() })
+      incoming.on('data', (chunk: Buffer) => chunks.push(chunk))
+      incoming.once('end', () => {
+        consumedBodies.set(id, Buffer.concat(chunks))
+        const observation: { started: number; completed?: number } = { started: performance.now() }
+        quietRequests.set(id, observation)
+        const streaming = target.pathname === '/api/caddy-test-quiet-body'
+        if (streaming) {
+          outgoing.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' })
+          outgoing.write('data: stream-start\n\n')
+        }
+        const timer = setTimeout(() => {
+          quietTimers.delete(timer)
+          observation.completed = performance.now()
+          if (!outgoing.headersSent) outgoing.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+          outgoing.end(streaming ? 'data: quiet-complete\n\n' : 'quiet-complete')
+        }, 65_000)
+        quietTimers.add(timer)
+        outgoing.once('close', () => { clearTimeout(timer); quietTimers.delete(timer) })
+      })
+      return
     }
     if (target.pathname === '/api/caddy-test-reset' || target.pathname === '/api/caddy-test-gateway-reset') {
       const chunks: Buffer[] = []
@@ -173,7 +237,14 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   const peers = new Set<WebSocket>()
   webSockets.on('connection', peer => { peers.add(peer); peer.on('message', data => peer.send(data)); peer.on('close', () => peers.delete(peer)) })
   upstream.on('upgrade', (incoming, socket, head) => { webSockets.handleUpgrade(incoming, socket, head, peer => webSockets.emit('connection', peer, incoming)) })
-  cleanups.push(async () => { for (const peer of peers) peer.terminate(); await new Promise<void>(resolve => webSockets.close(() => resolve())); upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())) })
+  cleanups.push(async () => {
+    for (const timer of quietTimers) clearTimeout(timer)
+    quietTimers.clear()
+    for (const peer of peers) peer.terminate()
+    await new Promise<void>(resolve => webSockets.close(() => resolve()))
+    upstream.closeAllConnections()
+    await new Promise<void>(resolve => upstream.close(() => resolve()))
+  })
   await step(() => new Promise<void>((resolve, reject) => { upstream.once('error', reject); upstream.listen(0, '127.0.0.1', resolve) }))
   const upstreamAddress = upstream.address(); if (upstreamAddress === null || typeof upstreamAddress === 'string') throw new Error('missing port')
   const template = parseGatewayConfig({ listenHost: '127.0.0.1', listenPort: 0, tls: { mode: 'disabled' },
@@ -209,7 +280,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   expect(rendered.match(/https:\/\/phone\.example\.com:8443 \{/gu)).toHaveLength(1)
   expect(rendered.match(/\ttls \{\n\t\tdns tencentcloud \{[\s\S]*?\n\t\t\}\n\t\}/gu)).toHaveLength(1)
   const internal = rendered
-    .replace('{\n', '{\n\tskip_install_trust\n\tservers {\n\t\tprotocols h1\n\t}\n')
+    .replace('{\n', '{\n\tskip_install_trust\n\tservers {\n\t\tprotocols h1 h2\n\t}\n')
     .replace('https://phone.example.com:8443 {', 'https://phone.example.com:0 {\n\tbind 127.0.0.1')
     .replace(/\ttls \{\n\t\tdns tencentcloud \{[\s\S]*?\n\t\t\}\n\t\}/u, '\ttls internal')
     .replace('output discard', 'output stderr')
@@ -275,6 +346,34 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   expect(typeof deviceToken === 'string' && deviceToken.length > 0).toBe(true)
   const resource = await step(() => exchange(signal, port, ca, '/api/caddy-test-resource', 'GET', { cookie: cookie! }))
   expect(resource.status).toBe(200); expect(resource.rawBody).toEqual(Buffer.from([0, 1, 2, 250]))
+  const csrfCookie = paired.headers['set-cookie']?.find(value => value.startsWith(CSRF_COOKIE + '='))?.split(';')[0]
+  const csrf = parseCookies(csrfCookie)?.get(CSRF_COOKIE)
+  expect(csrf).toBeDefined()
+  // Real request bodies cover read-idle ownership; HTTP/2 SSE also crosses the write-idle interval between chunks.
+  const quietBody = '{"quietProbe":true}'
+  const quietHeaders = { cookie: cookie!, [CSRF_HEADER]: csrf!, 'content-type': 'application/json' }
+  await Promise.all(['h1-headers', 'h1-body', 'h2-body'].map(async protocolPhase => {
+    const phase = protocolPhase.endsWith('headers') ? 'headers' : 'body'
+    const id = 'quiet-' + protocolPhase
+    const path = '/api/caddy-test-quiet-' + phase + '?requestId=' + id
+    const result = await step(() => protocolPhase.startsWith('h2')
+      ? exchangeHttp2(signal, port, ca, path, quietHeaders, quietBody)
+      : exchange(signal, port, ca, path, 'POST', quietHeaders, quietBody, 80_000))
+    expect(result.status).toBe(200)
+    expect(result.body).toBe(phase === 'body' ? 'data: stream-start\n\ndata: quiet-complete\n\n' : 'quiet-complete')
+    if (phase === 'body') {
+      expect(result.receivedAt.length).toBeGreaterThanOrEqual(2)
+      expect(result.receivedAt.at(-1)! - result.receivedAt[0]!).toBeGreaterThan(60_000)
+    }
+    const observation = quietRequests.get(id)
+    expect(observation?.completed).toBeDefined()
+    expect(observation!.completed! - observation!.started).toBeGreaterThan(60_000)
+    expect(gatewayRequests.get(id)).toBe(1)
+    expect(upstreamRequests.get(id)).toBe(1)
+    expect(consumedBodies.get(id)).toEqual(Buffer.from(quietBody))
+    expect(gatewayVersions.get(id)).toBe('1.1')
+  }))
+  expect(quietTimers.size).toBe(0)
   // Count both hops: success must not be explained by reused sockets or hidden API replay.
   const requestIds = Array.from({ length: 12 }, (_, index) => 'single-use-' + String(index))
   const readResource = async (id: string): Promise<void> => {
@@ -292,9 +391,6 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   }
   expect(new Set(requestIds.map(id => gatewaySockets.get(id))).size).toBe(requestIds.length)
   expect(new Set(requestIds.map(id => upstreamSockets.get(id))).size).toBe(requestIds.length)
-  const csrfCookie = paired.headers['set-cookie']?.find(value => value.startsWith(CSRF_COOKIE + '='))?.split(';')[0]
-  const csrf = parseCookies(csrfCookie)?.get(CSRF_COOKIE)
-  expect(csrf).toBeDefined()
   for (const method of ['GET', 'POST']) {
     const id = 'reset-after-consumption-' + method
     const failed = await step(() => exchange(signal, port, ca, '/api/caddy-test-reset?requestId=' + id, method,
@@ -359,6 +455,58 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   await step(() => restartedGateway.close())
   expect(await step(() => new JsonDeviceStore(template.stateFile).load())).toEqual(snapshot)
   if (fixture !== undefined) {
+    const artifact = { ...JSON.parse(await step(() => readFile(manifestFile!, 'utf8'))) as CaddyArtifact,
+      downloadUrl: 'https://fixture.invalid/pinned/caddy' }
+    const component = new CaddyComponentManager({ stateDirectory: root, artifact })
+    cleanups.push(() => component.close())
+    await step(() => component.initialize())
+    expect(component.status().installed).toBe(true)
+    let controlledChild: ChildProcess | undefined
+    let controlledPort = 0
+    const managed = new CaddyController({ component, config, store: createVolatileRemoteControlStore(),
+      instanceId: gatewayConfig.instanceId,
+      createGateway: async () => {
+        const controlled = new MobileAccessGateway(gatewayConfig, new JsonDeviceStore(template.stateFile))
+        cleanups.push(() => controlled.close())
+        await controlled.start()
+        return controlled
+      },
+      validateConfig: async (binary, file, childEnvironment, childSignal) => {
+        const generated = await readFile(file, 'utf8')
+        const controlledInternal = generated.replace('{\n', '{\n\tskip_install_trust\n\tservers {\n\t\tprotocols h1\n\t}\n')
+          .replace('https://phone.example.com:8443 {', 'https://phone.example.com:0 {\n\tbind 127.0.0.1')
+          .replace(/\ttls \{\n\t\tdns tencentcloud \{[\s\S]*?\n\t\t\}\n\t\}/u, '\ttls internal')
+        expect(controlledInternal).toContain('\ttls internal\n')
+        expect(controlledInternal).not.toMatch(/dns|acme|tencentcloud|8443/iu)
+        await writeFile(file, controlledInternal, { mode: 0o600 })
+        await execFileText(binary, ['adapt', '--config', file, '--adapter', 'caddyfile'],
+          { env: childEnvironment, signal: childSignal, timeout: 15_000 })
+      },
+      spawnProcess: (binary, args, childEnvironment) => {
+        const acquired = spawn(binary, [...args], { env: childEnvironment, shell: false, windowsHide: true, stdio: 'pipe' })
+        controlledChild = acquired
+        ownChild(acquired)
+        return acquired
+      },
+      probeDiscovery: async (_publicOrigin, expected, probeSignal) => {
+        if (controlledChild?.pid === undefined) return false
+        controlledPort = await ownedPort(controlledChild.pid, probeSignal)
+        const result = await exchange(probeSignal, controlledPort, ca, '/mobile-access/discovery')
+        if (result.status !== 200) return false
+        expect(JSON.parse(result.body).instanceId).toBe(expected)
+        return true
+      },
+    })
+    cleanups.push(() => managed.close())
+    await step(() => managed.initialize())
+    await step(() => managed.setEnabled(true))
+    expect(managed.status()).toMatchObject({ state: 'ready', origin: 'https://phone.example.com' })
+    expect(managed.gateway()?.access.authorizeDevice(deviceToken!).deviceId).toBe(pairedBody.deviceId)
+    expect((await step(() => exchange(signal, controlledPort, ca, '/api/caddy-test-resource'))).status).toBe(401)
+    await step(() => managed.close())
+    expect(managed.status().state).toBe('off')
+    expect(ownedChildren.find(owned => owned.child === controlledChild)?.closed).toBe(true)
+    await step(() => component.close())
     const privateKey = join(config.dataDirectory, 'pki', 'authorities', 'local', 'root.key')
     expect((await step(() => readFile(privateKey))).byteLength).toBeGreaterThan(0)
     const cache = join(config.configDirectory, 'owned-test-cache')
@@ -382,4 +530,4 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   }
   activeBodyTask = body()
   try { await activeBodyTask } finally { clearTimeout(deadline) }
-}, 120_000)
+}, 210_000)

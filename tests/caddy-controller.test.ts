@@ -6,6 +6,7 @@ import { ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_pr
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CaddyController, type CaddyControllerOptions } from '../src/caddy.js'
 import { CaddyConfigStore } from '../src/caddy-config.js'
+import { CADDY_VERSION } from '../src/caddy-component.js'
 import { MobileAccessGateway } from '../src/gateway.js'
 import { parseGatewayConfig } from '../src/config.js'
 import { MemoryDeviceStore } from '../src/storage.js'
@@ -39,7 +40,7 @@ async function fixture(overrides: Partial<CaddyControllerOptions> = {}): Promise
   const terminate = vi.fn(async () => { Object.defineProperty(child, 'exitCode', { value: 0 }); child.emit('close', 0) })
   const controller = new CaddyController({ config, instanceId: 'fixture-instance', store: createVolatileRemoteControlStore(),
     component: { executable: join(root, 'caddy.exe'), ensureExecutable: async () => undefined,
-      status: () => ({ supported: true, installed: true, version: '2.11.6', downloadBytes: 1, installedBytes: 1,
+      status: () => ({ supported: true, installed: true, version: CADDY_VERSION, downloadBytes: 1, installedBytes: 1,
         sourceUrl: 'https://example.com/caddy', downloadPage: '', storagePath: root }) },
     createGateway: async () => gateway, validateConfig: async () => undefined, spawnProcess: () => child,
     probeDiscovery: async () => true, terminateProcess: terminate, ...overrides,
@@ -103,10 +104,92 @@ describe('managed Caddy lifecycle', () => {
     expect(mismatch.closeGateway).toHaveBeenCalledTimes(1)
   })
   it('retains resource ownership when cleanup fails and retries close without starting another process', async () => {
-    const closeChild = vi.fn(async () => undefined).mockRejectedValueOnce(new Error('cleanup failed'))
+    const closeChild = vi.fn(async (child: ChildProcessWithoutNullStreams) => { child.emit('close', 0) }).mockRejectedValueOnce(new Error('cleanup failed'))
     const setup = await fixture({ terminateProcess: closeChild })
     await setup.controller.setEnabled(true); await expect(setup.controller.close()).rejects.toThrow('cleanup failed')
     await setup.controller.close()
     expect(closeChild).toHaveBeenCalledTimes(2); expect(setup.closeGateway).toHaveBeenCalledTimes(1)
+  })
+  it('keeps disposal pending after process exit until the acquired child actually closes', async () => {
+    const setup = await fixture({ terminateProcess: async child => { Object.defineProperty(child, 'exitCode', { value: 0 }) } })
+    await setup.controller.setEnabled(true)
+    vi.useFakeTimers()
+    let completed = false
+    const closing = setup.controller.close().then(() => { completed = true })
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      expect(setup.child.exitCode).toBe(0)
+      expect(completed).toBe(false)
+      expect(setup.child.stdout.destroyed).toBe(false)
+      setup.child.emit('close', 0)
+      await closing
+      expect(completed).toBe(true)
+    } finally {
+      setup.child.emit('close', 0)
+      await closing
+      vi.useRealTimers()
+    }
+  })
+  it('does not wait for a second close event when the acquired child has already closed', async () => {
+    const terminate = vi.fn(async () => undefined)
+    const setup = await fixture({ terminateProcess: terminate })
+    await setup.controller.setEnabled(true)
+    vi.useFakeTimers()
+    let completed = false
+    Object.defineProperty(setup.child, 'exitCode', { value: 0 })
+    setup.child.emit('close', 0)
+    const closing = setup.controller.close().then(() => { completed = true })
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      expect(completed).toBe(true)
+      await closing
+      expect(terminate).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      await closing
+      vi.useRealTimers()
+    }
+  })
+  it('reports an unconfirmed close and retains the child for a later cleanup retry', async () => {
+    const terminate = vi.fn(async (child: ChildProcessWithoutNullStreams) => { Object.defineProperty(child, 'exitCode', { value: 0 }) })
+    const setup = await fixture({ terminateProcess: terminate })
+    await setup.controller.setEnabled(true)
+    vi.useFakeTimers()
+    const failure = setup.controller.close().then(() => undefined, (error: unknown) => error)
+    try {
+      await vi.advanceTimersByTimeAsync(1_500)
+      const error = await failure
+      expect(error).toBeInstanceOf(Error)
+      if (!(error instanceof Error)) throw new Error('Expected an unconfirmed child close to fail')
+      expect(error.message).toBe('caddy_process_close_timeout')
+      expect(setup.controller.status()).toMatchObject({ state: 'error', errorCode: 'caddy_cleanup_failed' })
+      expect(terminate).toHaveBeenCalledTimes(1)
+      setup.child.emit('close', 0)
+      await setup.controller.close()
+      expect(terminate).toHaveBeenCalledTimes(2)
+      expect(setup.closeGateway).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      setup.child.emit('close', 0)
+      await failure
+      await setup.controller.close()
+      vi.useRealTimers()
+    }
+  })
+  it('does not replace a retained child after failed startup cleanup', async () => {
+    const children: ChildProcessWithoutNullStreams[] = []
+    const terminate = vi.fn(async (child: ChildProcessWithoutNullStreams) => { child.emit('close', 0) })
+      .mockRejectedValueOnce(new Error('cleanup failed')).mockRejectedValueOnce(new Error('cleanup still failed'))
+    const setup = await fixture({ spawnProcess: () => { const child = childFixture(); children.push(child); return child },
+      probeDiscovery: async () => { throw new Error('frp_discovery_mismatch') }, terminateProcess: terminate })
+    await expect(setup.controller.setEnabled(true)).rejects.toThrow('cleanup failed')
+    expect(setup.controller.status()).toMatchObject({ state: 'error', errorCode: 'caddy_cleanup_failed' })
+    await expect(setup.controller.setEnabled(true)).rejects.toThrow('cleanup still failed')
+    expect(children).toHaveLength(1)
+    expect(terminate).toHaveBeenNthCalledWith(1, children[0])
+    expect(terminate).toHaveBeenNthCalledWith(2, children[0])
+    await setup.controller.close()
+    expect(terminate).toHaveBeenNthCalledWith(3, children[0])
+    expect(setup.closeGateway).toHaveBeenCalledTimes(1)
   })
 })

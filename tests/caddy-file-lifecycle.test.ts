@@ -53,7 +53,7 @@ const artifact: CaddyArtifact = {
 function manager(root: string, overrides: Partial<ConstructorParameters<typeof CaddyComponentManager>[0]> = {}) {
   return new CaddyComponentManager({ stateDirectory: root, platform: 'win32', arch: 'x64', artifact,
     fetchArtifact: async () => bytes,
-    inspectExecutable: async () => ({ version: 'v2.11.6 h1:fixture', modules: 'dns.providers.tencentcloud v0.4.3\nNon-standard modules: 1\n' }),
+    inspectExecutable: async () => ({ version: 'v' + CADDY_VERSION + ' h1:fixture', modules: 'dns.providers.tencentcloud v0.4.3\nNon-standard modules: 1\n' }),
     ...overrides })
 }
 
@@ -163,15 +163,22 @@ describe('canonical Caddy file lifecycle', () => {
       if (String(source).includes('.install-')) throw original
       await native.rename(source, destination)
     })
-    vi.mocked(fs.unlink).mockRejectedValue(busy('EBUSY'))
+    const cleanupError = busy('EBUSY')
+    vi.mocked(fs.unlink).mockRejectedValue(cleanupError)
     const component = manager(root); await component.initialize()
-    await expect(component.install()).rejects.toBe(original)
+    const result = await component.install().then(() => undefined, error => error)
+    expect(result).toBeInstanceOf(AggregateError)
+    expect(result.cause).toBe(original)
+    expect(result.errors).toEqual([original, cleanupError])
     expect(fs.rename).toHaveBeenCalledTimes(10); expect(fs.unlink).toHaveBeenCalledTimes(8)
     expect(delays.reduce((total, delay) => total + delay, 0)).toBe(3900)
     expect(createHash('sha256').update(await fs.readFile(component.executable)).digest('hex')).toBe(hash)
     await component.ensureExecutable()
     const entries = await fs.readdir(component.componentRoot)
     expect(entries).toContain(CADDY_VERSION); expect(entries.some(name => name.startsWith('.previous-'))).toBe(false)
+    vi.mocked(fs.unlink).mockImplementation(native.unlink)
+    await component.close()
+    expect(await fs.readdir(component.componentRoot)).toEqual([CADDY_VERSION])
   })
   it('checks destination ancestors and outside-root paths before rename', async () => {
     const root = await directory(); const outside = await directory(); const source = join(root, 'source')

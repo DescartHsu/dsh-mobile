@@ -1413,6 +1413,14 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   await ctx.effect(async () => {
     const unregister = ctx.webServer.register(adminRoute)
     const stopAdmin = (): void => { adminClosing = true; unregister() }
+    const drainRemoteWork = async (): Promise<void> => {
+      const draining = remoteProviders.close()
+      caddyController.cancelPendingStart()
+      await settleCleanupSteps([
+        () => caddyComponent.close(),
+        () => draining,
+      ])
+    }
     const disposeMobileCommand = ctx.commands.register({
       name: 'mobile',
       description: '定制手机界面或添加电脑能力',
@@ -1483,6 +1491,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       try {
         await settleCleanupSteps([
           stopAdmin,
+          drainRemoteWork,
           () => trustedNetworksWrite,
           disposeMobileCommand,
           disposeTaskEvents,
@@ -1503,6 +1512,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     return async () => {
       await settleCleanupSteps([
         stopAdmin,
+        drainRemoteWork,
         () => trustedNetworksWrite,
         disposeMobileCommand,
         disposeTaskEvents,

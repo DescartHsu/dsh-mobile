@@ -52,12 +52,17 @@ async function validate(executable: string, caddyfile: string, environment: Node
   }) } catch { throw new Error('caddy_config_validation_failed') }
 }
 
+interface CaddyChild {
+  readonly process: ChildProcessWithoutNullStreams
+  closed: boolean
+}
+
 /** Owns Caddy and a loopback Gateway until both have stopped; ready requires verified public TLS and instance identity. */
 export class CaddyController implements RemoteProviderController {
   private enabled = false
   private initialized = false
   private disposed = false
-  private child: ChildProcessWithoutNullStreams | undefined
+  private child: CaddyChild | undefined
   private gatewayValue: MobileAccessGateway | undefined
   private generation = 0
   private startupAbort: AbortController | undefined
@@ -128,6 +133,7 @@ export class CaddyController implements RemoteProviderController {
   }
 
   private async start(): Promise<void> {
+    if (this.child !== undefined || this.gatewayValue !== undefined) await this.stop()
     const generation = ++this.generation
     const startup = new AbortController()
     this.startupAbort = startup
@@ -154,11 +160,13 @@ export class CaddyController implements RemoteProviderController {
       if (startup.signal.aborted || this.disposed) throw new Error('caddy_start_cancelled')
       const child = (this.options.spawnProcess ?? spawnCaddy)(this.options.component.executable,
         ['run', '--config', this.options.config.caddyfile, '--adapter', 'caddyfile'], environment)
-      this.child = child
+      const ownedChild: CaddyChild = { process: child, closed: false }
+      this.child = ownedChild
+      child.once('close', () => { ownedChild.closed = true })
       // No provider response or DNS credentials enter DSH logs, and pipes cannot fill and stall the child.
       child.stdout.resume(); child.stderr.resume(); child.stdin.end()
       const failed = (code: string): void => {
-        if (generation !== this.generation || this.child !== child) return
+        if (generation !== this.generation || this.child !== ownedChild) return
         childFailure = code
         startup.abort()
         if (this.latest.state === 'ready') {
@@ -207,17 +215,39 @@ export class CaddyController implements RemoteProviderController {
     })
   }
   private async stop(): Promise<void> { ++this.generation; this.startupAbort?.abort(); await this.stopResources() }
+  private waitForChildClose(child: CaddyChild): Promise<void> {
+    if (child.closed) return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      const finish = (error?: Error): void => {
+        clearTimeout(timer)
+        child.process.removeListener('close', closed)
+        if (error === undefined) resolve()
+        else reject(error)
+      }
+      const closed = (): void => { finish() }
+      // The process can exit before its stdio closes; retain ownership through that bounded final phase.
+      const timer = setTimeout(() => { finish(new Error('caddy_process_close_timeout')) }, 1_500)
+      timer.unref()
+      child.process.once('close', closed)
+    })
+  }
   private async stopResources(): Promise<void> {
     const child = this.child
     const gateway = this.gatewayValue
-    await settleRemoteResources([
-      async () => {
-        if (child !== undefined) {
-          await (this.options.terminateProcess ?? terminateRemoteProcess)(child)
-          if (this.child === child) this.child = undefined
-        }
-      },
-      async () => { if (gateway !== undefined) { await gateway.close(); if (this.gatewayValue === gateway) this.gatewayValue = undefined } },
-    ], 'caddy cleanup failed')
+    try {
+      await settleRemoteResources([
+        async () => {
+          if (child !== undefined) {
+            await (this.options.terminateProcess ?? terminateRemoteProcess)(child.process)
+            await this.waitForChildClose(child)
+            if (this.child === child) this.child = undefined
+          }
+        },
+        async () => { if (gateway !== undefined) { await gateway.close(); if (this.gatewayValue === gateway) this.gatewayValue = undefined } },
+      ], 'caddy cleanup failed')
+    } catch (error) {
+      this.publish({ enabled: this.enabled, state: 'error', errorCode: 'caddy_cleanup_failed' })
+      throw error
+    }
   }
 }

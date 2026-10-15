@@ -23,7 +23,7 @@ const artifact: CaddyArtifact = {
   downloadBytes: bytes.length, downloadSha256: hash, executableName: 'caddy.exe', executableBytes: bytes.length,
   executableSha256: hash, dnsPluginVersion: 'v0.4.3',
 }
-const metadata = { version: 'v2.11.6 h1:fixture', modules: 'dns.providers.tencentcloud v0.4.3\nNon-standard modules: 1\n' }
+const metadata = { version: 'v' + CADDY_VERSION + ' h1:fixture', modules: 'dns.providers.tencentcloud v0.4.3\nNon-standard modules: 1\n' }
 function manager(root: string, overrides: Partial<ConstructorParameters<typeof CaddyComponentManager>[0]> = {}): CaddyComponentManager {
   return new CaddyComponentManager({ stateDirectory: root, platform: 'win32', arch: 'x64', artifact,
     fetchArtifact: async () => bytes, inspectExecutable: async () => metadata, ...overrides })
@@ -120,7 +120,7 @@ describe('managed Caddy components', () => {
     await expect(component.install()).rejects.toThrow('caddy_download_hash_mismatch')
     expect(inspections).toBe(0)
   })
-  it.each([{ ...metadata, version: 'v2.11.7 h1:other' }, { ...metadata, modules: 'dns.providers.tencentcloud v0.4.2\nNon-standard modules: 1' },
+  it.each([{ ...metadata, version: 'v2.11.8 h1:other' }, { ...metadata, modules: 'dns.providers.tencentcloud v0.4.2\nNon-standard modules: 1' },
     { ...metadata, modules: 'dns.providers.tencentcloud v0.4.3\nNon-standard modules: 2' }])('rejects metadata mismatches %j', async info => {
     const root = await directory(); const component = manager(root, { stateDirectory: root, inspectExecutable: async () => info })
     await expect(component.install()).rejects.toThrow(/caddy_executable_(version|modules)_mismatch/u)

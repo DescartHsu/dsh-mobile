@@ -86,4 +86,12 @@ describe('buildMobileGuide', () => {
     expect(text).toContain('extension.json')
     expect(text).toContain('完成前请自检')
   })
+
+  it('checks old overrides before using scoped selectors without hiding required actions implicitly', () => {
+    const text = guide({ hasCustomCss: true })
+    expect(text).toContain('先备份并在同一会话、方向和字号下对比有无该样式')
+    expect(text).toContain('[data-dsh-mobile-header] [class*="_titleRow"]')
+    expect(text).toContain('不要裸匹配整页')
+    expect(text).toContain('不得把隐藏功能描述成折叠')
+  })
 })

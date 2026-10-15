@@ -29,7 +29,7 @@ The publicly trusted entry in this guide requires Android app 0.3.3 or later for
 
 Before deployment, the panel lists every VPS change. It installs Caddy from its official APT source; public IPv4 mode additionally installs a Python virtual environment, Certbot and the renewal timer. It creates the frps service/configuration, Caddy snippet and one import line, and allows the FRP control port plus 80/tcp and 443/tcp when UFW is active. An existing `dsh-mobile` system user is reused and retained during cleanup; a user created by this deployment is removed during cleanup. An existing DSH Mobile import is normalized to one line. Merge custom sites manually; the version-specific behavior is described below.
 
-The unreleased correction recognizes a replaceable default Caddyfile by its complete file hash. A default site with additional sites, or a file carrying only the legacy management marker, requires manual merging. The currently published plugin can misidentify such files during automatic deployment; use manual deployment and retain a backup when custom sites exist. Remove legacy whole-file DSH Mobile sites manually during cleanup while preserving other content.
+Since plugin 0.6.4, automatic deployment recognizes a replaceable default Caddyfile by its complete file hash. A default site with additional sites, or a file carrying only the legacy management marker, requires manual merging. Retain a backup when custom sites exist and do not replace the entire file with the generated template. Remove legacy whole-file DSH Mobile sites manually during cleanup while preserving other content.
 
 ## Verify the host keys every time
 

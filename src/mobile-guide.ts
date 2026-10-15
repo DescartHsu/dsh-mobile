@@ -76,6 +76,8 @@ const MOBILE_CUSTOMIZATION_GUIDE_BODY = `你在为用户定制 DSH Mobile 的手
 
 动手前先读已有的定制文件。若要调整 DSH 自带的输入框、侧栏或设置等现有界面，先确认当前 DSH 版本与手机页面模式（专用移动页面或 ?frontend=stock），只读核对运行页面的 DOM、属性和样式；本机有同版本前端源码时可参考相应组件，没有源码时可查看已安装的客户端产物，不必下载源码。优先使用扩展 API、插槽和稳定的 data-* 标记，不凭猜测依赖构建类名。只读查看不改变前述写入范围。
 
+旧 CSS 可能覆盖新版内置修复。先备份并在同一会话、方向和字号下对比有无该样式，不要无症状叠加旧补丁。CSS Modules 的后缀／子串匹配必须限定到已核对的区域祖先，例如 [data-dsh-mobile-header] [class*="_titleRow"]；不要裸匹配整页。display: none 会让其中的操作不可用，不得把隐藏功能描述成折叠。
+
 2. 电脑端能力 —— 手机需要读电脑文件、执行命令或访问硬件时，创建扩展：
    - 目录：$DSH_HOME/mobile-access/extensions/<id>/，id 用小写字母数字和连字符（如 media-remote）
    - extension.json：{"schemaVersion":1,"id":"<id>","name":"显示名","version":"0.1.0","description":"说明"}

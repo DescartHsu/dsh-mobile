@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { packBundle, runPackagingCommand } from './packed-profile.mjs'
 import { observeMobileBootDiagnostics, summarizeMobileBootDiagnostics } from './mobile-boot-diagnostics.mjs'
-import { CLIENT_TIMEOUT_MS, createMobileProfile, dismissOnboarding, launchDsh, openPairing,
+import { CLIENT_TIMEOUT_MS, createMobileProfile, dismissOnboarding, launchDsh, openMobileSettings, openPairing,
   pairMobilePage, removeTemporaryRoot, sanitized } from './mobile-boot-fixture.mjs'
 
 const repository = fileURLToPath(new URL('..', import.meta.url))
@@ -109,9 +109,7 @@ async function confirm(action, operation) {
 }
 
 async function openSettings() {
-  const drawer = phone.locator('.dshm-drawer')
-  if (await drawer.getAttribute('data-open') !== 'true') await drawer.locator('button[data-dsh-mobile-toggle]').click()
-  await drawer.locator('button:has([data-slot="settings.trigger"])').click()
+  await openMobileSettings(phone)
   await phone.locator('.dsh-module-row').waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
 }
 

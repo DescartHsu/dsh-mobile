@@ -19,11 +19,16 @@ export interface AccessControllerOptions {
   readonly rateLimitWindowMs: number
   readonly maxPairingAttempts: number
   readonly maxRateLimitKeys: number
+  /** Native identity stored with newly paired device credentials. */
+  readonly pairingInstanceId?: string
+  /** Native response identity for older credentials without a stored binding. */
+  readonly legacyInstanceId?: string
   readonly now?: () => number
 }
 
 /** Values issued once after pairing; only digests survive the response. */
 export interface PairingResult {
+  readonly nativeInstanceId?: string
   readonly deviceId: string
   readonly deviceToken: string
   readonly deviceExpiresAt: number
@@ -34,6 +39,7 @@ export interface PairingResult {
 
 /** Values issued after renewal with the persistent HttpOnly device Cookie. */
 export interface RenewalResult {
+  readonly nativeInstanceId?: string
   readonly deviceId: string
   readonly sessionToken: string
   readonly csrfToken: string
@@ -49,6 +55,7 @@ export interface SessionAuthorization {
 
 /** Result of a persistent-device reachability check without opening a Session. */
 export interface DeviceProbeResult {
+  readonly nativeInstanceId?: string
   readonly deviceId: string
   readonly deviceExpiresAt: number
 }
@@ -202,7 +209,12 @@ export class AccessController {
   }
 
   private snapshot(devices: readonly StoredDevice[]): DeviceSnapshot {
-    return Object.freeze({ version: 1, devices: Object.freeze([...devices]) })
+    return Object.freeze({ version: 2, devices: Object.freeze([...devices]) })
+  }
+
+  private nativeIdentity(device: StoredDevice): Pick<DeviceProbeResult, 'nativeInstanceId'> {
+    const nativeInstanceId = device.nativeInstanceId ?? this.options.legacyInstanceId ?? this.options.pairingInstanceId
+    return nativeInstanceId === undefined ? {} : { nativeInstanceId }
   }
 
   private emitSessionEnded(session: SessionRecord, reason: SessionEndReason): void {
@@ -227,7 +239,7 @@ export class AccessController {
     }
   }
 
-  private createSession(deviceId: string, now: number, deviceExpiresAt: number): RenewalResult {
+  private createSession(device: StoredDevice, now: number): RenewalResult {
     this.pruneSessions(now)
     if (this.sessions.size >= this.options.maxSessions) {
       const oldest = [...this.sessions.values()].sort((left, right) => left.createdAt - right.createdAt)[0]
@@ -238,13 +250,19 @@ export class AccessController {
     const key = digestHex(sessionToken)
     const record: SessionRecord = Object.freeze({
       key,
-      deviceId,
+      deviceId: device.id,
       csrfDigest: digest(csrfToken),
       createdAt: now,
-      expiresAt: Math.min(now + this.options.sessionTtlMs, deviceExpiresAt),
+      expiresAt: Math.min(now + this.options.sessionTtlMs, device.expiresAt),
     })
     this.sessions.set(key, record)
-    return Object.freeze({ deviceId, sessionToken, csrfToken, sessionExpiresAt: record.expiresAt })
+    return Object.freeze({
+      ...this.nativeIdentity(device),
+      deviceId: device.id,
+      sessionToken,
+      csrfToken,
+      sessionExpiresAt: record.expiresAt,
+    })
   }
 
   /** Open one short pairing window and return its one-time secret to a loopback caller only. */
@@ -286,12 +304,13 @@ export class AccessController {
         createdAt: now,
         expiresAt: now + this.options.deviceTtlMs,
         lastSeenAt: now,
+        ...(this.options.pairingInstanceId === undefined ? {} : { nativeInstanceId: this.options.pairingInstanceId }),
       })
       const retained = this.devices.filter(candidate => candidate.revokedAt === undefined && candidate.expiresAt > now)
       const next = [...retained, device]
       await this.store.save(this.snapshot(next))
       this.devices = next
-      const session = this.createSession(device.id, now, device.expiresAt)
+      const session = this.createSession(device, now)
       return Object.freeze({
         ...session,
         deviceToken,
@@ -312,7 +331,7 @@ export class AccessController {
       next[index] = updated
       await this.store.save(this.snapshot(next))
       this.devices = next
-      return this.createSession(device.id, now, device.expiresAt)
+      return this.createSession(device, now)
     })
   }
 
@@ -328,7 +347,7 @@ export class AccessController {
       next[index] = updated
       await this.store.save(this.snapshot(next))
       this.devices = next
-      return Object.freeze({ deviceId: device.id, deviceExpiresAt: device.expiresAt })
+      return Object.freeze({ ...this.nativeIdentity(device), deviceId: device.id, deviceExpiresAt: device.expiresAt })
     })
   }
 
@@ -336,7 +355,7 @@ export class AccessController {
   authorizeDevice(deviceToken: string): DeviceProbeResult {
     this.requireInitialized()
     const device = this.requireDevice(deviceToken, this.now())
-    return Object.freeze({ deviceId: device.id, deviceExpiresAt: device.expiresAt })
+    return Object.freeze({ ...this.nativeIdentity(device), deviceId: device.id, deviceExpiresAt: device.expiresAt })
   }
 
   private requireDevice(deviceToken: string, now: number): StoredDevice {

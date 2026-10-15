@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { packBundle } from './packed-profile.mjs'
 import {
-  CLIENT_TIMEOUT_MS, createMobileProfile, dismissOnboarding, launchDsh,
+  CLIENT_TIMEOUT_MS, createMobileProfile, dismissOnboarding, launchDsh, openMobileSettings,
   openPairing, pairMobilePage, removeTemporaryRoot, sanitized,
 } from './mobile-boot-fixture.mjs'
 
@@ -127,7 +127,7 @@ async function capture(baseUrl, logs, outputDir, overwrite) {
     await drawer.locator('[data-dsh-mobile-sidebar-root]').waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
     await shot('mobile-shell-03-session-drawer')
 
-    await drawer.locator('button[aria-haspopup="dialog"]').first().click()
+    await openMobileSettings(phone)
     const settings = phone.locator('[role="dialog"][aria-modal="true"]').first()
     await settings.waitFor({ state: 'visible', timeout: CLIENT_TIMEOUT_MS })
     await shot('mobile-shell-04-settings')

@@ -6,7 +6,7 @@ import { chromium } from 'playwright'
 import { packBundle } from './packed-profile.mjs'
 import { completeSmoke, recordSmokeFailure } from './negative-control.mjs'
 import {
-  CLIENT_TIMEOUT_MS, createMobileProfile, dismissOnboarding, launchDsh,
+  CLIENT_TIMEOUT_MS, createMobileProfile, dismissOnboarding, launchDsh, openMobileSettings,
   observeWorkspaceStream, openPairing, pairMobilePage, removeTemporaryRoot, sanitized, within,
 } from './mobile-boot-fixture.mjs'
 
@@ -276,7 +276,7 @@ async function inspectBrowser(baseUrl, logs) {
     await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'false')
     await drawerToggle.click()
     await phone.waitForFunction(() => document.querySelector('.dshm-scrim')?.getAttribute('data-open') === 'true')
-    await drawer.locator('button[aria-haspopup="dialog"]').first().click()
+    await openMobileSettings(phone)
     const settingsDialog = phone.locator('[role="dialog"][aria-modal="true"]').first()
     await settingsDialog.waitFor({ state: 'visible' })
     if (!await back()) throw new Error('Mobile Back did not consume the settings dialog')

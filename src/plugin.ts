@@ -81,6 +81,7 @@ import { OriginController } from './origin-proxy.js'
 import { PluginReleaseManager, releaseProfileDirectory } from './release-update.js'
 import { installMobileFileLogger } from './file-logger.js'
 import { loadOrCreateInstallationId } from './installation-id.js'
+import { withInstallationIdentity } from './gateway-identity.js'
 import {
   configuredRemoteProvider,
   JsonRemoteProviderStore,
@@ -318,6 +319,7 @@ export function remoteGatewayConfig(
   stateFile: string,
   instanceId: string,
   listenPort = 0,
+  legacyInstanceId?: string,
 ): ResolvedGatewayConfig {
   const origin = new URL(publicOrigin)
   if (origin.protocol !== 'https:' || origin.username !== '' || origin.password !== ''
@@ -337,6 +339,7 @@ export function remoteGatewayConfig(
     allowedCidrs: Object.freeze([parseCidr('127.0.0.0/8')]),
     stateFile,
     instanceId,
+    ...(legacyInstanceId === undefined ? {} : { legacyInstanceId }),
     tls: Object.freeze({ mode: 'disabled' }),
     publicTls: true,
     discovery: false,
@@ -413,12 +416,13 @@ export function originGatewayConfig(
   stateFile: string,
   instanceId: string,
   listenPort = settings.listenPort,
+  legacyInstanceId?: string,
 ): ResolvedGatewayConfig {
   const validated = parseOriginSettings(settings)
   // Port zero is available only to in-process tests, never to saved settings.
   if (listenPort !== 0) validateOriginListenPort(listenPort)
   return Object.freeze({
-    ...remoteGatewayConfig(template, validated.publicOrigin, stateFile, instanceId, listenPort),
+    ...remoteGatewayConfig(template, validated.publicOrigin, stateFile, instanceId, listenPort, legacyInstanceId),
     listenHost: validated.listenHost,
     allowedCidrs: Object.freeze(validated.allowedCidrs.map(parseCidr)),
   })
@@ -518,9 +522,12 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   await cloudflaredComponent.initialize()
   const frpComponent = new FrpComponentManager({ stateDirectory })
   await frpComponent.initialize()
-  // FRP registration persists across LAN setup changes, while the gateway's
-  // pairing identity may change when an unconfigured setup becomes managed.
+  // FRP registration and unpinned public pairing share the persisted installation
+  // identity; CA-backed entries keep their certificate fingerprint.
   const frpIdentity = await loadOrCreateInstallationId(join(stateDirectory, 'installation-id'))
+  // Public entries serve no pairing CA, so their new pairings can use this
+  // installation's random identity while legacy credentials retain their ID.
+  const remoteInstanceId = loaded.kind === 'managed' ? frpIdentity : loaded.config.instanceId ?? frpIdentity
   const frpConfig = new FrpConfigStore(join(remoteDirectory, 'frp', 'config'), frpProxyName(frpIdentity), stateDirectory)
   await frpConfig.initialize()
   const originConfig = new OriginConfigStore(join(remoteDirectory, 'origin', 'config'), stateDirectory)
@@ -566,10 +573,10 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   let trustedNetworksWrite: Promise<void> = Promise.resolve()
   let adminClosing = false
   const startGateway = async (candidateConfig: PluginConfig): Promise<MobileAccessRuntime> => {
-    const resolved = parseGatewayConfig({
+    const resolved = withInstallationIdentity(parseGatewayConfig({
       ...candidateConfig,
       upstreamOrigin: template.upstreamOrigin.origin,
-    })
+    }), frpIdentity, candidateConfig.instanceId !== undefined)
     const candidate = new MobileAccessGateway(
       resolved,
       new JsonDeviceStore(resolved.stateFile, resolved.maxDevices),
@@ -648,8 +655,9 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         template,
         publicOrigin,
         remoteDeviceFile,
-        instanceId,
+        remoteInstanceId,
         listenPort,
+        instanceId,
       )
       const candidate = new MobileAccessGateway(
         resolved,
@@ -693,7 +701,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     return candidate
   }
   const createOriginGateway = async (settings: OriginSettings): Promise<MobileAccessGateway> => {
-    const resolved = originGatewayConfig(template, settings, remoteDeviceFile, instanceId)
+    const resolved = originGatewayConfig(template, settings, remoteDeviceFile, remoteInstanceId, settings.listenPort, instanceId)
     const candidate = new MobileAccessGateway(
       resolved, new JsonDeviceStore(resolved.stateFile, resolved.maxDevices), mobileAccess,
       upstreamLoginUrl, webSocketPaths, blockedUpgradePaths, undefined, clientModulePreferences,
@@ -713,7 +721,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
     store: createVolatileRemoteControlStore(),
     component: caddyComponent,
     config: caddyConfig,
-    instanceId,
+    instanceId: remoteInstanceId,
     createGateway: settings => createRemoteGateway(settings.publicOrigin),
   })
   const originController = new ManagedOriginController({
@@ -752,7 +760,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       store: frpStore,
       executable: frpComponent.executable,
       config: frpConfig,
-      instanceId,
+      instanceId: remoteInstanceId,
       createGateway: createFrpGateway,
       /**
        * Hand the start-up self-check the CA the app itself pins.

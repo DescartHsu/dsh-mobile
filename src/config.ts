@@ -129,6 +129,8 @@ export interface ResolvedGatewayConfig {
   readonly excludedClientModules: readonly string[]
   readonly websocketCompression: ResolvedWebSocketCompressionConfig
   readonly instanceId: string
+  /** Identity returned only for authenticated legacy native credentials without a stored binding. */
+  readonly legacyInstanceId?: string
   readonly pairingCaFile?: string
   readonly tls: TlsConfig
   /** Whether the public hop is HTTPS, even when a trusted loopback proxy terminates TLS. */

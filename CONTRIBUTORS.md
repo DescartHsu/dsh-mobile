@@ -64,6 +64,8 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 
 ## 问题反馈与建议 / Issue reports and ideas
 
+感谢 [@Yurzi](https://github.com/Yurzi) 在 [#213](https://github.com/saya-ch/dsh-mobile/issues/213) 报告不同电脑的远程配对记录互相覆盖。 / Thanks [@Yurzi](https://github.com/Yurzi) for reporting remote pairing records on different computers overwriting one another in [#213](https://github.com/saya-ch/dsh-mobile/issues/213).
+
 感谢 [@Dantezcx](https://github.com/Dantezcx) 在 [#209](https://github.com/saya-ch/dsh-mobile/issues/209) 和 [#210](https://github.com/saya-ch/dsh-mobile/issues/210) 提供侧栏命中、短屏布局和定制资源加载的详细诊断。 / Thanks [@Dantezcx](https://github.com/Dantezcx) for the detailed sidebar hit-testing, short-viewport and customization-loading diagnostics in [#209](https://github.com/saya-ch/dsh-mobile/issues/209) and [#210](https://github.com/saya-ch/dsh-mobile/issues/210).
 
 感谢 [@xhwxt](https://github.com/xhwxt) 在 [#203](https://github.com/saya-ch/dsh-mobile/pull/203) 中提出文档选择器改进方案，以及 [@Void-LifeStream](https://github.com/Void-LifeStream) 在 [#205](https://github.com/saya-ch/dsh-mobile/issues/205) 中提供附件选择与回传问题的详细反馈。
@@ -120,5 +122,5 @@ Thanks [@xhwxt](https://github.com/xhwxt) for the document-picker proposal in [#
 | [@tianyimc](https://github.com/tianyimc) | [#126](https://github.com/saya-ch/dsh-mobile/issues/126) |
 | [@Xingcheng-wang](https://github.com/Xingcheng-wang) | [#76](https://github.com/saya-ch/dsh-mobile/issues/76) |
 | [@xhwxt](https://github.com/xhwxt) | [#107](https://github.com/saya-ch/dsh-mobile/issues/107), [#108](https://github.com/saya-ch/dsh-mobile/issues/108), [#145](https://github.com/saya-ch/dsh-mobile/issues/145), [#146](https://github.com/saya-ch/dsh-mobile/issues/146), [#149](https://github.com/saya-ch/dsh-mobile/issues/149), [#171](https://github.com/saya-ch/dsh-mobile/issues/171) |
-| [@Yurzi](https://github.com/Yurzi) | [#17](https://github.com/saya-ch/dsh-mobile/issues/17) |
+| [@Yurzi](https://github.com/Yurzi) | [#17](https://github.com/saya-ch/dsh-mobile/issues/17), [#213](https://github.com/saya-ch/dsh-mobile/issues/213) |
 | [@Ztyss](https://github.com/Ztyss) | [#22](https://github.com/saya-ch/dsh-mobile/issues/22), [#23](https://github.com/saya-ch/dsh-mobile/issues/23) |

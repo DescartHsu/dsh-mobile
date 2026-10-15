@@ -24,7 +24,7 @@ import { HOST_CSRF_COOKIE, HOST_DEVICE_COOKIE, HOST_SESSION_COOKIE } from '../sr
 import { MemoryDeviceStore } from '../src/storage.js'
 import { DSH_MOBILE_VERSION, MINIMUM_ANDROID_APP_VERSION } from '../src/version.js'
 import { createTestTlsChain } from './tls-fixtures.js'
-import { acquireUdpDiscoveryGateway } from './udp-discovery-fixture.js'
+import { startWithMappedUdpDiscovery } from './udp-discovery-fixture.js'
 
 interface HttpResult {
   readonly status: number
@@ -113,8 +113,7 @@ async function request(
   return beginRequest(port, path, options).result
 }
 
-async function udpDiscovery(instance: MobileAccessGateway): Promise<Record<string, unknown>> {
-  const port = instance.address().port
+async function udpDiscovery(instance: MobileAccessGateway, port: number): Promise<Record<string, unknown>> {
   const client = createSocket('udp4')
   return new Promise<Record<string, unknown>>((resolve, reject) => {
     let settled = false
@@ -148,7 +147,7 @@ async function udpDiscovery(instance: MobileAccessGateway): Promise<Record<strin
       retry = setInterval(send, 250)
     })
   }).catch(error => {
-    throw new Error(`UDP discovery failed on port ${port}: ${JSON.stringify(instance.discoveryStatus())}`, { cause: error })
+    throw new Error(`UDP discovery failed on transport ${port}, HTTP ${instance.address().port}: ${JSON.stringify(instance.discoveryStatus())}`, { cause: error })
   })
 }
 
@@ -483,6 +482,7 @@ async function gateway(
   extraWebSocketPaths: readonly string[] = [],
   blockedUpgradeLog?: BlockedUpgradePathLog,
   onDiscoveryDegraded?: (source: 'broadcast' | 'mdns', code: string) => void,
+  startForTest?: (instance: MobileAccessGateway) => Promise<void>,
 ): Promise<MobileAccessGateway> {
   const resolved = parseGatewayConfig({
     listenHost: '127.0.0.1',
@@ -500,7 +500,8 @@ async function gateway(
     effective, new MemoryDeviceStore(), undefined, upstreamAuthenticatedUrl,
     { has: (pathname: string) => extra.has(pathname) }, blockedUpgradeLog, onDiscoveryDegraded,
   )
-  await instance.start()
+  if (startForTest === undefined) await instance.start()
+  else await startForTest(instance)
   cleanups.push(() => instance.close())
   return instance
 }
@@ -1616,8 +1617,10 @@ describe('HTTP gateway', () => {
   it('discovers one instance and renews a native long-lived device credential', async () => {
     const inner = await upstream()
     const instanceId = 'a'.repeat(64)
-    const instance = await acquireUdpDiscoveryGateway(observe =>
-      gateway(inner.port, { instanceId }, undefined, undefined, [], undefined, observe))
+    let udpPort = 0
+    const instance = await gateway(inner.port, { instanceId }, undefined, undefined, [], undefined, undefined, async candidate => {
+      udpPort = await startWithMappedUdpDiscovery(candidate)
+    })
     const discovered = await request(instance.address().port, '/mobile-access/discovery', {
       headers: { host: new URL(instance.address().origin).host },
     })
@@ -1629,7 +1632,7 @@ describe('HTTP gateway', () => {
       protocol: 1,
       instanceId,
     })
-    const discovery = await udpDiscovery(instance)
+    const discovery = await udpDiscovery(instance, udpPort)
     expect(discovery).toEqual({
       deviceName: expect.any(String),
       origin: instance.address().origin,
@@ -1808,13 +1811,18 @@ describe('HTTP gateway', () => {
     const files = await tlsFixtureFiles()
     const root = new X509Certificate(await readFile(files.root))
     const instanceId = root.fingerprint256.replaceAll(':', '').toLowerCase()
-    const instance = await acquireUdpDiscoveryGateway(observe => gateway(inner.port, {
+    let udpPort = 0
+    const instance = await gateway(inner.port, {
       instanceId,
       pairingCaFile: files.root,
       tls: { mode: 'provided', certFile: files.leaf, keyFile: files.key, caFile: files.intermediate },
-    }, undefined, undefined, [], undefined, observe))
-    const discovered = await udpDiscovery(instance)
+    }, undefined, undefined, [], undefined, undefined, async candidate => {
+      udpPort = await startWithMappedUdpDiscovery(candidate)
+    })
+    const discovered = await udpDiscovery(instance, udpPort)
     expect(Object.keys(discovered).sort()).toEqual(['deviceName', 'instanceId', 'origin', 'port', 'protocol'])
+    expect(discovered.port).toBe(instance.address().port)
+    expect(discovered.origin).toBe(instance.address().origin)
     const certificate = await trustedHttpsRequest(instance.address().port, '/mobile-access/ca.cer', await readFile(files.root, 'utf8'))
     expect(certificate.status).toBe(200)
     expect(certificate.headers['content-type']).toBe('application/pkix-cert')

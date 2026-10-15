@@ -58,6 +58,7 @@ internal class SecureWebViewClient(
     private val onRendererGone: () -> Unit,
     private val onTopLevelUrlChanged: (String) -> Unit,
     private val onLoaded: () -> Unit,
+    private val onBeforeTopLevelNavigation: () -> Unit,
 ) : WebViewClient() {
     private val handler = Handler(Looper.getMainLooper())
     private val document = WebViewDocumentState(origin)
@@ -71,7 +72,13 @@ internal class SecureWebViewClient(
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val candidate = request.url.toString()
         if (!request.isForMainFrame) return shouldBlockSubframeNavigation(origin, candidate)
-        if (GatewayUrlPolicy.isSameOrigin(origin, candidate)) return false
+        if (GatewayUrlPolicy.isSameOrigin(origin, candidate)) {
+            val currentUrl = view.url.orEmpty()
+            val fragmentOnly = sameMainDocumentUrl(origin, currentUrl, candidate) &&
+                Uri.parse(currentUrl).encodedFragment != request.url.encodedFragment
+            if (!fragmentOnly) onBeforeTopLevelNavigation()
+            return false
+        }
         if (request.hasGesture() && GatewayUrlPolicy.isExternalHttps(candidate)) {
             openExternal(request.url)
         } else {

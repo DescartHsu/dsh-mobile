@@ -58,6 +58,25 @@ class WebFileChooserWiringTest {
         assertFalse(owner.contains("restoreGeneration"))
     }
 
+    @Test fun supportedNavigationOwnsDocumentChangesAndBlocksSelectionUntilItsExactCompletion() {
+        val source = activitySource()
+        val browser = methodBody(source, "showBrowser")
+        val started = browser.substringAfter("override fun onNavigationStarted(").substringBefore("override fun onNavigationCompleted(")
+        assertTrue(started.contains("ownsBrowser() && !navigation.isSameDocument"))
+        assertTrue(started.contains("fileChooserTransitions.begin(navigation)"))
+        assertTrue(started.contains("invalidateWebFileChooser()"))
+        val completed = browser.substringAfter("override fun onNavigationCompleted(").substringBefore("fileChooserNavigationListener = listener")
+        assertTrue(completed.contains("if (ownsBrowser()) fileChooserTransitions.complete(navigation)"))
+        assertFalse(completed.contains("didCommit()"))
+        assertTrue(browser.contains("java.util.concurrent.Executor { task -> task.run() }"))
+        val legacy = browser.substringAfter("onTopLevelUrlChanged =").substringBefore("onLoaded =")
+        assertTrue(legacy.contains("if (fileChooserNavigationListener == null) invalidateWebFileChooser()"))
+        assertTrue(methodBody(source, "isCurrentFileChooser").contains("!fileChooserTransitions.active"))
+        val teardown = methodBody(source, "destroyWebView")
+        assertTrue(teardown.contains("removeNavigationListener(this, it)"))
+        assertTrue(teardown.contains("fileChooserTransitions.clear()"))
+    }
+
     private fun methodBody(source: String, name: String): String =
         source.substringAfter("private fun $name(").substringBefore("\n    private fun ")
 

@@ -12,6 +12,8 @@ The current stable app is **0.6.3** (build 79). The app and npm plugin update in
 
 Unreleased App code uses the system Photo Picker on Android 13+ when the webpage requests a single supported image MIME filter. Multiple selection follows the system limit; unavailable pickers, older systems, capture requests and filters that cannot be represented exactly use the document picker instead. Document requests start directly, retain MIME and multiple settings, and do not promise a particular manufacturer's gallery. Standard callbacks are bound to the current WebView, Origin and document; obsolete results cannot complete a newer request. These native changes are not in the published 0.6.3 APK, and need a future signed App update.
 
+WebViews with navigation-listener support cancel a pending standard file request before replacing the document and do not open another selector while a document navigation is in progress. Older providers use the available navigation callbacks; if file selection stops opening after changing pages, update WebView or return to the paired-computer list and reopen the page. Clearing App data is unnecessary.
+
 ## 0.6.3 update
 
 Build 79 adds per-computer recovery guidance, readable expired-CA records, duplicate-pairing protection and deduplicated status checks that leave capacity for an explicit connection. TLS still refuses expired certificates. It also improves dark-mode primary buttons and explicitly excludes encrypted pairings and WebView sessions from cloud backup and device transfer. The earlier automatic-recovery ownership corrections are included. This signed App is published independently from plugin 0.6.4.

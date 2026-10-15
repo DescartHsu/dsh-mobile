@@ -59,3 +59,12 @@ internal class WebFileChooserGate<T>(private val codes: WebFileChooserRequestCod
 /** Preserve all selected items while deduplicating ClipData and Intent.data. */
 internal fun <T : Any> mergeFileChooserItems(clipItems: List<T?>, singleItem: T?): List<T> =
     (clipItems.filterNotNull() + listOfNotNull(singleItem)).distinct()
+
+/** In-flight cross-document navigations deny file selection until each navigation completes. */
+internal class WebFileChooserTransitions<T : Any> {
+    private val pending = mutableSetOf<T>()
+    val active: Boolean get() = pending.isNotEmpty()
+    fun begin(navigation: T): Boolean = pending.add(navigation)
+    fun complete(navigation: T) { pending.remove(navigation) }
+    fun clear() { pending.clear() }
+}

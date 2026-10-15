@@ -22,10 +22,12 @@ Notable changes are recorded here. GitHub Releases provide the downloadable pack
 - Clarify `/mobile` and both READMEs: detected files are not proof of page activation; ordinary DSH login or phone-sized preview does not establish mobile pairing. Thanks @Dantezcx for the detailed reports in [#209](https://github.com/saya-ch/dsh-mobile/issues/209) and [#210](https://github.com/saya-ch/dsh-mobile/issues/210).
 - Thanks @GavinQiEr for the request in [#207](https://github.com/saya-ch/dsh-mobile/issues/207) and implementation in [#208](https://github.com/saya-ch/dsh-mobile/pull/208); the original author commit is retained alongside maintainer corrections.
 
-## Unreleased Android changes
+## Android 0.6.4 - 2026-10-15
 
 - Prefer the system Photo Picker on Android 13+ for supported image requests, with document selection for other requests or an unavailable picker. Preserve multi-selection, MIME filtering and selected URI results without adding storage permission or forcing a vendor gallery.
-- Bind standard file callbacks to the active WebView, Origin and document. Cancel them on navigation or teardown and prevent old results from consuming a newer request. These changes require a future App release; the published Android 0.6.3 APK is unchanged.
+- Bind standard file callbacks to the active WebView, Origin and document. Cancel them on navigation or teardown and prevent old results from consuming a newer request. This native update is released independently from plugin 0.6.8 and preserves existing paired records.
+- On WebViews with navigation-listener support, settle file requests before replacing their document and pause new selection until all in-flight document navigations finish, including cancelled and non-committing navigations. This prevents a late cancellation from disabling the new page's file input. Older providers retain their available callbacks; update WebView or reopen the paired computer if selection still fails after changing pages.
+- Retain the package identity, established release signer, permission list and native pairing protocol. Thanks @Void-LifeStream for the attachment report in [#205](https://github.com/saya-ch/dsh-mobile/issues/205), and @xhwxt for the document-picker proposal in [#203](https://github.com/saya-ch/dsh-mobile/pull/203).
 
 ## 0.6.6 - 2026-10-14
 

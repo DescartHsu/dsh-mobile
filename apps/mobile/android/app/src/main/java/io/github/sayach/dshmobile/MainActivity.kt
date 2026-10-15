@@ -148,6 +148,8 @@ class MainActivity : Activity() {
     )
     private val webFileChooser = WebFileChooserGate<PendingWebFileChooser>(webFileChooserRequestCodes)
     private var fileChooserDocument = 0L
+    private var fileChooserNavigationListener: androidx.webkit.NavigationListener? = null
+    private val fileChooserTransitions = WebFileChooserTransitions<androidx.webkit.Navigation>()
     private var pendingDownload: PendingDownload? = null
     private var failureDialog: AlertDialog? = null
     private var retryUrl: String? = null
@@ -357,6 +359,7 @@ class MainActivity : Activity() {
 
     private fun handleNativeBack(browser: WebView?) {
         if (browser?.canGoBack() == true) {
+            cancelWebFileChooser()
             browser.goBack()
         } else if (setupBackAction != null) {
             setupBackAction?.invoke()
@@ -2408,8 +2411,27 @@ class MainActivity : Activity() {
             setAcceptThirdPartyCookies(browser, false)
         }
         fun ownsBrowser(): Boolean = webView === browser && gatewayOrigin == origin && !isFinishing && !isDestroyed
+        if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.NAVIGATION_LISTENER)) {
+            val listener = object : androidx.webkit.NavigationListener {
+                override fun onNavigationStarted(navigation: androidx.webkit.Navigation) {
+                    if (ownsBrowser() && !navigation.isSameDocument && fileChooserTransitions.begin(navigation)) {
+                        invalidateWebFileChooser()
+                    }
+                }
+
+                override fun onNavigationCompleted(navigation: androidx.webkit.Navigation) {
+                    if (ownsBrowser()) fileChooserTransitions.complete(navigation)
+                }
+            }
+            fileChooserNavigationListener = listener
+            // A posted cancellation can outlive the frame that owns its Chromium callback.
+            androidx.webkit.WebViewCompat.addNavigationListener(browser, java.util.concurrent.Executor { task -> task.run() }, listener)
+        }
         val secureClient = SecureWebViewClient(
             origin = origin,
+            onBeforeTopLevelNavigation = {
+                if (ownsBrowser() && fileChooserNavigationListener == null) cancelWebFileChooser()
+            },
             caCertificate = caCertificate,
             openExternal = { uri ->
                 if (ownsBrowser()) openExternal(uri)
@@ -2425,7 +2447,7 @@ class MainActivity : Activity() {
             },
             onTopLevelUrlChanged = {
                 if (ownsBrowser()) {
-                    invalidateWebFileChooser()
+                    if (fileChooserNavigationListener == null) invalidateWebFileChooser()
                     displayScale.onDocumentStarted()
                     cancelPendingWebBack()
                     pendingAudioPermission = null
@@ -2633,7 +2655,7 @@ class MainActivity : Activity() {
 
     private fun isCurrentFileChooser(owner: WebFileChooserOwner<WebView>): Boolean {
         val origin = gatewayOrigin ?: return false
-        return owner.matches(webView, origin.serialized, fileChooserDocument) && !isFinishing && !isDestroyed &&
+        return !fileChooserTransitions.active && owner.matches(webView, origin.serialized, fileChooserDocument) && !isFinishing && !isDestroyed &&
             GatewayUrlPolicy.isSameOrigin(origin, owner.browser.url.orEmpty())
     }
 
@@ -2827,7 +2849,10 @@ class MainActivity : Activity() {
                     recoverAutomatically()
                 } else {
                     val target = retryUrl ?: gatewayOrigin?.serialized
-                    if (target != null) webView?.loadUrl(target)
+                    if (target != null) {
+                        cancelWebFileChooser()
+                        webView?.loadUrl(target)
+                    }
                 }
             }
             .setNegativeButton(R.string.edit_connection) { _, _ ->
@@ -2849,6 +2874,9 @@ class MainActivity : Activity() {
         nativeBridge?.dispose(changingConfigurations)
         nativeBridge = null
         webView?.apply {
+            fileChooserNavigationListener?.let { androidx.webkit.WebViewCompat.removeNavigationListener(this, it) }
+            fileChooserNavigationListener = null
+            fileChooserTransitions.clear()
             if (!rendererGone) {
                 stopLoading()
                 webChromeClient = null

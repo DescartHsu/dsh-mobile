@@ -4,6 +4,8 @@
 
 > This provider ships from **0.4.2** onward.
 
+This guide covers the default **external proxy** mode, where you manage public HTTPS. To have the plugin install and manage Caddy and certificates instead, choose [Managed Caddy](CADDY_MANAGED.en.md) in the same panel. Its configuration and readiness checks are separate.
+
 ## When to use it
 
 Use an existing Lucky, Nginx or Caddy HTTPS proxy rather than a tunnel. Under **Mobile Access → Remote → Self-hosted connection → Own reverse proxy**, DSH Mobile creates a separate private HTTP backend with device authentication:
@@ -51,7 +53,7 @@ For a separate proxy host, configure routing and a firewall rule limited to its 
 
 ## State and phone verification
 
-**Backend listening proves the local listener only, not public HTTPS, certificates or WebSocket connectivity.** This provider's diagnostics do not probe the public origin.
+**Backend listening proves the local listener only, not public HTTPS, certificates or WebSocket connectivity.** External-proxy diagnostics do not probe the public origin.
 
 Generate a remote pairing QR code and use **Remote access** in Android app **0.4.0 or later**, not Local network. A publicly trusted origin also supports mobile-browser pairing. Verify from the intended external network:
 

@@ -216,6 +216,20 @@ jobs:
         run: npm install --global pnpm@10.10.0
       - run: npm ci
       - run: npm run verify
+      - name: Verify the published Caddy component through the default installer
+        if: matrix.node == '24.x'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          component_tag=caddy-component-2.11.7-tencentcloud-0.4.3-r1
+          component_target=$(node -p "process.platform + '-' + process.arch")
+          component_asset="caddy-2.11.7-tencentcloud-0.4.3-$component_target"
+          if [[ "$component_target" == win32-x64 ]]; then component_asset="$component_asset.exe"; fi
+          component_directory="$RUNNER_TEMP/caddy-default-source"
+          gh release download "$component_tag" --repo saya-ch/dsh-mobile --pattern "$component_asset" --dir "$component_directory"
+          DSH_CADDY_DEFAULT_TEST_EXECUTABLE="$component_directory/$component_asset" npx vitest run tests/caddy-default-source.test.ts --pool=threads --maxWorkers=1
       - name: Verify pinned Windows cpolar extraction without installer actions
         if: runner.os == 'Windows' && matrix.node == '24.x'
         run: npm run smoke:cpolar-component

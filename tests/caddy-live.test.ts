@@ -19,6 +19,7 @@ import { parseGatewayConfig } from '../src/config.js'
 import { MobileAccessGateway } from '../src/gateway.js'
 import { JsonDeviceStore } from '../src/storage.js'
 import { installedCaddyFixture } from './helpers/caddy-component-fixture.js'
+import { observeCaddyListener } from './helpers/caddy-listener.js'
 import { waitForCaddyTls } from './helpers/caddy-tls-ready.js'
 import { remoteGatewayConfig } from '../src/plugin.js'
 import { terminateRemoteProcess } from '../src/remote.js'
@@ -41,25 +42,6 @@ afterEach(async () => {
   }
   if (errors.length > 0) throw new AggregateError(errors, 'Owned live-fixture cleanup failed')
 }, 60_000)
-
-/** Observe only the spawned Caddy process's atomically allocated TCP listener. */
-async function ownedPort(pid: number, signal: AbortSignal): Promise<number> {
-  signal.throwIfAborted()
-  if (process.platform === 'win32') {
-    const systemRoot = process.env.SystemRoot
-    if (systemRoot === undefined) throw new Error('Windows system root missing')
-    const output = await execFileText(join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-      ['-NoProfile', '-NonInteractive', '-Command', `(Get-NetTCPConnection -State Listen -OwningProcess ${String(pid)} -ErrorAction SilentlyContinue | Where-Object LocalAddress -eq '127.0.0.1' | Select-Object -ExpandProperty LocalPort) -join ','`], { timeout: 10_000, signal })
-    const ports = output.stdout.trim().split(',').filter(Boolean).map(Number)
-    if (ports.length !== 1 || !Number.isInteger(ports[0])) throw new Error('Owned Caddy listener is not ready')
-    return ports[0]!
-  }
-  const output = await execFileText('ss', ['-ltnp'], { timeout: 10_000, signal })
-  const line = output.stdout.split(/\r?\n/u).find(value => value.includes('pid=' + String(pid) + ',') && value.includes('127.0.0.1:'))
-  const port = Number(line?.match(/127\.0\.0\.1:(\d+)/u)?.[1])
-  if (!Number.isInteger(port) || port < 1) throw new Error('Owned Caddy listener is not ready')
-  return port
-}
 
 function exchange(signal: AbortSignal, port: number, ca: string, path: string, method = 'GET', headers: Record<string, string> = {}, body = '', idleTimeoutMs = 10_000): Promise<{ status: number; headers: IncomingHttpHeaders; body: string; rawBody: Buffer; receivedAt: number[] }> {
   return new Promise((resolve, reject) => {
@@ -142,11 +124,14 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   const body = async (): Promise<void> => {
   const childLogs = new Map<string, string>()
   const diagnostics = (): string => [...childLogs].map(([name, text]) => name + ': ' + text).join('\n').slice(-8192)
-  const captureChild = (name: string, child: ChildProcessWithoutNullStreams): void => {
+  const captureChild = (name: string, child: ChildProcessWithoutNullStreams): ReturnType<typeof observeCaddyListener> => {
+    const listener = observeCaddyListener(child)
+    cleanups.push(async () => { listener.dispose() })
     childLogs.set(name, '')
     child.stdout.resume()
     child.stderr.on('data', (chunk: Buffer) => { childLogs.set(name, (childLogs.get(name)! + chunk.toString()).slice(-8192)) })
     child.stdin.end()
+    return listener
   }
   const step = async <T>(operation: () => Promise<T>): Promise<T> => {
     signal.throwIfAborted()
@@ -297,7 +282,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
     .replace('{\n', '{\n\tskip_install_trust\n\tservers {\n\t\tprotocols h1 h2\n\t}\n')
     .replace('https://phone.example.com:8443 {', 'https://phone.example.com:0 {\n\tbind 127.0.0.1')
     .replace(/\ttls \{\n\t\tdns tencentcloud \{[\s\S]*?\n\t\t\}\n\t\}/u, '\ttls internal')
-    .replace('output discard', 'output stderr')
+    .replace('output discard', 'output stderr\n\t\tformat json')
   const testConfig = join(config.rootDirectory, 'Caddyfile.internal-test')
   await step(() => writeFile(testConfig, internal, { mode: 0o600 }))
   expect(internal).toContain('\tskip_install_trust\n')
@@ -323,17 +308,10 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   signal.throwIfAborted()
   const child = spawn(executable, ['run', '--config', testConfig, '--adapter', 'caddyfile'], { env: environment, shell: false, windowsHide: true, stdio: 'pipe' })
   const stopChild = ownChild(child)
-  captureChild('initial', child)
+  const initialListener = captureChild('initial', child)
   await step(() => once(child, 'spawn', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }))
   if (child.pid === undefined) throw new Error('Missing child PID')
-  let port = 0
-  try {
-    await vi.waitFor(async () => {
-      if (child.exitCode !== null) throw new Error('Caddy exited: ' + String(child.exitCode))
-      port = await step(() => ownedPort(child.pid!, signal))
-    }, { timeout: 20_000, interval: 100 })
-    signal.throwIfAborted()
-  } catch (error) { throw new Error('Caddy listener startup failed: ' + diagnostics(), { cause: error }) }
+  let port = await phaseStep('initial listener', () => initialListener.wait({ signal, timeoutMs: 20_000 }))
   let ca = ''
   await step(() => vi.waitFor(async () => { ca = await step(() => readFile(join(config.dataDirectory, 'pki', 'authorities', 'local', 'root.crt'), 'utf8')) }, { timeout: 10_000 }))
   await phaseStep('initial TLS readiness', () => waitForCaddyTls({ port, ca, servername: 'phone.example.com', signal,
@@ -448,10 +426,10 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
   signal.throwIfAborted()
   const restartedChild = spawn(executable, ['run', '--config', testConfig, '--adapter', 'caddyfile'], { env: environment, shell: false, windowsHide: true, stdio: 'pipe' })
   const stopRestartedChild = ownChild(restartedChild)
-  captureChild('restart', restartedChild)
+  const restartedListener = captureChild('restart', restartedChild)
   await step(() => once(restartedChild, 'spawn', { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }))
   if (restartedChild.pid === undefined) throw new Error('Missing restarted child PID')
-  await phaseStep('restart listener', () => vi.waitFor(async () => { port = await step(() => ownedPort(restartedChild.pid!, signal)) }, { timeout: 20_000, interval: 100 }))
+  port = await phaseStep('restart listener', () => restartedListener.wait({ signal, timeoutMs: 20_000 }))
   await phaseStep('restart TLS readiness', () => waitForCaddyTls({ port, ca, servername: 'phone.example.com', signal,
     timeoutMs: 20_000, intervalMs: 100, isRunning: () => restartedChild.exitCode === null && restartedChild.signalCode === null }))
   expect((await phaseStep('restart authenticated API', () => exchange(signal, port, ca, '/api/caddy-test-resource', 'GET', { cookie: cookie! }))).rawBody).toEqual(Buffer.from([0, 1, 2, 250]))
@@ -479,6 +457,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
     await step(() => component.initialize())
     expect(component.status().installed).toBe(true)
     let controlledChild: ChildProcess | undefined
+    let controlledListener: { child: ChildProcess; receipt: ReturnType<typeof observeCaddyListener> } | undefined
     let tlsReadyChild: ChildProcess | undefined
     let controlledPort = 0
     const managed = new CaddyController({ component, config, store: createVolatileRemoteControlStore(),
@@ -494,6 +473,7 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
         const controlledInternal = generated.replace('{\n', '{\n\tskip_install_trust\n\tservers {\n\t\tprotocols h1\n\t}\n')
           .replace('https://phone.example.com:8443 {', 'https://phone.example.com:0 {\n\tbind 127.0.0.1')
           .replace(/\ttls \{\n\t\tdns tencentcloud \{[\s\S]*?\n\t\t\}\n\t\}/u, '\ttls internal')
+          .replace('output discard', 'output stderr\n\t\tformat json')
         expect(controlledInternal).toContain('\ttls internal\n')
         expect(controlledInternal).not.toMatch(/dns|acme|tencentcloud|8443/iu)
         await writeFile(file, controlledInternal, { mode: 0o600 })
@@ -503,14 +483,16 @@ it.runIf(inputExecutable !== undefined || manifestFile !== undefined)('runs opti
       spawnProcess: (binary, args, childEnvironment) => {
         const acquired = spawn(binary, [...args], { env: childEnvironment, shell: false, windowsHide: true, stdio: 'pipe' })
         controlledChild = acquired
-        captureChild('managed', acquired)
+        controlledListener = { child: acquired, receipt: captureChild('managed', acquired) }
         ownChild(acquired)
         return acquired
       },
       probeDiscovery: async (_publicOrigin, expected, probeSignal) => {
         const activeChild = controlledChild
         if (activeChild?.pid === undefined) return false
-        controlledPort = await ownedPort(activeChild.pid, probeSignal)
+        const listener = controlledListener
+        if (listener?.child !== activeChild) throw new Error('Missing owned Caddy listener observer')
+        controlledPort = await phaseStep('managed listener', () => listener.receipt.wait({ signal: probeSignal, timeoutMs: 20_000 }))
         if (tlsReadyChild !== activeChild) {
           await phaseStep('managed TLS readiness', () => waitForCaddyTls({ port: controlledPort, ca, servername: 'phone.example.com',
             signal: probeSignal, timeoutMs: 20_000, intervalMs: 100,

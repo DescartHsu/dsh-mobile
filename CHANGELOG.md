@@ -2,11 +2,13 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
-## Unreleased
+## 0.6.9 - 2026-10-15
 
+- Enable optional managed Caddy installation on Windows/Linux x64 with independently verified official component URLs, lengths and SHA-256 pins. Tencent Cloud DNSPod credentials, a domain and reachable public ingress are required; existing Cloudflared tunnels and external proxies remain available. Thanks @abworks-dev for the original managed-Caddy contributions in [#176](https://github.com/saya-ch/dsh-mobile/pull/176), [#184](https://github.com/saya-ch/dsh-mobile/pull/184), [#185](https://github.com/saya-ch/dsh-mobile/pull/185) and [#190](https://github.com/saya-ch/dsh-mobile/pull/190).
 - Refresh managed Caddy component inputs to Caddy 2.11.7, Go 1.26.9 and an explicit golang.org/x/net 0.60.0 pin, retaining exact source, checksum and embedded dependency checks.
 - Use explicit single-maintainer manual component publication instead of mandatory second-person approval. Preserve exact tag/source binding, same-run Windows/Linux native gates, draft/public asset verification and occupied-release protection; component publication does not publish npm or Android automatically.
 - Cancel and drain accepted Caddy component work during plugin unload, retain recoverable files on failure, and wait for the owned Caddy process's actual close event before releasing it. Failed cleanup remains visible and retryable.
+- Cover native CaddyController startup/shutdown and HTTP/1.1/HTTP/2 POST responses that remain quiet for more than 60 seconds, including exact response bytes and one upstream request per operation. These isolated checks do not establish public DNS-01 issuance or certificate renewal for the fixed component.
 - Document scoped custom CSS selectors and same-page comparisons before applying older overrides. Current header behavior is retained rather than hiding working actions. Thanks @Void-LifeStream for [#219](https://github.com/saya-ch/dsh-mobile/issues/219).
 - Android App remains the independently published 0.6.4 (build 80); these changes do not require another APK.
 

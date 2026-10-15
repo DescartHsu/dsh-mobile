@@ -19,6 +19,7 @@ on:
       - 'scripts/caddy-component-lock.json'
       - 'tests/helpers/caddy-component-fixture.ts'
       - 'tests/helpers/caddy-tls-ready.ts'
+      - 'tests/helpers/caddy-listener.ts'
       - 'tests/helpers/caddy-release-fetch-preload.mjs'
       - '.github/workflows/caddy-component.yml'
       - 'src/caddy*.ts'
@@ -74,7 +75,7 @@ jobs:
         env:
           DSH_CADDY_TEST_EXECUTABLE: ${{ runner.temp }}/caddy-component/${{ matrix.executable }}
           DSH_CADDY_TEST_MANIFEST: ${{ runner.temp }}/caddy-component/manifest.json
-        run: npx vitest run tests/caddy.test.ts tests/caddy-component-shutdown.test.ts tests/caddy-controller.test.ts tests/caddy-mode.test.ts tests/caddy-file-lifecycle.test.ts tests/caddy-live.test.ts tests/caddy-tls-ready.test.ts tests/caddy-build-inputs.test.ts tests/caddy-artifacts.test.ts tests/caddy-buffer-comparison.test.ts tests/caddy-publication.test.ts
+        run: npx vitest run tests/caddy.test.ts tests/caddy-default-source.test.ts tests/caddy-component-shutdown.test.ts tests/caddy-controller.test.ts tests/caddy-mode.test.ts tests/caddy-file-lifecycle.test.ts tests/caddy-live.test.ts tests/caddy-listener.test.ts tests/caddy-tls-ready.test.ts tests/caddy-build-inputs.test.ts tests/caddy-artifacts.test.ts tests/caddy-buffer-comparison.test.ts tests/caddy-publication.test.ts
       - name: Install pinned pnpm for existing Windows updater smoke test
         if: runner.os == 'Windows'
         run: npm install --global pnpm@10.10.0

@@ -24,6 +24,7 @@ import { HOST_CSRF_COOKIE, HOST_DEVICE_COOKIE, HOST_SESSION_COOKIE } from '../sr
 import { MemoryDeviceStore } from '../src/storage.js'
 import { DSH_MOBILE_VERSION, MINIMUM_ANDROID_APP_VERSION } from '../src/version.js'
 import { createTestTlsChain } from './tls-fixtures.js'
+import { acquireUdpDiscoveryGateway } from './udp-discovery-fixture.js'
 
 interface HttpResult {
   readonly status: number
@@ -112,9 +113,10 @@ async function request(
   return beginRequest(port, path, options).result
 }
 
-async function udpDiscovery(port: number): Promise<Record<string, unknown>> {
+async function udpDiscovery(instance: MobileAccessGateway): Promise<Record<string, unknown>> {
+  const port = instance.address().port
   const client = createSocket('udp4')
-  return new Promise((resolve, reject) => {
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
     let settled = false
     let retry: ReturnType<typeof setInterval> | undefined
     const finish = (complete: () => void): void => {
@@ -145,6 +147,8 @@ async function udpDiscovery(port: number): Promise<Record<string, unknown>> {
       send()
       retry = setInterval(send, 250)
     })
+  }).catch(error => {
+    throw new Error(`UDP discovery failed on port ${port}: ${JSON.stringify(instance.discoveryStatus())}`, { cause: error })
   })
 }
 
@@ -1612,7 +1616,8 @@ describe('HTTP gateway', () => {
   it('discovers one instance and renews a native long-lived device credential', async () => {
     const inner = await upstream()
     const instanceId = 'a'.repeat(64)
-    const instance = await gateway(inner.port, { instanceId })
+    const instance = await acquireUdpDiscoveryGateway(observe =>
+      gateway(inner.port, { instanceId }, undefined, undefined, [], undefined, observe))
     const discovered = await request(instance.address().port, '/mobile-access/discovery', {
       headers: { host: new URL(instance.address().origin).host },
     })
@@ -1624,9 +1629,7 @@ describe('HTTP gateway', () => {
       protocol: 1,
       instanceId,
     })
-    const discovery = await udpDiscovery(instance.address().port).catch(error => {
-      throw new Error(`UDP discovery failed: ${JSON.stringify(instance.discoveryStatus())}`, { cause: error })
-    })
+    const discovery = await udpDiscovery(instance)
     expect(discovery).toEqual({
       deviceName: expect.any(String),
       origin: instance.address().origin,
@@ -1805,12 +1808,12 @@ describe('HTTP gateway', () => {
     const files = await tlsFixtureFiles()
     const root = new X509Certificate(await readFile(files.root))
     const instanceId = root.fingerprint256.replaceAll(':', '').toLowerCase()
-    const instance = await gateway(inner.port, {
+    const instance = await acquireUdpDiscoveryGateway(observe => gateway(inner.port, {
       instanceId,
       pairingCaFile: files.root,
       tls: { mode: 'provided', certFile: files.leaf, keyFile: files.key, caFile: files.intermediate },
-    })
-    const discovered = await udpDiscovery(instance.address().port)
+    }, undefined, undefined, [], undefined, observe))
+    const discovered = await udpDiscovery(instance)
     expect(Object.keys(discovered).sort()).toEqual(['deviceName', 'instanceId', 'origin', 'port', 'protocol'])
     const certificate = await trustedHttpsRequest(instance.address().port, '/mobile-access/ca.cer', await readFile(files.root, 'utf8'))
     expect(certificate.status).toBe(200)

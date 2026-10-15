@@ -3,69 +3,11 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { execFileText } from '../src/exec-file.js'
-import { cpolarWindowsSystemTool, extractWindowsMsiArchive } from '../src/windows-msi-extract.js'
-
-interface ZipEntryFixture {
-  readonly name: string
-  readonly bytes: number
-  readonly attributes?: number
-}
-
-// ZIP names are metadata only: this writer never extracts an entry or starts MSI actions.
-// Owned paths and entry fields cross through JSON in an environment variable, not script text.
-const CREATE_FIXTURE_ZIP = String.raw`
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-Add-Type -AssemblyName System.IO.Compression
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$spec = ConvertFrom-Json $env:DSH_MSI_NATIVE_ZIP_FIXTURE
-$zipFileStream = [System.IO.File]::Open($spec.archive, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
-try {
-  $zipWriter = New-Object System.IO.Compression.ZipArchive($zipFileStream, [System.IO.Compression.ZipArchiveMode]::Create, $true)
-  try {
-    $buffer = New-Object byte[] 65536
-    foreach ($entrySpec in $spec.entries) {
-      $entry = $zipWriter.CreateEntry($entrySpec.name, [System.IO.Compression.CompressionLevel]::Optimal)
-      if ($null -ne $entrySpec.attributes) { $entry.ExternalAttributes = [int]$entrySpec.attributes }
-      $fixtureEntryStream = $entry.Open()
-      try {
-        [long]$remaining = $entrySpec.bytes
-        while ($remaining -gt 0) {
-          [int]$count = [Math]::Min([long]$buffer.Length, $remaining)
-          $fixtureEntryStream.Write($buffer, 0, $count)
-          $remaining -= $count
-        }
-      } finally { $fixtureEntryStream.Dispose() }
-    }
-  } finally { $zipWriter.Dispose() }
-} finally { $zipFileStream.Dispose() }
-$zipReader = [System.IO.Compression.ZipFile]::OpenRead($spec.archive)
-try {
-  $entries = @($zipReader.Entries | ForEach-Object { [PSCustomObject]@{ name = $_.FullName; bytes = $_.Length; attributes = $_.ExternalAttributes } })
-  [PSCustomObject]@{ entries = $entries } | ConvertTo-Json -Depth 4 -Compress
-} finally { $zipReader.Dispose() }
-`
+import { extractWindowsMsiArchive } from '../src/windows-msi-extract.js'
+import { writeWindowsMsiZipFixture as createZip, type WindowsMsiZipEntryFixture as ZipEntryFixture } from './helpers/windows-msi-zip-fixture.js'
 
 const prefix = 'dsh-mobile-native-zip-negative-'
 const digest = (value: Uint8Array): string => createHash('sha256').update(value).digest('hex')
-
-async function createZip(archive: string, entries: readonly ZipEntryFixture[]): Promise<void> {
-  const { stdout } = await execFileText(cpolarWindowsSystemTool('powershell.exe'), [
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(CREATE_FIXTURE_ZIP, 'utf16le').toString('base64'),
-  ], { windowsHide: true, timeout: 30_000, maxBuffer: 32_768,
-    env: { ...process.env, DSH_MSI_NATIVE_ZIP_FIXTURE: JSON.stringify({ archive, entries }) } })
-  const value: unknown = JSON.parse(stdout.trim())
-  if (value === null || typeof value !== 'object' || !('entries' in value) || !Array.isArray(value.entries)) throw new Error('Invalid native ZIP fixture receipt')
-  const observed = value.entries.map((entry: unknown) => {
-    if (entry === null || typeof entry !== 'object' || !('name' in entry) || typeof entry.name !== 'string'
-      || !('bytes' in entry) || typeof entry.bytes !== 'number' || !('attributes' in entry) || typeof entry.attributes !== 'number') throw new Error('Invalid native ZIP fixture metadata')
-    return { name: entry.name, bytes: entry.bytes, attributes: entry.attributes }
-  })
-  expect(observed.map(({ name, bytes }) => ({ name, bytes }))).toEqual(entries.map(({ name, bytes }) => ({ name, bytes })))
-  for (const [index, entry] of entries.entries()) if (entry.attributes !== undefined) expect(observed[index]?.attributes).toBe(entry.attributes)
-}
 
 async function withOwnedFixture(operation: (archive: string, destination: string, sentinel: string) => Promise<void>): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), prefix))

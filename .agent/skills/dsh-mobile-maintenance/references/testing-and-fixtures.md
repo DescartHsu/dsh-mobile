@@ -47,6 +47,8 @@ The shared [negative-control helper](../../../../scripts/negative-control.mjs) e
 
 Verify effects rather than self-reports. For a rejected response, observe cancellation or stream closure and listener release, not merely HTTP 500. For an interrupted operation, distinguish withdrawn callbacks from already completed writes; cancellation is not rollback and does not justify automatic replay.
 
+A native consumer test need not use an OS subprocess to construct its input. The [controlled ZIP fixtures](../../../../tests/helpers/windows-msi-zip-fixture.ts) use Node for preparation and verify the persisted metadata, actual deflated payload and CRC before the [real Windows reader](../../../../tests/windows-msi-zip-native.test.ts) runs. Preserve unsafe names, duplicate entries, attributes and actual oversized payloads; arbitrary corrupt ZIP bytes do not establish those specific rejection paths.
+
 ## Investigate without masking the failure
 
 Keep the failing artifact, runtime and configuration stable while changing one suspected resource owner. Start with the smallest relevant topology; run independent processes concurrently when the claimed fix is cross-process isolation. Repeated successful runs cannot replace a controlled race or erase an earlier unexplained failure.

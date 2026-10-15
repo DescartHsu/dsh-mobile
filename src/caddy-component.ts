@@ -7,9 +7,9 @@ import { execFileText } from './exec-file.js'
 
 export const CADDY_VERSION = '2.11.7'
 export const CADDY_DNS_PLUGIN_VERSION = 'v0.4.3'
-export const CADDY_DOWNLOAD_PAGE = 'https://caddyserver.com/download'
+export const CADDY_DOWNLOAD_PAGE = 'https://github.com/saya-ch/dsh-mobile/releases/tag/caddy-component-2.11.7-tencentcloud-0.4.3-r1'
 
-/** An immutable release asset with independent wire and installed-byte checks. */
+/** A size- and content-pinned release asset with independent wire and installed-byte checks. */
 export interface CaddyArtifact {
   readonly version: string
   readonly platform: NodeJS.Platform
@@ -23,9 +23,23 @@ export interface CaddyArtifact {
   readonly dnsPluginVersion: string
 }
 
-// The custom-download service returned v2.11.7 when v2.11.6 was requested.
-// Production installation stays disabled until immutable assets have been published and verified.
-export const CADDY_COMPONENT_RELEASES: Readonly<Record<string, CaddyArtifact>> = Object.freeze({})
+// Only independently verified official assets enter this source-owned catalog.
+export const CADDY_COMPONENT_RELEASES: Readonly<Record<string, CaddyArtifact>> = Object.freeze({
+  'linux-x64': Object.freeze({
+    version: CADDY_VERSION, dnsPluginVersion: CADDY_DNS_PLUGIN_VERSION, platform: 'linux', arch: 'x64', executableName: 'caddy',
+    downloadUrl: 'https://github.com/saya-ch/dsh-mobile/releases/download/caddy-component-2.11.7-tencentcloud-0.4.3-r1/caddy-2.11.7-tencentcloud-0.4.3-linux-x64',
+    downloadBytes: 81_995_704, executableBytes: 81_995_704,
+    downloadSha256: '13652ef9ea3792ebff772a5b873ade63ed6de1c0a794bb3403a523639b8f57af',
+    executableSha256: '13652ef9ea3792ebff772a5b873ade63ed6de1c0a794bb3403a523639b8f57af',
+  }),
+  'win32-x64': Object.freeze({
+    version: CADDY_VERSION, dnsPluginVersion: CADDY_DNS_PLUGIN_VERSION, platform: 'win32', arch: 'x64', executableName: 'caddy.exe',
+    downloadUrl: 'https://github.com/saya-ch/dsh-mobile/releases/download/caddy-component-2.11.7-tencentcloud-0.4.3-r1/caddy-2.11.7-tencentcloud-0.4.3-win32-x64.exe',
+    downloadBytes: 82_816_000, executableBytes: 82_816_000,
+    downloadSha256: '962f7937a06e1e737513d2d1d4ad75df54ba503d36fa2a458912bd38fbd0094a',
+    executableSha256: '962f7937a06e1e737513d2d1d4ad75df54ba503d36fa2a458912bd38fbd0094a',
+  }),
+})
 export const CADDY_COMPONENT_RELEASE = Object.freeze({ version: CADDY_VERSION, dnsPluginVersion: CADDY_DNS_PLUGIN_VERSION })
 export type CaddyDnsProvider = 'tencentcloud'
 

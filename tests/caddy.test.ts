@@ -98,8 +98,8 @@ describe('managed Caddy configuration', () => {
 })
 
 describe('managed Caddy components', () => {
-  it('keeps production disabled until an immutable versioned artifact has been published', async () => {
-    const root = await directory(); const component = new CaddyComponentManager({ stateDirectory: root, platform: 'win32', arch: 'x64' })
+  it('refuses installation on an unsupported platform', async () => {
+    const root = await directory(); const component = new CaddyComponentManager({ stateDirectory: root, platform: 'darwin', arch: 'arm64' })
     await component.initialize()
     expect(component.status()).toMatchObject({ installed: false, supported: false, errorCode: 'caddy_component_unavailable' })
     await expect(component.install()).rejects.toThrow('caddy_component_unavailable')

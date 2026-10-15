@@ -233,6 +233,7 @@ describe('review component artifact binding', () => {
     const publicUrl = (name: string) => `https://github.com/${repository}/releases/download/${tag}/${name}`
     const redirectUrl = (name: string) => `https://release-assets.githubusercontent.com/test/${name}?signed=synthetic`
     const productionBefore = await readFile(fileURLToPath(new URL('../src/caddy-component.ts', import.meta.url)))
+    const catalogBefore = structuredClone(CADDY_COMPONENT_RELEASES)
     const cases: [string, string | undefined][] = [
       ['valid', undefined], ['preexisting-output', 'EEXIST'],
       ...(channel === 'official' ? [['latest404', undefined], ['latest-component', 'Official component must not be latest'],
@@ -317,7 +318,7 @@ describe('review component artifact binding', () => {
         ])
       }
     }
-    expect(CADDY_COMPONENT_RELEASES).toEqual({})
+    expect(CADDY_COMPONENT_RELEASES).toEqual(catalogBefore)
     expect(await readFile(fileURLToPath(new URL('../src/caddy-component.ts', import.meta.url)))).toEqual(productionBefore)
   }, 60_000)
   it.runIf(process.platform !== 'win32')('refuses symlinked metadata rather than reading its target', async () => {

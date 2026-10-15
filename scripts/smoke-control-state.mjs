@@ -266,7 +266,7 @@ async function withControl(browser, name, options, run) {
       external: page.locator('input[name="caddy-mode"][value="external"]'),
       caddySave: page.getByRole('button', { name: 'Save and start Caddy', exact: true, includeHidden: true }),
       caddyDomain: page.getByLabel('Public domain', { exact: true }),
-      caddyPort: page.getByLabel('Public HTTPS port', { exact: true }),
+      caddyPort: page.getByLabel('Local HTTPS port', { exact: true }),
       caddySecretId: page.getByLabel('Tencent Cloud SecretId', { exact: true }),
       caddySecretKey: page.getByLabel('Tencent Cloud SecretKey', { exact: true }),
       originPublic: page.getByLabel('Public HTTPS address', { exact: true }),

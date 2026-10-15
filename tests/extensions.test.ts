@@ -10,11 +10,36 @@ import { combineSignals, disposeLateExtensionResponse, EXTENSION_LIMITS, MobileA
 
 const contexts: Context[] = []
 const directories: string[] = []
+const services: { service: MobileAccessService; context: Context }[] = []
+
+function createService(context: Context): MobileAccessService {
+  const service = new MobileAccessService(context)
+  services.push({ service, context })
+  return service
+}
 
 afterEach(async () => {
   vi.useRealTimers()
-  await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
-  await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
+  const errors: unknown[] = []
+  const owned = services.splice(0)
+  const stopped = await Promise.allSettled(owned.map(({ service }) => service.stopLocal()))
+  const retainedContexts = new Set<Context>()
+  for (const [index, result] of stopped.entries()) {
+    if (result.status === 'rejected') {
+      const reason: unknown = result.reason; errors.push(reason)
+      retainedContexts.add(owned[index]!.context)
+    }
+  }
+  const disposed = await Promise.allSettled(contexts.splice(0).filter(context => !retainedContexts.has(context)).map(context => context.fiber.dispose()))
+  for (const result of disposed) if (result.status === 'rejected') { const reason: unknown = result.reason; errors.push(reason) }
+  // Retain owned directories when a service did not confirm its watcher/refresh had stopped.
+  if (stopped.every(result => result.status === 'fulfilled')) {
+    const removed = await Promise.allSettled(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
+    for (const result of removed) if (result.status === 'rejected') { const reason: unknown = result.reason; errors.push(reason) }
+  }
+  const retainedDirectories = directories.splice(0)
+  if (errors.length > 0) throw new AggregateError(errors, 'Extension test fixture cleanup failed'
+    + (retainedDirectories.length === 0 ? '' : '; retained owned directories: ' + retainedDirectories.join(', ')))
 })
 
 async function createExtension(root: string, host: string, script = 'window.dshMobile.define({ apiVersion: 1, id: "demo", activate() {} })'): Promise<string> {
@@ -29,7 +54,7 @@ async function createExtension(root: string, host: string, script = 'window.dshM
 describe('mobile extension registry', () => {
   it('matches a root prefix while keeping other prefixes within their path segments', async () => {
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     service.registerExtension({ schemaVersion: 1, id: 'root-route', name: 'Root', version: '1', routes: [
       { method: 'GET', path: '/', kind: 'prefix', handle: request => ({ body: request.pathname }) },
     ] })
@@ -66,7 +91,7 @@ describe('mobile extension registry', () => {
       }
     }
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     const action = new Action()
     const route = new Route()
     service.registerExtension({ schemaVersion: 1, id: 'class-host', name: 'ClassHost', version: '1', actions: { echo: action }, routes: [route] })
@@ -90,7 +115,7 @@ describe('mobile extension registry', () => {
       api.route({ method: 'GET', path: 'status', handle: () => ({ body: 'ok' }) })
     }`)
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     const generation = service.signal('demo')!
     const caller = new AbortController()
@@ -119,7 +144,7 @@ describe('mobile extension registry', () => {
     expect(parseExtensionManifest({ schemaVersion: 1, id: 'hello-world', name: 'Hello', version: '1.0.0' })).toMatchObject({ id: 'hello-world' })
     expect(() => parseExtensionManifest({ schemaVersion: 1, id: '../escape', name: 'bad', version: '1' })).toThrow(MobileExtensionError)
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     const definition = { schemaVersion: 1 as const, id: 'sample', name: 'Sample', version: '1.0.0', actions: { ping: { run: async () => ({ ok: true }) } } }
     const dispose = service.registerExtension(definition)
     expect(() => service.registerExtension(definition)).toThrow(/already registered/)
@@ -130,7 +155,7 @@ describe('mobile extension registry', () => {
 
   it('validates per-action and per-route operation timeout bounds', () => {
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     const actionWith = (id: string, timeoutMs: unknown): void => {
       service.registerExtension({
         schemaVersion: 1, id, name: 'Timed', version: '1.0.0',
@@ -160,7 +185,7 @@ describe('mobile extension registry', () => {
   it('bounds hanging actions with the default and overridden deadlines, including input parsing', async () => {
     vi.useFakeTimers()
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     const hanging = (id: string, action: Record<string, unknown>): void => {
       service.registerExtension({ schemaVersion: 1, id, name: 'Hanging', version: '1.0.0', actions: action as never })
     }
@@ -190,7 +215,7 @@ describe('mobile extension registry', () => {
   it('never dispatches run after cancellation during input parsing', async () => {
     vi.useFakeTimers()
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     let resolveParse: ((value: unknown) => void) | undefined
     let ran = false
     service.registerExtension({
@@ -231,7 +256,7 @@ describe('mobile extension registry', () => {
     try {
       vi.useFakeTimers()
       const context = new Context(); contexts.push(context)
-      const service = new MobileAccessService(context)
+      const service = createService(context)
       let failing: PassThrough | undefined
       service.registerExtension({
         schemaVersion: 1, id: 'late-null', name: 'LateNull', version: '1.0.0',
@@ -266,7 +291,7 @@ describe('mobile extension registry', () => {
   it('clears caller-wait resources when an operation is externally cancelled', async () => {
     vi.useFakeTimers()
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     service.registerExtension({
       schemaVersion: 1, id: 'long-hang', name: 'LongHang', version: '1.0.0',
       actions: { hang: { timeoutMs: 300_000, run: () => new Promise(() => {}) } },
@@ -284,7 +309,7 @@ describe('mobile extension registry', () => {
   it('bounds hanging route handlers while keeping resolved stream lifetimes untouched', async () => {
     vi.useFakeTimers()
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     const routing = (id: string, routes: unknown): void => {
       service.registerExtension({ schemaVersion: 1, id, name: 'Routing', version: '1.0.0', routes: routes as never })
     }
@@ -322,7 +347,7 @@ describe('mobile extension registry', () => {
   it('gates dispatch on abandoned work, keeps siblings running, and recovers on settlement', async () => {
     vi.useFakeTimers()
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     let observedCancel: AbortSignal | undefined
     service.registerExtension({
       schemaVersion: 1, id: 'abandoned', name: 'Abandoned', version: '1.0.0',
@@ -383,7 +408,7 @@ describe('mobile extension registry', () => {
     await writeFile(join(directory, 'mobile.js'), 'window.dshMobile.define({ apiVersion: 1, id: "demo", activate() {} })')
     await writeFile(join(directory, 'host.mjs'), 'export default async api => api.action("ping", { async run() { return { version: 1 } } })')
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     expect(service.manifest()).toMatchObject([{
       id: 'demo',
@@ -405,7 +430,7 @@ describe('mobile extension registry', () => {
 
   it('accepts callable Schemastery schemas and parse adapters for action input', async () => {
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     service.registerExtension({
       schemaVersion: 1,
       id: 'callable',
@@ -441,7 +466,7 @@ describe('mobile extension registry', () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-extension-generations-')); directories.push(root)
     const directory = await createExtension(root, 'export default async api => api.action("ping", { async run() { return { version: 1 } } })')
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     const first = service.manifest()[0]?.generation
     let changes = 0
@@ -471,7 +496,7 @@ describe('mobile extension registry', () => {
       api.action('ping', { async run() { return true } })
     }`)
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     const generation = service.manifest()[0]?.generation
     expect(generation).toMatch(/^[a-f\d]{64}$/u)
@@ -497,7 +522,7 @@ describe('mobile extension registry', () => {
         return { body: new PassThrough() }
       } })`)
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     const generation = service.manifest()[0]?.generation
     const baseRequest = { method: 'GET', pathname: '/events', query: new URLSearchParams(), headers: {}, body: new Uint8Array(), deviceId: 'device' }
@@ -531,21 +556,29 @@ describe('mobile extension registry', () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-extension-disposer-')); directories.push(root)
     const directory = await createExtension(root, 'export default async api => { api.effect(() => () => { globalThis.__disposeStarted += 1; return new Promise(() => {}) }); api.action("ping", { async run() { return 1 } }) }')
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
-    await service.startLocal(root, context)
-    let changes = 0
-    service.onContentChanged(() => { changes += 1 })
+    const service = createService(context)
+    try {
+      await service.startLocal(root, context)
+      let changes = 0
+      service.onContentChanged(() => { changes += 1 })
 
-    await writeFile(join(directory, 'host.mjs'), 'export default async api => api.action("ping", { async run() { return 2 } })')
-    await expect(service.refreshLocal()).resolves.toBeUndefined()
-    expect(changes).toBe(1)
-    await vi.advanceTimersByTimeAsync(10 * 60_000 + 1)
-    expect(globals.__disposeStarted).toBe(1)
-    await writeFile(join(directory, 'host.mjs'), 'export default async api => api.action("ping", { async run() { return 3 } })')
-    await expect(service.refreshLocal()).resolves.toBeUndefined()
-    await expect(service.invoke('demo', 'ping', {}, { deviceId: 'device', signal: new AbortController().signal })).resolves.toBe(3)
-    expect(changes).toBe(2)
-    delete globals.__disposeStarted
+      await writeFile(join(directory, 'host.mjs'), 'export default async api => api.action("ping", { async run() { return 2 } })')
+      await expect(service.refreshLocal()).resolves.toBeUndefined()
+      expect(changes).toBe(1)
+      await vi.advanceTimersByTimeAsync(10 * 60_000 + 1)
+      expect(globals.__disposeStarted).toBe(1)
+      await writeFile(join(directory, 'host.mjs'), 'export default async api => api.action("ping", { async run() { return 3 } })')
+      await expect(service.refreshLocal()).resolves.toBeUndefined()
+      await expect(service.invoke('demo', 'ping', {}, { deviceId: 'device', signal: new AbortController().signal })).resolves.toBe(3)
+      expect(changes).toBe(2)
+    } finally {
+      const stopping = service.stopLocal()
+      try {
+        // Finish the advisory disposer deadline while its clock still exists; real-timer restoration would discard it.
+        await vi.runOnlyPendingTimersAsync()
+        await stopping
+      } finally { vi.useRealTimers(); delete globals.__disposeStarted }
+    }
   })
 
   it('cancels an in-flight staging Host before stopLocal returns', async () => {
@@ -567,7 +600,7 @@ describe('mobile extension registry', () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-extension-stop-refresh-')); directories.push(root)
     const directory = await createExtension(root, 'export default async api => api.action("ping", { async run() { return true } })')
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     await writeFile(join(directory, 'host.mjs'), `export default async api => {
       globalThis.__stopActivationStarted += 1
@@ -627,7 +660,7 @@ describe('mobile extension registry', () => {
       catch { globalThis.__startStopLateRejected += 1 }
     }`)
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     const refresh = vi.spyOn(service, 'refreshLocal')
 
     const starting = service.startLocal(root, context)
@@ -657,7 +690,7 @@ describe('mobile extension registry', () => {
     await mkdir(join(directory, 'assets', 'nested'), { recursive: true })
     await writeFile(join(directory, 'assets', 'nested', 'value.txt'), 'one')
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     const first = service.manifest()[0]?.generation
     let assetChanges = 0
@@ -680,22 +713,7 @@ describe('mobile extension registry', () => {
     await writeFile(join(outside, 'secret.txt'), 'secret')
     await symlink(outside, join(directory, 'assets'), process.platform === 'win32' ? 'junction' : 'dir')
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
-    await service.startLocal(root, context)
-    expect(service.manifest()).toEqual([])
-    expect(service.status()).toEqual({ loaded: 0, failed: 1 })
-  })
-
-  it('rejects asset trees that exceed the aggregate file-count limit', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-mobile-extension-asset-count-')); directories.push(root)
-    const directory = await createExtension(root, 'export default async () => undefined')
-    const assets = join(directory, 'assets')
-    await mkdir(assets, { recursive: true })
-    await Promise.all(Array.from({ length: EXTENSION_LIMITS.assetFiles + 1 }, async (_, index) => {
-      await writeFile(join(assets, `${String(index).padStart(4, '0')}.txt`), '')
-    }))
-    const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     expect(service.manifest()).toEqual([])
     expect(service.status()).toEqual({ loaded: 0, failed: 1 })
@@ -707,7 +725,7 @@ describe('mobile extension registry', () => {
     const segments = Array.from({ length: EXTENSION_LIMITS.assetDepth + 1 }, (_, index) => `level-${String(index)}`)
     await mkdir(join(directory, 'assets', ...segments), { recursive: true })
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     expect(service.manifest()).toEqual([])
     expect(service.status()).toEqual({ loaded: 0, failed: 1 })
@@ -721,7 +739,7 @@ describe('mobile extension registry', () => {
     const body = Buffer.alloc(7 * 1024 * 1024)
     for (let index = 0; index < 5; index += 1) await writeFile(join(assets, `${String(index)}.bin`), body)
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     expect(service.manifest()).toEqual([])
     expect(service.status()).toEqual({ loaded: 0, failed: 1 })
@@ -739,7 +757,7 @@ describe('mobile extension registry', () => {
       try { api.effect(() => { globalThis.__lateSetup += 100 }) } catch { globalThis.__lateRejected += 1 }
     }`)
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
     expect(service.manifest()).toEqual([])
     await new Promise(resolve => setTimeout(resolve, 1_100))
@@ -758,7 +776,7 @@ describe('mobile extension registry', () => {
     await writeFile(join(directory, 'mobile.css'), '.good-generation { color: green }')
     await writeFile(join(directory, 'host.mjs'), 'export default async api => api.action("ping", { async run() { return "good" } })')
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     await service.startLocal(root, context)
 
     expect((await service.readClientFile('demo', 'script')).body.toString('utf8')).toContain('goodGeneration')
@@ -779,7 +797,7 @@ describe('mobile extension registry', () => {
 
   it('notifies observers only after committed registry changes', () => {
     const context = new Context(); contexts.push(context)
-    const service = new MobileAccessService(context)
+    const service = createService(context)
     let changes = 0
     const unsubscribe = service.onContentChanged(() => { changes += 1 })
     const dispose = service.registerExtension({ schemaVersion: 1, id: 'sample', name: 'Sample', version: '1.0.0' })

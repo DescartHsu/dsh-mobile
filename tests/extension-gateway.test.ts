@@ -332,7 +332,8 @@ describe('gateway extension namespace', () => {
     await writeFile(join(directory, 'host.mjs'), 'export default async api => api.action("ping", { async run() { return 1 } })')
     const context = new Context(); cleanups.push(() => context.fiber.dispose())
     const service = new MobileAccessService(context)
-    await service.startLocal(extensionRoot, context); cleanups.push(() => service.stopLocal())
+    cleanups.push(() => service.stopLocal())
+    await service.startLocal(extensionRoot, context)
     const first = service.manifest()[0]?.generation as string
 
     const config = parseGatewayConfig({ listenHost: '127.0.0.1', listenPort: 0, upstreamOrigin: `http://127.0.0.1:${String(upstreamPort)}`, publicAuthorities: ['127.0.0.1'], allowedCidrs: ['127.0.0.0/8'], stateFile: join(state, 'devices.json'), tls: { mode: 'disabled' } })

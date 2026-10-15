@@ -6,11 +6,11 @@ DeepSeek Harness 是这个轻量、社区维护的 Android WebView 薄壳的显�
 
 当前只支持 Android。iOS 客户端仍为未发布的本地开发实验，不进入构建、Release 或支持范围。
 
-当前正式 App 为 **0.6.3**。本版构建号为 79。App 与 npm 插件独立更新；插件的网页或连接修复不要求重新安装 APK。请在原生功能更新或提示版本过旧时安装新的正式签名 APK。旧正式版使用相同签名时可原位升级保留配对；不同签名的 Debug 包不能直接覆盖正式版。
+当前正式 App 为 **0.6.4**。本版构建号为 80。App 与 npm 插件独立更新；插件的网页或连接修复不要求重新安装 APK。请在原生功能更新或提示版本过旧时安装新的正式签名 APK。旧正式版使用相同签名时可原位升级保留配对；不同签名的 Debug 包不能直接覆盖正式版。
 
-### 开发中的附件修正
+## 0.6.4 更新
 
-尚未发布的 App 代码在 Android 13+ 且网页请求单个可精确表达的图片 MIME 过滤时，优先使用系统 Photo Picker；多选遵循系统数量限制。选择器不可用、较旧系统、拍摄请求或无法精确表达的过滤条件仍使用文档选择器。文档请求直接启动，保留 MIME 和多选设置，不承诺一定出现某个厂商的相册。标准回调绑定当前 WebView、Origin 和文档；旧结果不能完成新请求。这些原生改动尚未包含在正式 0.6.3 APK 中，需要后续正式签名 App 更新。
+构建 80 在 Android 13+ 且网页请求单个可精确表达的图片 MIME 过滤时，优先使用系统 Photo Picker；多选遵循系统数量限制。选择器不可用、较旧系统、拍摄请求或无法精确表达的过滤条件仍使用文档选择器。文档请求直接启动，保留 MIME 和多选设置；App 不承诺一定出现某个厂商的相册。标准回调绑定当前 WebView、精确 Origin 和文档；旧 Activity 结果不能完成新请求。这些原生改动需要 App 0.6.4 或更新版本，与 npm 插件独立发布。
 
 支持导航监听的 WebView 会在替换文档前取消待完成的标准文件请求，文档导航进行期间不会再打开选择器。较旧的提供方使用其可用的导航回调；如换页后仍无法打开文件选择，请更新 WebView，或返回已配对设备列表后重新打开页面，无需清除 App 数据。
 
@@ -95,7 +95,7 @@ App 收到电脑端撤销通知后，后续检测不会把“电脑端已移除�
 | TLS | 局域网在 App 内固定配对 CA；自签 FRP 入口还须由 0.4.6 或更新的 App 固定远程 CA。两者只接受它为精确 Origin 签发的有效叶证书；公开 CA 远程入口使用系统信任库，其余 `SslError` 全部取消。 |
 | Origin | 只保存协议、规范化主机和端口；普通路径、查询和 fragment 不持久化。 |
 | 导航 | 同源主页面留在 WebView；用户点击的外部 HTTPS 链接交给系统浏览器。 |
-| 权限 | 文件输入使用系统文档选择器，无需存储权限；扫码或拍照时申请相机权限，使用 DSH 语音输入时申请麦克风权限。 |
+| 权限 | 标准文件输入按 Android 版本和网页请求使用系统 Photo Picker 或文档选择器，无需存储权限；扫码或拍照时申请相机权限，使用 DSH 语音输入时申请麦克风权限。 |
 | 下载 | 只允许当前 exact origin 的前台 GET；认证控制路径永不下载。 |
 | 数据 | Android Keystore 加密保存设备记录，包括 token、Origin 和固定的 CA；网页存储位于 App 沙箱。删除设备只清除该记录；系统“清除应用数据”会删除全部配对和网页数据。 |
 | 备份 | App 备份关闭，TLS 私钥和签名密钥不得进入仓库。 |
@@ -108,7 +108,7 @@ App 收到电脑端撤销通知后，后续检测不会把“电脑端已移除�
 
 可用能力包括 `files.pick`、`camera.capture`、`share`、`clipboard.read`、`clipboard.write`、`notification.notify`、`notification.settings` 和 `mobile.switch-computer`。DSH 原生文件附件入口仍在输入栏的“添加”组；当前附件 owner 支持接收图片时，Mobile 只把“拍照”加入同一组。扩展可单独调用 `files.pick`：它返回一个文件，系统选择器遵循调用方声明的 MIME 类型，通过 Bridge 返回的文件上限为 8 MiB；这不是 DSH 原生文件选择的限制。拍照仅在使用时申请 Android 相机权限，通过 `FileProvider` 写入完整分辨率 JPEG，再作为浏览器 `File` 返回。
 
-普通 DSH 附件使用系统文档选择器，App 会透传网页的多选和 MIME 设置，并返回全部选中项。可从“图片”分类或可用的图库提供方选择图片；相册入口是否出现由设备和已安装的提供方决定。这条路径独立于扩展的 `files.pick`。每台真机的文件选择验收仍见下方检查说明。
+普通 DSH 附件在 App 0.6.4 中按上方规则使用系统 Photo Picker 或文档选择器，保留网页的 MIME 和多选设置，并在系统选择器限制内返回全部选中项。可用相册和文档提供方由设备决定。标准 WebView 路径独立于扩展的 `files.pick` 及其 Bridge 大小限制。文件选择验收只适用于实际检查的设备、WebView 提供方和 APK。
 
 任务提醒使用 Host 完成事件和明确的待确认卡片，在页面仍存活时触发；可从 App 内的 DSH **设置 → 通用设置** 开启通知或打开系统设置。锁屏只显示通用文案，点击可回到 App。插件 0.6.4 按完整会话和轮次 ID 区分通知，包括长 ID 和非 ASCII 字符；此前版本可能因标签冲突而替换通知。完成提醒依赖通道支持 SSE，没有离线事件补发；Cloudflare 快速隧道不支持此流，详见[通道限制](../../docs/CLOUDFLARE_TUNNEL.md#快速隧道的功能限制)。
 
@@ -137,11 +137,13 @@ Set-Location apps/mobile/android
 ./gradlew.bat :app:lintDebug :app:testDebugUnitTest :app:assembleDebug -x :app:lintAnalyzeDebugUnitTest -x :app:lintAnalyzeDebugAndroidTest
 ```
 
-Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。GitHub Release 使用仅保存在仓库 Secrets 中的稳定签名密钥生成已签名 Release APK；签名密钥与密码不会进入源码或构建产物。当前正式签名版本为 [Android 0.6.3](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.3)，SHA-256 为 `167b9447cf5b700b811b6b5279e2935b5aca250e5f1a3b59fa7cf13b1af9e497`。
+Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。GitHub Release 使用仅保存在仓库 Secrets 中的稳定签名密钥生成已签名 Release APK；签名密钥与密码不会进入源码或构建产物。当前正式签名版本为 [Android 0.6.4](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.4)，SHA-256 为 `b28f2e832a8596df2fa1bfbad7dc36eef59d519c9e4875dd2be1ea4713804adf`。
 
 ## 验收
 
-共享 URL 策略测试覆盖 Origin 规范化、配对入口、同源导航和下载路径。已在 PJW110（Android 16、WebView 151）验证模型菜单逐级返回、旋转保持草稿/引用/图片、已知撤销状态在检测及重启后保持，以及同设备重新配对。该证据使用 USB 连接隔离 HTTPS 实例，不代表公网通道验证。自签 FRP 入口尚无真实 VPS 加手机的端到端验收记录；其他机型、刘海、字体缩放、TLS 失败、文件选择和下载仍需针对设备验收。
+共享 URL 策略测试覆盖 Origin 规范化、配对入口、同源导航和下载路径。本地验收使用干净的 App 0.6.4 / 构建 80 Debug APK，设备为 PJW110（Android 16、Google WebView 153.0.8010.36）。在同一保留的 WebView 中，真实 DSH 标准输入在文档替换后可重新打开 Documents，旧选择未进入新文档，新选择收到受控 PNG 的精确字节并生成解码草稿预览。暂停主文档响应还验证了导航期间拒绝选择，HTTP 204 保留旧文档后可重新打开。未提交模型请求。这些 USB 隔离 Debug 检查不代表正式签名 APK 的真机验收、公网通道、HyperOS、旧 WebView 提供方或其他设备已通过。
+
+此前在 PJW110（Android 16、WebView 151）检查过模型菜单逐级返回、旋转保持草稿/引用/图片、已知撤销状态在检测及重启后保持，以及同设备重新配对，同样使用 USB 连接隔离 HTTPS 实例。自签 FRP 入口尚无真实 VPS 加手机的端到端验收记录；刘海、字体缩放、TLS 失败、下载及其他设备／提供方组合仍需单独验收。
 
 准备 0.6.0 时使用的 0.5.6 开发包还在这台设备验证了原位 Debug 升级保留配对、七种 Launcher 选择、两台隔离电脑配对、手动顺序在连接变化后保持，以及扫码按钮／双击缩放与关闭后摄像头释放。没有把物理双指缩放、真实二维码识别、旧 Android 回退路径或进程终止后的恢复写成已完成的真机验收。
 

@@ -18,6 +18,7 @@ on:
       - 'scripts/*caddy*.mjs'
       - 'scripts/caddy-component-lock.json'
       - 'tests/helpers/caddy-component-fixture.ts'
+      - 'tests/helpers/caddy-tls-ready.ts'
       - 'tests/helpers/caddy-release-fetch-preload.mjs'
       - '.github/workflows/caddy-component.yml'
       - 'src/caddy*.ts'
@@ -73,7 +74,7 @@ jobs:
         env:
           DSH_CADDY_TEST_EXECUTABLE: ${{ runner.temp }}/caddy-component/${{ matrix.executable }}
           DSH_CADDY_TEST_MANIFEST: ${{ runner.temp }}/caddy-component/manifest.json
-        run: npx vitest run tests/caddy.test.ts tests/caddy-component-shutdown.test.ts tests/caddy-controller.test.ts tests/caddy-mode.test.ts tests/caddy-file-lifecycle.test.ts tests/caddy-live.test.ts tests/caddy-build-inputs.test.ts tests/caddy-artifacts.test.ts tests/caddy-buffer-comparison.test.ts tests/caddy-publication.test.ts
+        run: npx vitest run tests/caddy.test.ts tests/caddy-component-shutdown.test.ts tests/caddy-controller.test.ts tests/caddy-mode.test.ts tests/caddy-file-lifecycle.test.ts tests/caddy-live.test.ts tests/caddy-tls-ready.test.ts tests/caddy-build-inputs.test.ts tests/caddy-artifacts.test.ts tests/caddy-buffer-comparison.test.ts tests/caddy-publication.test.ts
       - name: Install pinned pnpm for existing Windows updater smoke test
         if: runner.os == 'Windows'
         run: npm install --global pnpm@10.10.0
@@ -101,7 +102,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' && needs.caddy-review-artifact.result == 'success' &&
       ((inputs.publish_review_prerelease && !inputs.publish_official_release && github.repository == 'abworks-dev/dsh-mobile' && startsWith(github.ref, 'refs/tags/caddy-component-2.11.7-tencentcloud-0.4.3-review.')) ||
-      (inputs.publish_official_release && !inputs.publish_review_prerelease && toJSON(github.event.repository.private) == 'false' && github.repository == 'saya-ch/dsh-mobile' && github.ref == 'refs/tags/caddy-component-2.11.7-tencentcloud-0.4.3'))
+      (inputs.publish_official_release && !inputs.publish_review_prerelease && toJSON(github.event.repository.private) == 'false' && github.repository == 'saya-ch/dsh-mobile' && github.ref == 'refs/tags/caddy-component-2.11.7-tencentcloud-0.4.3-r1'))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:

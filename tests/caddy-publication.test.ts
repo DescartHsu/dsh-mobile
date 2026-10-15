@@ -78,14 +78,17 @@ it('evaluates the actual YAML publisher route with exclusive native-success chan
   if (!expression) throw new Error('Publisher predicate missing')
   const route = new Function('github', 'inputs', 'needs', 'startsWith', 'toJSON', 'return (' + expression.replaceAll('needs.caddy-review-artifact', 'needs.native') + ')')
   const base = { event_name: 'workflow_dispatch', repository: 'saya-ch/dsh-mobile',
-    ref: 'refs/tags/caddy-component-2.11.7-tencentcloud-0.4.3', event: { repository: { private: false } } }
+    ref: 'refs/tags/caddy-component-2.11.7-tencentcloud-0.4.3-r1', event: { repository: { private: false } } }
   const inputs = { publish_official_release: true, publish_review_prerelease: false }
   const run = (github: Omit<typeof base, 'event'> & { event: { repository: { private?: unknown } } } = base, flags = inputs, result = 'success') =>
     route(github, flags, { native: { result } }, (value: string, prefix: string) => value.startsWith(prefix), JSON.stringify)
   expect(run()).toBe(true)
-  expect(run({ ...base, repository: 'abworks-dev/dsh-mobile', ref: base.ref + '-review.1' }, { publish_official_release: false, publish_review_prerelease: true })).toBe(true)
+  const reviewRef = 'refs/tags/caddy-component-2.11.7-tencentcloud-0.4.3-review.1'
+  expect(run({ ...base, repository: 'abworks-dev/dsh-mobile', ref: reviewRef }, { publish_official_release: false, publish_review_prerelease: true })).toBe(true)
   for (const github of [{ ...base, event_name: 'pull_request' }, { ...base, repository: 'foreign/repo' },
-    { ...base, ref: 'refs/heads/main' }, { ...base, ref: 'refs/tags/v0.6.2' }, { ...base, ref: base.ref + '-review.1' },
+    { ...base, ref: 'refs/heads/main' }, { ...base, ref: 'refs/tags/v0.6.2' }, { ...base, ref: reviewRef },
+    { ...base, ref: 'refs/tags/caddy-component-2.11.7-tencentcloud-0.4.3' },
+    { ...base, ref: 'refs/tags/caddy-component-2.11.7-tencentcloud-0.4.3-r2' },
     { ...base, event: { repository: { private: true } } }, { ...base, event: { repository: {} } },
     { ...base, event: { repository: { private: null } } }, { ...base, event: { repository: { private: 'false' } } }]) expect(run(github)).toBe(false)
   expect(run(base, { ...inputs, publish_review_prerelease: true })).toBe(false)
@@ -162,13 +165,14 @@ printf '{}' > "$RUNNER_TEMP/caddy-review-catalog.json"
     ['verify-fail', 8], ['valid', 0],
     ['official-valid', 0], ['official-main-identical', 0],
     ...['main-ahead', 'main-diverged', 'main-malformed', 'main-error',
-      'wrong-tag', 'native-failure', 'no-input', 'double-input', 'wrong-event', 'wrong-repo', 'wrong-ref', 'wrong-component-tag', 'wrong-channel', 'private-repo', 'malformed-private']
+      'wrong-tag', 'native-failure', 'no-input', 'double-input', 'wrong-event', 'wrong-repo', 'wrong-ref', 'wrong-component-tag', 'base-component-tag', 'wrong-channel', 'private-repo', 'malformed-private']
       .map(mode => ['official-' + mode, 1]),
   ] as [string, number][]
   for (const [scenario, expectedExitCode] of scenarios) {
     const official = scenario.startsWith('official-')
     const mode = official ? scenario.slice(9) : scenario
-    const tag = official ? 'caddy-component-2.11.7-tencentcloud-0.4.3' : 'caddy-component-2.11.7-tencentcloud-0.4.3-review.1'
+    const tag = official ? 'caddy-component-2.11.7-tencentcloud-0.4.3' + (mode === 'base-component-tag' ? '' : '-r1')
+      : 'caddy-component-2.11.7-tencentcloud-0.4.3-review.1'
     const work = join(root, scenario); await mkdir(work)
     await mkdir(join(work, 'component-release')); await writeFile(join(work, 'component-release', 'asset'), 'known reviewed bytes')
     const log = join(work, 'calls'); await writeFile(log, '')
@@ -186,6 +190,7 @@ printf '{}' > "$RUNNER_TEMP/caddy-review-catalog.json"
     const calls = await readFile(log, 'utf8')
     expect(exitCode, scenario).toBe(expectedExitCode)
     expect(calls, scenario).not.toContain('/environments/')
+    if (mode === 'base-component-tag') expect(calls, scenario).not.toContain('release ')
     const reachedPublicEdit = ['valid', 'official-valid', 'official-main-identical', 'fail-edit', 'verify-fail'].includes(scenario)
     expect(calls.includes('release edit '), scenario).toBe(reachedPublicEdit)
     expect(calls.includes('verify\n'), scenario).toBe(['valid', 'official-valid', 'official-main-identical', 'verify-fail'].includes(scenario))

@@ -56,7 +56,7 @@ async function provedFixture(platform: string) {
 
 describe('review component artifact binding', () => {
   it('shares strict channel identity and exclusive publication request validation', () => {
-    const officialTag = 'caddy-component-2.11.7-tencentcloud-0.4.3'
+    const officialTag = 'caddy-component-2.11.7-tencentcloud-0.4.3-r1'
     const request = { event: 'workflow_dispatch', repository: 'saya-ch/dsh-mobile', ref: 'refs/tags/' + officialTag,
       official: 'true', review: 'false', nativeResult: 'success', repositoryPrivate: false }
     expect(helpers.publicationRequest(request)).toMatchObject({ channel: 'official', authorization: 'manual-maintainer-dispatch' })
@@ -68,8 +68,14 @@ describe('review component artifact binding', () => {
       expect(() => helpers.publicationRequest({ ...request, ...override })).toThrow()
     }
     expect(() => helpers.releaseIdentity(request.repository, officialTag, 'unknown')).toThrow('channel')
-    expect(() => helpers.releaseIdentity('saya-ch/dsh-mobile', officialTag + '-review.1')).toThrow('repository')
+    expect(() => helpers.releaseIdentity('saya-ch/dsh-mobile', 'caddy-component-2.11.7-tencentcloud-0.4.3-review.1')).toThrow('repository')
     expect(() => helpers.releaseIdentity('abworks-dev/dsh-mobile', officialTag, 'official')).toThrow('identity')
+    for (const tag of ['caddy-component-2.11.7-tencentcloud-0.4.3',
+      'caddy-component-2.11.7-tencentcloud-0.4.3-r0', 'caddy-component-2.11.7-tencentcloud-0.4.3-r2',
+      'caddy-component-2.11.7-tencentcloud-0.4.3-review.1', officialTag + '-other']) {
+      expect(() => helpers.releaseIdentity('saya-ch/dsh-mobile', tag, 'official')).toThrow('identity')
+      expect(() => helpers.publicationRequest({ ...request, ref: 'refs/tags/' + tag })).toThrow('identity')
+    }
     expect(helpers.publicationRequest(request)).toMatchObject({ authorization: 'manual-maintainer-dispatch' })
     expect(helpers.publicationRequest(request)).not.toHaveProperty('environment')
   })
@@ -199,7 +205,7 @@ describe('review component artifact binding', () => {
     }
     const directory = join(wrapper, 'prepared')
     const repository = channel === 'official' ? 'saya-ch/dsh-mobile' : 'abworks-dev/dsh-mobile'
-    const tag = 'caddy-component-2.11.7-tencentcloud-0.4.3' + (channel === 'review' ? '-review.1' : '')
+    const tag = 'caddy-component-2.11.7-tencentcloud-0.4.3' + (channel === 'review' ? '-review.1' : '-r1')
     const commit = 'b'.repeat(40)
     await cli('prepare-caddy-release.mjs', ['--input-dir', input, '--output-dir', directory,
       '--repository', repository, '--tag', tag, '--commit', commit, '--run-id', '123', '--run-attempt', '1', '--channel', channel])

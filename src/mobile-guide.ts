@@ -90,6 +90,8 @@ const MOBILE_CUSTOMIZATION_GUIDE_BODY = `你在为用户定制 DSH Mobile 的手
    - mobile.js 里用 api.host.invoke('动作名', 输入) 调 host.mjs 的 action（请求会按 application/json 发送），api.host.fetch('/路由路径') 调 route，api.host.assetUrl('相对路径') 生成与当前版本绑定的资源地址
    - DSH Web 可先用命令生成模板：dsh plugin --profile web exec dsh-mobile extension create <id> --name "<名称>"，再在模板上改；Desktop 请在上方实际定制目录创建文件，不要误改 Web profile
 
+附件功能优先复用 DSH 自带的文件上传。扩展若需向输入框模拟文件拖放，dataTransfer 除了 files，还须有可迭代的 items（DataTransferItemList），文件项应提供 kind、type 和 getAsFile()；不能只拼一个 files 数组。原生 DataTransfer / DragEvent 可用时优先使用，并通过 items.add(file) 填充文件；还要验证 effectAllowed / dropEffect 能否按投递逻辑读写，不能只检查构造函数是否存在。不完整的 WebView 需要保留这些能力的兼容实现。dragover 接受或事件派发成功不代表附件已加入，须检查 DSH 输入框草稿中的附件与解码后的图片预览；不要用电脑端附件目录的文件数量或修改时间代替这项验证。
+
 安全约束：
 - host.mjs 拥有电脑用户的完整权限，绝不能放入不可信代码，也不要让手机端无条件执行任意命令
 - in-process 的同步阻塞会卡住网关事件循环，超时不能打断；Worker 可约束 JavaScript 阻塞，但不是安全沙箱，不约束全部原生内存，也不回滚副作用。两种模式都应响应 signal，避免编写不可取消的同步循环

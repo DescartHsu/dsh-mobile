@@ -1,8 +1,8 @@
 # 贡献者 / Contributors
 
-GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-14 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
+GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-16 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-14. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-16. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
 ## 0.6.7 代码贡献 / Code contributions in 0.6.7
 
@@ -64,6 +64,8 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 
 ## 问题反馈与建议 / Issue reports and ideas
 
+感谢 [@Anyways366](https://github.com/Anyways366) 在 [#223](https://github.com/saya-ch/dsh-mobile/issues/223) 提供 Funnel 错误覆盖和诊断信息缺失的详细复现与修正建议。 / Thanks [@Anyways366](https://github.com/Anyways366) for the detailed Funnel error-overwrite and missing-diagnostic reproduction and proposed corrections in [#223](https://github.com/saya-ch/dsh-mobile/issues/223).
+
 感谢 [@Yurzi](https://github.com/Yurzi) 在 [#213](https://github.com/saya-ch/dsh-mobile/issues/213) 报告不同电脑的远程配对记录互相覆盖。 / Thanks [@Yurzi](https://github.com/Yurzi) for reporting remote pairing records on different computers overwriting one another in [#213](https://github.com/saya-ch/dsh-mobile/issues/213).
 
 感谢 [@Dantezcx](https://github.com/Dantezcx) 在 [#209](https://github.com/saya-ch/dsh-mobile/issues/209) 和 [#210](https://github.com/saya-ch/dsh-mobile/issues/210) 提供侧栏命中、短屏布局和定制资源加载的详细诊断。 / Thanks [@Dantezcx](https://github.com/Dantezcx) for the detailed sidebar hit-testing, short-viewport and customization-loading diagnostics in [#209](https://github.com/saya-ch/dsh-mobile/issues/209) and [#210](https://github.com/saya-ch/dsh-mobile/issues/210).
@@ -80,6 +82,7 @@ Thanks [@xhwxt](https://github.com/xhwxt) for the document-picker proposal in [#
 | [@2647954284](https://github.com/2647954284) | [#199](https://github.com/saya-ch/dsh-mobile/issues/199) |
 | [@abworks-dev](https://github.com/abworks-dev) | [#174](https://github.com/saya-ch/dsh-mobile/issues/174) |
 | [@Ann-luo](https://github.com/Ann-luo) | [#150](https://github.com/saya-ch/dsh-mobile/issues/150) |
+| [@Anyways366](https://github.com/Anyways366) | [#223](https://github.com/saya-ch/dsh-mobile/issues/223) |
 | [@azri57806-design](https://github.com/azri57806-design) | [#97](https://github.com/saya-ch/dsh-mobile/issues/97) |
 | [@BrainZombie](https://github.com/BrainZombie) | [#128](https://github.com/saya-ch/dsh-mobile/issues/128) |
 | [@CESAEREE](https://github.com/CESAEREE) | [#1](https://github.com/saya-ch/dsh-mobile/issues/1) |

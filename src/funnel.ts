@@ -410,7 +410,14 @@ export class FunnelController implements RemoteProviderController {
 
   private async failGeneration(generation: number, code: string, setupUrl?: string): Promise<void> {
     if (generation !== this.generation) return
-    await this.stopProcessAndGateway()
+    // Failure ends the generation before cleanup can enqueue a process-close event.
+    ++this.generation
+    try { await this.stopProcessAndGateway() } catch (_error) {
+      // Background protocol callbacks cannot reject into the process event loop.
+      // Failed resources remain owned so reconnect or close can retry their cleanup.
+      this.publish({ enabled: this.enabled, state: 'error', errorCode: 'funnel_cleanup_failed' })
+      return
+    }
     if (this.enabled) this.publish({ enabled: true, state: 'error', errorCode: code, ...(setupUrl === undefined ? {} : { setupUrl }) })
   }
 

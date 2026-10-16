@@ -25,13 +25,13 @@
   <a href="#security">Security</a> ·
   <a href="#compatibility">Compatibility</a> ·
   <a href="#contributors">Contributors</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.9">Release notes</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.10">Release notes</a> ·
   <a href="README.md">简体中文</a>
 </p>
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.9**. Enable optional managed Caddy installation on Windows/Linux x64, improve connection shutdown and component cleanup, and add custom-style troubleshooting guidance. Existing remote channels and pairings are retained; no Android app update is required. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.9) · [Full changelog](CHANGELOG.md).
+> **Current stable release: 0.6.10**. Preserve Tailscale Funnel's specific failure and authorization entry when its process exits, restore error codes and actionable guidance in all three diagnostic languages, and clarify extension file delivery. Existing remote channels and pairings are retained; no Android app update is required. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.10) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
@@ -225,6 +225,8 @@ An old `mobile.css` patch can override a newer built-in fix. Back up that file a
 Extension manifests, scripts, styles, and assets are revisioned. When the plugin observes a `/mobile` or extension-file change, it notifies authenticated phones to refresh immediately; 45-second visible and 5-minute hidden checks remain only as recovery fallbacks. A failed Host staging pass keeps the current version; if the Host has changed but the new phone UI cannot activate, that extension closes and retries instead of mixing generations.
 
 An extension action's `input` may use a callable Schemastery schema such as `api.schema.object(...)` or an adapter with `parse(value)`; mobile `api.host.invoke()` sends JSON explicitly, and the input is validated and normalized before the computer-side action runs.
+
+Prefer DSH's built-in file upload for attachments. If an extension must simulate a drop, its `dataTransfer` needs iterable `items` (file items) as well as `files`; a `files` array alone is insufficient. Some WebViews have incomplete native drag-and-drop constructors; see the [plugin's file-delivery implementation](src/native-mobile.ts) for compatibility handling. An accepted `dragover` or successfully dispatched event does not confirm attachment delivery: check the composer's attachments and previews.
 
 The 0.6.3 release adds optional [Worker execution](docs/EXTENSION_WORKERS.en.md) for trusted local JavaScript hosts. It is disabled by default, selectable by extension, and recovers explicitly without replaying interrupted actions. It is not a permission sandbox and does not require a matching App version.
 

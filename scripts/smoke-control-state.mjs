@@ -61,6 +61,7 @@ async function withControl(browser, name, options, run) {
     holdNextRemote: false,
     hosts: options.hosts ?? [], holdHosts: false, holdRecovery: options.holdRecovery === true,
     recoveryError: options.recoveryError,
+    diagnostics: options.diagnostics,
   }
   if (options.managedReady) {
     Object.assign(state.remote, {
@@ -101,7 +102,11 @@ async function withControl(browser, name, options, run) {
     const entry = { method: request.method, pathname, body }
     requests.push(entry)
     if (pathname === `${prefix}/release`) { json(response, 200, {}); return }
-    if (pathname === `${prefix}/diagnostics`) { json(response, 503, { error: 'diagnostic_fixture_unavailable' }); return }
+    if (pathname === `${prefix}/diagnostics`) {
+      if (state.diagnostics === undefined) json(response, 503, { error: 'diagnostic_fixture_unavailable' })
+      else json(response, 200, state.diagnostics)
+      return
+    }
     if (pathname === hostsPath) {
       if (state.holdHosts) { hold(entry, response); return }
       json(response, 200, { hosts: state.hosts, limits: { maxWorkers: 4, workers: state.hosts.filter(host => host.mode === 'worker' && host.state === 'ready').length } })
@@ -309,6 +314,63 @@ async function withControl(browser, name, options, run) {
 const browser = await chromium.launch({ headless: true })
 let cases = 0
 try {
+  for (const language of ['en', 'it', 'zh']) {
+    const codes = ['sidecar_exited', 'some_unknown_future_code', 'funnel_https_required', 'cloudflared_invalid_output', 'future_<img src=x onerror=alert(1)>']
+    const diagnostics = {
+      overall: 'error', generatedAt: Date.UTC(2026, 0, 1, 12),
+      checks: codes.map(controllerCode => ({
+        id: 'remote', status: 'error', reason: 'remote-controller-error',
+        label: 'Remote', detail: 'Host fallback detail', action: 'Host fallback action',
+        facts: { provider: 'tailscale', controllerCode },
+      })),
+    }
+    await withControl(browser, `Funnel authorization and diagnostic copy ${language}`, {
+      layoutFixture: true, language, locale: language === 'zh' ? 'zh-CN' : language === 'it' ? 'it-IT' : 'en-US',
+      width: 360, diagnostics,
+    }, async ({ page, state, consumed, settle, openRemote, pollRemote }) => {
+      await openRemote()
+      Object.assign(state.remote, {
+        provider: 'tailscale', running: true, state: 'error', errorCode: 'funnel_https_required',
+        setupUrl: 'https://tailscale.com/s/https',
+      })
+      await pollRemote()
+      const guide = page.locator('.dsh-mobile-control__guide')
+      const authorize = guide.locator('.dsh-mobile-control__primary')
+      assert.equal(await guide.isVisible(), true, 'The authorization error did not expose its setup guide')
+      assert.equal(await authorize.isEnabled(), true, 'The authorization button was disabled')
+      await page.evaluate(() => {
+        window.fixtureOpenedUrls = []
+        window.open = url => { window.fixtureOpenedUrls.push(String(url)); return null }
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+          writeText: async text => { window.fixtureCopiedReport = text },
+        } })
+      })
+      await authorize.click()
+      assert.deepEqual(await page.evaluate(() => window.fixtureOpenedUrls), ['https://tailscale.com/s/https'])
+      const previous = await consumed(`${prefix}/diagnostics`)
+      await page.locator('.dsh-mobile-control__diagnostic-entry').click()
+      await settle(`${prefix}/diagnostics`, previous)
+      const rows = page.locator('.dsh-mobile-control__diagnostic-check')
+      assert.equal(await rows.count(), codes.length)
+      const catalog = await page.evaluate(locale => ({
+        messages: window.mobileClient.MOBILE_CONTROL_MESSAGES[locale],
+        templates: window.mobileClient.DIAGNOSTIC_REASON_MESSAGES[locale]['remote-controller-error'],
+      }), language)
+      const report = await page.locator('.dsh-mobile-control__diagnostic-report').textContent()
+      const actions = [catalog.messages.controlChannelFailed, catalog.templates[1], catalog.messages.funnelHttps, catalog.messages.cloudflaredOutputInvalid, catalog.templates[1]]
+      for (const [index, code] of codes.entries()) {
+        const expectedDetail = catalog.templates[0].replace('{provider}', 'Tailscale Funnel').replace('{controllerCode}', code)
+        assert.equal(await rows.nth(index).locator('.dsh-mobile-control__diagnostic-check-body > p').first().textContent(), expectedDetail)
+        assert.equal(await rows.nth(index).locator('.dsh-mobile-control__diagnostic-action').textContent(), catalog.messages.diagnosticAction + actions[index])
+        assert(report.includes(expectedDetail + ' ' + actions[index]), 'Copied report diverged from the visible diagnostic')
+      }
+      assert.equal(await rows.locator('img').count(), 0, 'An error code was interpreted as HTML')
+      await page.locator('.dsh-mobile-control__diagnostic-copy').click()
+      assert.equal(await page.evaluate(() => window.fixtureCopiedReport), report)
+    })
+    cases++
+  }
+
   await withControl(browser, 'managed readiness uses server truth, not the HTTPS form preview', { managedReady: true }, async ({ page, state, ui, count, openRemote, pollRemote }) => {
     const heading = page.locator('.dsh-mobile-control__stage-value')
     const badge = page.locator('.dsh-mobile-control__state-badge')

@@ -2,6 +2,13 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## 0.6.10 - 2026-10-16
+
+- Preserve the first Funnel failure and its validated official authorization URL instead of replacing them with a later process-exit error. Discard queued events from the failed connection while allowing an explicit reconnect to start a new one. Failed resource cleanup remains visible and can be retried without discarding owned resources.
+- Keep unmapped remote-controller error codes visible in localized diagnostics instead of rendering an empty error description. Thanks @Anyways366 for the detailed report and reproduction in [#223](https://github.com/saya-ch/dsh-mobile/issues/223).
+- Clarify that custom file drops need iterable file items as well as files, and that successful event dispatch is not confirmation that DSH added the attachment. Thanks @Void-LifeStream for the extension findings and follow-up verification in [#205](https://github.com/saya-ch/dsh-mobile/issues/205).
+- Android App remains independently published as 0.6.4 (build 80); these plugin changes do not require another APK.
+
 ## 0.6.9 - 2026-10-15
 
 - Enable optional managed Caddy installation on Windows/Linux x64 with independently verified official component URLs, lengths and SHA-256 pins. Tencent Cloud DNSPod credentials, a domain and reachable public ingress are required; existing Cloudflared tunnels and external proxies remain available. Thanks @abworks-dev for the original managed-Caddy contributions in [#176](https://github.com/saya-ch/dsh-mobile/pull/176), [#184](https://github.com/saya-ch/dsh-mobile/pull/184), [#185](https://github.com/saya-ch/dsh-mobile/pull/185) and [#190](https://github.com/saya-ch/dsh-mobile/pull/190).

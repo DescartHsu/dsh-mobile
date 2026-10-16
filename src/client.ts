@@ -797,9 +797,62 @@ const DIAGNOSTIC_CONTROLLER_ACTION_CODES: ReadonlySet<string> = new Set([
 /** Resolve the next-step text for a remote-controller diagnostic. */
 export function diagnosticControllerAction(code: unknown, locale: MobileControlLocale, fallback: string): string {
   if (typeof code !== 'string') return fallback
-  const key = DIAGNOSTIC_CONTROLLER_ACTION_OVERRIDES[code]
+  const key = (Object.prototype.hasOwnProperty.call(DIAGNOSTIC_CONTROLLER_ACTION_OVERRIDES, code)
+    ? DIAGNOSTIC_CONTROLLER_ACTION_OVERRIDES[code] : undefined)
     ?? (DIAGNOSTIC_CONTROLLER_ACTION_CODES.has(code) ? REMOTE_ERROR_MESSAGE_KEYS[code] : undefined)
   return key === undefined ? fallback : controlTranslator(locale)(key)
+}
+
+/**
+ * Localize a diagnostic entry, retaining Host text for unknown diagnostic reasons.
+ * @param entry Diagnostic fields received from the control API.
+ * @param locale Language of the mounted control panel.
+ * @param versions Optional version fields from the diagnostic response.
+ * @returns Detail and next-step text shared by the visible card and copied report.
+ */
+export function localizedDiagnosticEntryCopy(
+  entry: Readonly<Record<string, unknown>>,
+  locale: MobileControlLocale,
+  versions?: unknown,
+): { readonly detail: string; readonly action: string } {
+  const t = controlTranslator(locale)
+  const localeTag = locale === 'it' ? 'it-IT' : locale === 'zh' ? 'zh-CN' : 'en-US'
+  const serverCopy = diagnosticServerCopy(entry)
+  const reason = typeof entry.reason === 'string' ? entry.reason : ''
+  const facts = entry.facts !== null && typeof entry.facts === 'object' ? entry.facts as Record<string, unknown> : {}
+  const copyReason = facts.viaProxy === true && (reason === 'remote-ready' || reason === 'remote-rate-limited')
+    ? `${reason}-via-proxy` : reason
+  const catalog = DIAGNOSTIC_REASON_MESSAGES[locale] as Readonly<Record<string, readonly [string, string]>>
+  const templates = Object.prototype.hasOwnProperty.call(catalog, copyReason) ? catalog[copyReason] : undefined
+  if (templates === undefined) return serverCopy
+  const providerNames: Record<string, string> = {
+    tailscale: 'Tailscale Funnel', cpolar: 'cpolar', cloudflared: 'cloudflared',
+    frp: t('frpName'), origin: t('originName'),
+  }
+  const providerId = typeof facts.provider === 'string' ? facts.provider : ''
+  const controllerCode = typeof facts.controllerCode === 'string' ? facts.controllerCode : ''
+  const controllerKey = Object.prototype.hasOwnProperty.call(REMOTE_ERROR_MESSAGE_KEYS, controllerCode)
+    ? REMOTE_ERROR_MESSAGE_KEYS[controllerCode] : undefined
+  const values: Record<string, string> = {
+    provider: providerNames[providerId] ?? '',
+    latencyMs: typeof facts.latencyMs === 'number' && Number.isFinite(facts.latencyMs) ? new Intl.NumberFormat(localeTag).format(facts.latencyMs) : '',
+    interfaceName: typeof facts.interfaceName === 'string' ? facts.interfaceName : '',
+    endpointSuffix: typeof facts.endpointSuffix === 'string' ? facts.endpointSuffix : '',
+    controllerCode,
+  }
+  const interpolate = (template: string): string => template.replace(/\{(\w+)\}/gu, (_match, key: string) => values[key] ?? '')
+  let detail = reason === 'remote-controller-error' && controllerCode === '' ? t('remoteError') : interpolate(templates[0])
+  let action = interpolate(templates[1])
+  if (reason === 'versions-current') {
+    const fields = versions !== null && typeof versions === 'object' ? versions as Record<string, unknown> : {}
+    if ([fields.plugin, fields.dsh, fields.minimumAndroidApp].every(value => typeof value === 'string')) {
+      detail += ` plugin ${String(fields.plugin)}, DSH ${String(fields.dsh)}, Android ${String(fields.minimumAndroidApp)}.`
+    }
+  }
+  if (reason === 'remote-controller-error') {
+    action = diagnosticControllerAction(controllerCode, locale, controllerKey === undefined ? action : t(controllerKey))
+  }
+  return { detail, action }
 }
 
 function installControl(): { remove: () => void; toggle: () => void; isOpen: () => boolean } {
@@ -3118,45 +3171,8 @@ function installControl(): { remove: () => void; toggle: () => void; isOpen: () 
       firewall: 'diagnosticLabelFirewall', remote: 'diagnosticLabelRemote', 'phone-network': 'diagnosticLabelPhone',
     }
     const statusOf = (entry: Record<string, unknown>): 'ok' | 'warning' | 'error' | 'info' => normalizeDiagnosticStatus(entry.status)
-    const localizedEntryCopy = (entry: Record<string, unknown>): { readonly detail: string; readonly action: string } => {
-      const serverCopy = diagnosticServerCopy(entry)
-      const reason = typeof entry.reason === 'string' ? entry.reason : ''
-      const facts = entry.facts !== null && typeof entry.facts === 'object' ? entry.facts as Record<string, unknown> : {}
-      const copyReason = facts.viaProxy === true && (reason === 'remote-ready' || reason === 'remote-rate-limited')
-        ? `${reason}-via-proxy` : reason
-      const catalog = DIAGNOSTIC_REASON_MESSAGES[locale] as Readonly<Record<string, readonly [string, string]>>
-      const templates = catalog[copyReason]
-      if (templates === undefined) return serverCopy
-      // Diagnostics read as sentences, so an internal provider id or a raw controller
-      // code belongs in the report, not in the prose: it renders as
-      // "Remote access through origin is currently off." or "reported gateway_start_failed".
-      const providerNames: Record<string, string> = {
-        tailscale: 'Tailscale Funnel', cpolar: 'cpolar', cloudflared: 'cloudflared',
-        frp: t('frpName'), origin: t('originName'),
-      }
-      const providerId = typeof facts.provider === 'string' ? facts.provider : ''
-      const controllerKey = typeof facts.controllerCode === 'string' ? REMOTE_ERROR_MESSAGE_KEYS[facts.controllerCode] : undefined
-      const values: Record<string, string> = {
-        provider: providerNames[providerId] ?? '',
-        latencyMs: typeof facts.latencyMs === 'number' && Number.isFinite(facts.latencyMs) ? new Intl.NumberFormat(localeTag).format(facts.latencyMs) : '',
-        interfaceName: typeof facts.interfaceName === 'string' ? facts.interfaceName : '',
-        endpointSuffix: typeof facts.endpointSuffix === 'string' ? facts.endpointSuffix : '',
-        // A translated sentence when the code is known, otherwise nothing rather than
-        // an identifier no user can act on.
-        controllerCode: controllerKey === undefined ? '' : t(controllerKey),
-      }
-      const interpolate = (template: string): string => template.replace(/\{(\w+)\}/gu, (_match, key: string) => values[key] ?? '')
-      let detail = interpolate(templates[0])
-      let action = interpolate(templates[1])
-      if (reason === 'versions-current') {
-        const versions = data.versions !== null && typeof data.versions === 'object' ? data.versions as Record<string, unknown> : {}
-        if ([versions.plugin, versions.dsh, versions.minimumAndroidApp].every(value => typeof value === 'string')) {
-          detail += ` plugin ${String(versions.plugin)}, DSH ${String(versions.dsh)}, Android ${String(versions.minimumAndroidApp)}.`
-        }
-      }
-      if (reason === 'remote-controller-error') action = diagnosticControllerAction(facts.controllerCode, locale, action)
-      return { detail, action }
-    }
+    const localizedEntryCopy = (entry: Record<string, unknown>): { readonly detail: string; readonly action: string } =>
+      localizedDiagnosticEntryCopy(entry, locale, data.versions)
     const appendGroup = (label: string, groupEntries: Record<string, unknown>[]): void => {
       if (groupEntries.length === 0) return
       const group = element('section', 'dsh-mobile-control__diagnostic-group')

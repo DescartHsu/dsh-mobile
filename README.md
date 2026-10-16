@@ -25,13 +25,13 @@
   <a href="#安全">安全</a> ·
   <a href="#兼容性">兼容性</a> ·
   <a href="#贡献者">贡献者</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.9">更新记录</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.10">更新记录</a> ·
   <a href="README.en.md">English</a>
 </p>
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.9**。开放 Windows/Linux x64 的托管 Caddy 按需安装，改善连接停止与组件清理，并补充自定义样式排障建议。已有远程通道和配对保留，无需更新 Android App。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.9) · [完整更新记录](CHANGELOG.md)。
+> **当前正式版本：0.6.10**。修复 Tailscale Funnel 的具体错误与授权入口被退出通知覆盖，补齐三语诊断中的错误码和操作说明，并完善扩展文件投递指南。已有远程通道和配对保留，无需更新 Android App。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.10) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
@@ -225,6 +225,8 @@ Funnel 的运行组件把公开监听生命周期绑定到父进程和受限控�
 扩展清单及其脚本、样式和资源按版本标识刷新。插件监听到 `/mobile` 或扩展文件变化后，会通过已认证连接通知手机立即更新；页面可见时每 45 秒、隐藏时每 5 分钟的检查只作为断线兜底。Host 暂存失败会继续使用现有版本；若 Host 已更新但新手机界面激活失败，则关闭该扩展并自动重试，避免混用新旧能力。
 
 扩展动作的 `input` 可以直接使用 `api.schema.object(...)` 等 Schemastery schema，也可以使用带 `parse(value)` 的适配器；手机端 `api.host.invoke()` 会按 JSON 请求发送，输入会在电脑端动作执行前完成校验和规范化。
+
+附件功能优先复用 DSH 自带的文件上传。扩展若需模拟拖放，`dataTransfer` 除了 `files`，还须提供可迭代的 `items`（文件项列表），不能只拼一个 `files` 数组。部分 WebView 的原生拖放构造不完整，兼容处理可参考[插件内的文件投递实现](src/native-mobile.ts)；`dragover` 接受或事件派发成功不代表附件已加入，应检查输入框中的附件与预览。
 
 0.6.3 新增可选的 [Worker 执行模式](docs/EXTENSION_WORKERS.md)，用于约束可信本地扩展的 JavaScript 阻塞；默认关闭，按扩展选择，故障后显式恢复，不自动重放操作。这不是权限沙箱，也不要求 App 同步版本。
 

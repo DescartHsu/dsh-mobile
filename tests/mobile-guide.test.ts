@@ -94,4 +94,16 @@ describe('buildMobileGuide', () => {
     expect(text).toContain('不要裸匹配整页')
     expect(text).toContain('不得把隐藏功能描述成折叠')
   })
+
+  it('distinguishes complete file-drop data from confirmed draft attachments', () => {
+    const text = guide()
+    expect(text).toContain('优先复用 DSH 自带的文件上传')
+    expect(text).toContain('可迭代的 items（DataTransferItemList）')
+    expect(text).toContain('items.add(file)')
+    expect(text).toContain('effectAllowed / dropEffect')
+    expect(text).toContain('不能只检查构造函数是否存在')
+    expect(text).toContain('dragover 接受或事件派发成功不代表附件已加入')
+    expect(text).toContain('DSH 输入框草稿中的附件与解码后的图片预览')
+    expect(text).toContain('不要用电脑端附件目录的文件数量或修改时间代替')
+  })
 })

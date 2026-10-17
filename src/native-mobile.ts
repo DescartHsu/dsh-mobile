@@ -530,6 +530,151 @@ export function shouldAutoLoadEarlier(previousTop: number, currentTop: number): 
 }
 
 /**
+ * How long an armed auto-load survives without fresh user input. It outlasts the
+ * pauses inside one deliberate drag, and expires long before a reader reaches the
+ * top of a loaded page on their own.
+ */
+export const HISTORY_SCROLL_QUIET_MS = 1600
+
+/**
+ * One shared options object for every intent listener, so a listener is removed by
+ * exactly the registration it came from. Capture keeps `wheel` and `touchmove`
+ * visible even where DSH stops propagation, and is harmless for the scroller's own
+ * `scroll`/`scrollend`.
+ */
+export const HISTORY_INTENT_LISTENER_OPTIONS: AddEventListenerOptions = { passive: true, capture: true }
+
+/**
+ * The events that carry a history-loading intent. The scroller is not focusable, so
+ * there is no `keydown`: a keyboard reader scrolls it through the page instead.
+ */
+const HISTORY_INTENT_EVENTS = ['touchstart', 'touchmove', 'wheel', 'scroll', 'scrollend', 'touchend', 'touchcancel'] as const
+
+export interface HistoryAutoLoadHooks {
+  /** The scroller's `scrollTop`, clamped to >= 0. */
+  readonly getTop: () => number
+  /** Whether a move from `previousTop` to `currentTop` is an upward scroll into the zone. */
+  readonly shouldLoad: (previousTop: number, currentTop: number) => boolean
+  /** Click the loader button when it accepts a click; report `false` otherwise. */
+  readonly tryLoad: () => boolean
+  readonly schedule: (fn: () => void, ms: number) => unknown
+  readonly cancel: (id: unknown) => void
+}
+
+export interface HistoryAutoLoadGate {
+  /** One listener for every `HISTORY_INTENT_EVENTS` type. */
+  readonly handleEvent: (event: { type: string }) => void
+  /** Session switch or rebind: disarm and clear the quiet timer. */
+  readonly reset: (top: number) => void
+  /** Clear the quiet timer only; the binder owns listener add/remove. */
+  readonly dispose: () => void
+  readonly state: () => { armed: boolean; previousTop: number }
+}
+
+/**
+ * Decide whether a scroll near the top of the history is the user's, because DSH
+ * writes `scrollTop` itself while it prepends a loaded page. An ungated listener read
+ * that compensation as another upward fling, clicked "Load earlier" again, and shook
+ * the view in a chain. Only fresh input arms the gate, one arm buys at most one
+ * successful load, and an arm with no further input expires quietly.
+ */
+export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryAutoLoadGate {
+  let armed = false
+  let touchActive = false
+  let disposed = false
+  let previousTop = hooks.getTop()
+  let quietPending = false
+  let quietId: unknown
+
+  const cancelQuiet = (): void => {
+    if (!quietPending) return
+    quietPending = false
+    hooks.cancel(quietId)
+    quietId = undefined
+  }
+  const onQuiet = (): void => {
+    quietPending = false
+    quietId = undefined
+    // A finger still on the glass is an unfinished intent, not a quiet one.
+    if (touchActive) return
+    armed = false
+  }
+  const restartQuiet = (): void => {
+    cancelQuiet()
+    if (disposed) return
+    quietPending = true
+    quietId = hooks.schedule(onQuiet, HISTORY_SCROLL_QUIET_MS)
+  }
+  const arm = (): void => {
+    armed = true
+    restartQuiet()
+  }
+  const onScroll = (): void => {
+    const top = hooks.getTop()
+    const eligible = armed && hooks.shouldLoad(previousTop, top)
+    // Track the top while disarmed too: a script-driven write is a fact about the
+    // viewport, and hiding it would let the next drag look like a longer upward move.
+    previousTop = top
+    if (!eligible) return
+    // A refused click leaves the arm unspent, so the loader can still be reached
+    // inside the same gesture once DSH enables the button.
+    if (!hooks.tryLoad()) return
+    armed = false
+    cancelQuiet()
+  }
+
+  return {
+    handleEvent: event => {
+      if (disposed) return
+      switch (event.type) {
+        case 'touchstart':
+          touchActive = true
+          arm()
+          break
+        case 'touchmove':
+        case 'wheel':
+          arm()
+          break
+        case 'touchend':
+        case 'touchcancel':
+          touchActive = false
+          restartQuiet()
+          break
+        case 'scrollend':
+          armed = false
+          cancelQuiet()
+          break
+        case 'scroll':
+          onScroll()
+          break
+        default:
+          break
+      }
+    },
+    reset: top => {
+      armed = false
+      // The finger belonged to the previous session or node; it cannot arm this one.
+      touchActive = false
+      previousTop = top
+      cancelQuiet()
+    },
+    dispose: () => {
+      disposed = true
+      cancelQuiet()
+    },
+    state: () => ({ armed, previousTop }),
+  }
+}
+
+/** Attach a gate to one scroller; the disposer removes exactly the listeners it added. */
+export function bindHistoryAutoLoadGate(scroller: EventTarget, gate: Pick<HistoryAutoLoadGate, 'handleEvent'>): () => void {
+  for (const type of HISTORY_INTENT_EVENTS) scroller.addEventListener(type, gate.handleEvent, HISTORY_INTENT_LISTENER_OPTIONS)
+  return () => {
+    for (const type of HISTORY_INTENT_EVENTS) scroller.removeEventListener(type, gate.handleEvent, HISTORY_INTENT_LISTENER_OPTIONS)
+  }
+}
+
+/**
  * Whether the overlay scrim belongs on screen. The scrim exists for the
  * slide-in drawer only — it dims the page and catches the tap that closes the
  * drawer — so it is shown while that drawer is open *and* the overlay query is
@@ -1337,27 +1482,41 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   let transitionTimer = 0
   let transitionTarget: HTMLElement | undefined
   let historyScroller: HTMLElement | undefined
-  let historyPreviousTop = 0
+  let historySessionId: string | null = null
+  let disposeHistoryGate: (() => void) | undefined
   const historyLoadButton = (): HTMLButtonElement | undefined => {
     const loader = historyScroller === undefined ? undefined : firstByClassSuffix(historyScroller, '_older')
     return loader?.querySelector<HTMLButtonElement>('button') ?? undefined
   }
-  const onHistoryScroll = (): void => {
-    if (historyScroller === undefined) return
-    const currentTop = Math.max(0, historyScroller.scrollTop)
-    const shouldLoad = shouldAutoLoadEarlier(historyPreviousTop, currentTop)
-    historyPreviousTop = currentTop
-    if (!shouldLoad) return
-    const button = historyLoadButton()
-    if (button === undefined || button.disabled || button.getAttribute('aria-disabled') === 'true') return
-    button.click()
-  }
+  const historyAutoLoadGate = createHistoryAutoLoadGate({
+    getTop: () => Math.max(0, historyScroller?.scrollTop ?? 0),
+    shouldLoad: shouldAutoLoadEarlier,
+    tryLoad: () => {
+      const button = historyLoadButton()
+      if (button === undefined || button.disabled || button.getAttribute('aria-disabled') === 'true') return false
+      button.click()
+      return true
+    },
+    schedule: (fn, ms) => window.setTimeout(fn, ms),
+    cancel: id => { window.clearTimeout(id as number) },
+  })
+  /**
+   * Rebind the gate to the conversation scroller, and drop an arm that belongs to a
+   * session the reader has already left: DSH can reuse the same scroller node, so the
+   * session identity has to be checked even when the node did not change.
+   */
   const bindHistoryScroller = (next: HTMLElement | undefined): void => {
-    if (historyScroller === next) return
-    historyScroller?.removeEventListener('scroll', onHistoryScroll)
-    historyScroller = next
-    historyPreviousTop = next?.scrollTop ?? 0
-    historyScroller?.addEventListener('scroll', onHistoryScroll, { passive: true })
+    if (historyScroller !== next) {
+      disposeHistoryGate?.()
+      disposeHistoryGate = undefined
+      historyScroller = next
+      historyAutoLoadGate.reset(next?.scrollTop ?? 0)
+      if (next !== undefined) disposeHistoryGate = bindHistoryAutoLoadGate(next, historyAutoLoadGate)
+    }
+    const sessionId = currentSessionOrigin().sessionId
+    if (sessionId === historySessionId) return
+    historySessionId = sessionId
+    historyAutoLoadGate.reset(historyScroller?.scrollTop ?? 0)
   }
   const animateNavigation = (event: MouseEvent): void => {
     if (!(event.target instanceof Element)) return
@@ -1632,7 +1791,9 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     if (transitionRestartFrame !== 0) cancelAnimationFrame(transitionRestartFrame)
     if (transitionTimer !== 0) clearTimeout(transitionTimer)
     transitionTarget?.removeAttribute('data-dsh-mobile-view-transition')
-    historyScroller?.removeEventListener('scroll', onHistoryScroll)
+    disposeHistoryGate?.()
+    disposeHistoryGate = undefined
+    historyAutoLoadGate.dispose()
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('keydown', onKeyDown, true)
     document.removeEventListener('pointerdown', onTogglePointerDown, true)

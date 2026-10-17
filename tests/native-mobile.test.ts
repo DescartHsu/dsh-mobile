@@ -249,6 +249,12 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[data-variant="think"]) { margin-bottom:12px !important; }')
   })
 
+  it('pins a fixed loader row box independent of button state', () => {
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] { position:relative !important; height:28px !important; }')
+    expect(NATIVE_MOBILE_STYLES).not.toContain('min-height:1px !important')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:disabled { position:absolute !important; left:50% !important; top:0 !important; transform:translateX(-50%) !important; height:28px !important; max-height:28px !important; overflow:hidden !important; padding:4px 12px !important; }')
+  })
+
   it('caps only the draft scrollport when the narrow focused viewport is short', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('@media (max-width:720px) and (max-height:500px)')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-center] [data-composer-card] > [data-input-scroll] { max-height:72px !important; overflow-y:auto !important; }')

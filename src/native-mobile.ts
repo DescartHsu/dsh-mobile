@@ -160,9 +160,9 @@ export const NATIVE_MOBILE_STYLES = `
   [data-dsh-mobile-center] pre { max-width:100%; overflow-x:auto; }
   [data-dsh-mobile-center] :is(img,video,canvas,svg) { max-width:100%; }
   [data-dsh-mobile-message-scroll] { box-sizing:border-box !important; width:100% !important; padding:8px 10px 20px !important; }
-  [data-dsh-mobile-history-loader] { position:relative !important; min-height:1px !important; }
+  [data-dsh-mobile-history-loader] { position:relative !important; height:28px !important; }
   [data-dsh-mobile-history-loader] button:not(:disabled) { position:absolute !important; width:1px !important; height:1px !important; margin:-1px !important; padding:0 !important; clip-path:inset(50%) !important; opacity:0 !important; overflow:hidden !important; pointer-events:none !important; }
-  [data-dsh-mobile-history-loader] button:disabled { min-height:28px !important; padding:4px 12px !important; }
+  [data-dsh-mobile-history-loader] button:disabled { position:absolute !important; left:50% !important; top:0 !important; transform:translateX(-50%) !important; height:28px !important; max-height:28px !important; overflow:hidden !important; padding:4px 12px !important; }
   /* DSH's sibling margins exclude hidden and empty Chat Node Seats. Keep that
      spacing rule so searchable hidden seats contribute no folded-turn gaps. */
   [data-dsh-mobile-message-column] { box-sizing:border-box !important; width:100% !important; max-width:none !important; margin:0 !important; padding:0 !important; gap:0 !important; --dsh-chat-flow-gap:10px; }

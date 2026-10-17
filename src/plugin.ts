@@ -586,6 +586,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       blockedUpgradePaths,
       (source, code) => { logger.warn('%s discovery degraded while DSH remains available: %s', source, code) },
       clientModulePreferences,
+      entry => { logger.warn('auth failure %s', JSON.stringify(entry)) },
     )
     await candidate.start()
     lanGateway = candidate
@@ -668,6 +669,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
         blockedUpgradePaths,
         undefined,
         clientModulePreferences,
+        entry => { logger.warn('auth failure %s', JSON.stringify(entry)) },
       )
       await candidate.start()
       return candidate

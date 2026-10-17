@@ -956,6 +956,35 @@ function mapError(error: unknown): HttpError {
   return new HttpError(500, 'internal_error')
 }
 
+/**
+ * Shape one rejected request for logging.
+ *
+ * Presence flags only: the session token and the CSRF value are never reflected
+ * into the log, because the log outlives the request and is plain text.
+ */
+function authFailureEntry(
+  kind: 'authorize' | 'csrf',
+  status: number,
+  request: IncomingMessage,
+  path: string,
+  authorization?: SessionAuthorization,
+): AuthFailureEntry {
+  const cookies = request.headers.cookie ?? ''
+  const site = request.headers['sec-fetch-site']
+  return {
+    kind,
+    status,
+    method: request.method ?? 'GET',
+    path,
+    sessionCookie: /(?:^|;\s*)(?:__Host-)?dsh_ma_session=/.test(cookies),
+    csrfHeader: headerValue(request.headers, CSRF_HEADER) !== undefined,
+    csrfCookies: cookies.split(';').filter(value => value.includes('dsh_ma_csrf')).length,
+    ...(request.headers.origin === undefined ? {} : { origin: request.headers.origin }),
+    ...(site === undefined ? {} : { site: String(site) }),
+    ...(authorization === undefined ? {} : { device: authorization.deviceId.slice(0, 8) }),
+  }
+}
+
 function requestAbortedError(): Error {
   const error = new Error('request aborted')
   error.name = 'AbortError'
@@ -1127,6 +1156,20 @@ function extensionContentType(path: string): string {
   return type ?? 'application/octet-stream'
 }
 
+/** One rejected request, recorded so an auth failure in the field leaves evidence. */
+export interface AuthFailureEntry {
+  kind: 'authorize' | 'csrf'
+  status: number
+  method: string
+  path: string
+  sessionCookie: boolean
+  csrfHeader: boolean
+  csrfCookies: number
+  origin?: string
+  site?: string
+  device?: string
+}
+
 /** Authenticated TLS edge in front of the ordinary loopback-only DSH Web server. */
 export class MobileAccessGateway {
   readonly access: AccessController
@@ -1190,6 +1233,7 @@ export class MobileAccessGateway {
     private readonly blockedUpgradeLog?: BlockedUpgradePathLog,
     private readonly onDiscoveryDegraded?: (source: 'broadcast' | 'mdns', code: string) => void,
     clientModulePreferences?: ClientModulePreferenceStore,
+    private readonly authFailureLog?: (entry: AuthFailureEntry) => void,
   ) {
     this.clientModulePreferences = clientModulePreferences ?? new ClientModulePreferenceStore(
       join(dirname(config.stateFile), `${basename(config.stateFile)}.client-modules.json`), config.excludedClientModules,
@@ -1848,6 +1892,7 @@ export class MobileAccessGateway {
       authorization = this.authorize(request)
     } catch (error) {
       const mapped = mapError(error)
+      this.authFailureLog?.(authFailureEntry('authorize', mapped.status, request, target.decodedPathname))
       const acceptsHtml = request.headers.accept?.split(',').some(value => value.trim().split(';', 1)[0] === 'text/html') ?? false
       const topLevel = request.method === 'GET'
         && acceptsHtml
@@ -1866,7 +1911,14 @@ export class MobileAccessGateway {
       }
       throw error
     }
-    if (isMutation) this.requireCsrf(request, authorization)
+    if (isMutation) {
+      try {
+        this.requireCsrf(request, authorization)
+      } catch (error) {
+        this.authFailureLog?.(authFailureEntry('csrf', mapError(error).status, request, target.decodedPathname, authorization))
+        throw error
+      }
+    }
     if (clientModules) {
       if (target.search !== '') throw new HttpError(400, 'bad_request')
       if (request.method !== 'GET' && request.method !== 'POST') throw new HttpError(405, 'method_not_allowed')

@@ -17,7 +17,7 @@ import { connect, Socket, type AddressInfo } from 'node:net'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseGatewayConfig } from '../src/config.js'
-import { MobileAccessGateway } from '../src/gateway.js'
+import { MobileAccessGateway, type AuthFailureEntry } from '../src/gateway.js'
 import { BlockedUpgradePathLog } from '../src/websocket-paths.js'
 import { CSRF_COOKIE, CSRF_HEADER, DEVICE_COOKIE, SESSION_COOKIE } from '../src/http-security.js'
 import { HOST_CSRF_COOKIE, HOST_DEVICE_COOKIE, HOST_SESSION_COOKIE } from '../src/browser-auth-cookies.js'
@@ -3106,5 +3106,53 @@ describe('WebSocket gateway', () => {
     await vi.waitFor(() => {
       expect(() => instance.access.authorizeSession(paired.session)).toThrow()
     })
+  })
+})
+
+describe('auth failure recording', () => {
+  it('records a rejected authorization and a rejected mutation without reflecting credentials', async () => {
+    const entries: AuthFailureEntry[] = []
+    const instance = new MobileAccessGateway(
+      parseGatewayConfig({
+        listenHost: '127.0.0.1',
+        listenPort: 0,
+        upstreamOrigin: 'http://127.0.0.1:1',
+        publicAuthorities: ['127.0.0.1'],
+        allowedCidrs: ['127.0.0.0/8'],
+        stateFile: join(tmpdir(), `dsh-mobile-auth-failure-${crypto.randomUUID()}.json`),
+        tls: { mode: 'disabled' },
+      }),
+      new MemoryDeviceStore(),
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      entry => { entries.push(entry) },
+    )
+    await instance.start()
+    cleanups.push(() => instance.close())
+
+    // No session cookie: rejected before the CSRF gate is reached.
+    const anonymous = await request(instance.address().port, '/mobile-access/compat.js', {
+      headers: browserHeaders(instance),
+    })
+    expect(anonymous.status).toBe(401)
+
+    // Paired, but a mutation that carries no CSRF header.
+    const paired = await pair(instance)
+    const rejected = await request(instance.address().port, '/api/session/prompt', {
+      method: 'POST',
+      headers: {
+        ...browserHeaders(instance),
+        cookie: `${SESSION_COOKIE}=${paired.session}; ${CSRF_COOKIE}=${paired.csrf}`,
+      },
+    })
+    expect(rejected.status).toBe(403)
+
+    expect(entries.map(entry => [entry.kind, entry.status])).toEqual([['authorize', 401], ['csrf', 403]])
+    expect(entries[0]).toMatchObject({ method: 'GET', path: '/mobile-access/compat.js', sessionCookie: false, csrfHeader: false })
+    expect(entries[1]).toMatchObject({ method: 'POST', path: '/api/session/prompt', sessionCookie: true, csrfHeader: false, device: paired.deviceId.slice(0, 8) })
+
+    // Presence flags only: neither credential may reach the log.
+    const serialized = JSON.stringify(entries)
+    expect(serialized).not.toContain(paired.session)
+    expect(serialized).not.toContain(paired.csrf)
   })
 })

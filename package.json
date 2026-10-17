@@ -117,6 +117,7 @@
     "smoke:module-settings": "node ./scripts/smoke-client-module-settings.mjs",
     "smoke:attachments": "node ./scripts/smoke-mobile-attachments.mjs",
     "smoke:browser-auth-cookies": "node ./scripts/smoke-browser-auth-cookies.mjs",
+    "smoke:history-scroll": "node ./scripts/smoke-history-scroll-stability.mjs",
     "capture:screenshots": "node ./scripts/capture-mobile-screenshots.mjs",
     "check:release-tag": "node ./scripts/check-release-version.mjs --tag-env",
     "check:android-release-tag": "node ./scripts/check-release-version.mjs --android-tag-env",

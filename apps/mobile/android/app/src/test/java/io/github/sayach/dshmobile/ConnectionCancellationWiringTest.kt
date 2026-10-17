@@ -238,10 +238,22 @@ class ConnectionCancellationWiringTest {
         assertTrue(method(source, "startConnectionAttempt").contains("returnFromStoppedRecoveryIfPageLost(preserveBrowser)"))
         val fallback = method(source, "returnFromStoppedRecoveryIfPageLost")
         assertTrue(fallback.contains("probeMountedDshPage(browser, origin, INITIAL_DSH_READY_PROBE)"))
-        for (condition in listOf("!mounted", "pendingConnection == null", "restoreGeneration == generation", "webView === browser", "browser.url == url", "gatewayOrigin == origin", "recoveryStoppedBrowser === browser")) {
+        for (condition in listOf("!mounted", "pendingConnection == null", "restoreGeneration == generation", "webView === browser", "browser.url == url", "currentDocumentGeneration == documentGeneration", "gatewayOrigin == origin", "recoveryStoppedBrowser === browser")) {
             assertTrue("A stale stopped-page probe must not replace newer content: $condition", fallback.contains(condition))
         }
         assertTrue(fallback.contains("showConnectionCenter()"))
+    }
+
+    @Test fun aSameUrlReplacementWithdrawsTheStoppedDocumentProbeBeforeReturningToTheList() {
+        val fallback = method(activitySource(), "returnFromStoppedRecoveryIfPageLost")
+        val capture = fallback.indexOf("val documentGeneration = secureWebViewClient?.currentDocumentGeneration ?: return")
+        val probe = fallback.indexOf("probeMountedDshPage(browser, origin, INITIAL_DSH_READY_PROBE)")
+        val guard = fallback.indexOf("secureWebViewClient?.currentDocumentGeneration == documentGeneration")
+        val navigate = fallback.indexOf("showConnectionCenter()")
+        assertTrue("Capture the committed document separately from its reusable URL", capture >= 0)
+        assertTrue(capture < probe)
+        assertTrue("A delayed result checks the document that requested it", guard > probe)
+        assertTrue("A same-URL reload must win over the older failed-page result", navigate > guard)
     }
 
     @Test fun cancellingInitialPageLoadingCannotReturnToADetachedPairingForm() {

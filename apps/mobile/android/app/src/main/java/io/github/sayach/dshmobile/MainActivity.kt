@@ -716,10 +716,12 @@ class MainActivity : Activity() {
     private fun returnFromStoppedRecoveryIfPageLost(browser: WebView) {
         val origin = gatewayOrigin ?: return
         val generation = restoreGeneration
+        val documentGeneration = secureWebViewClient?.currentDocumentGeneration ?: return
         val url = browser.url
         probeMountedDshPage(browser, origin, INITIAL_DSH_READY_PROBE) { mounted ->
             if (!mounted && !isFinishing && !isDestroyed && pendingConnection == null
                 && restoreGeneration == generation && webView === browser && browser.url == url
+                && secureWebViewClient?.currentDocumentGeneration == documentGeneration
                 && gatewayOrigin == origin && recoveryStoppedBrowser === browser
             ) showConnectionCenter()
         }

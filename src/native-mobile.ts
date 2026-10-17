@@ -160,9 +160,10 @@ export const NATIVE_MOBILE_STYLES = `
   [data-dsh-mobile-center] pre { max-width:100%; overflow-x:auto; }
   [data-dsh-mobile-center] :is(img,video,canvas,svg) { max-width:100%; }
   [data-dsh-mobile-message-scroll] { box-sizing:border-box !important; width:100% !important; padding:8px 10px 20px !important; }
-  [data-dsh-mobile-history-loader] { position:relative !important; flex:0 0 28px !important; height:28px !important; }
-  [data-dsh-mobile-history-loader] button:not(:disabled) { position:absolute !important; width:1px !important; height:1px !important; margin:-1px !important; padding:0 !important; clip-path:inset(50%) !important; opacity:0 !important; overflow:hidden !important; pointer-events:none !important; }
-  [data-dsh-mobile-history-loader] button:disabled { position:absolute !important; left:50% !important; top:0 !important; transform:translateX(-50%) !important; height:28px !important; max-height:28px !important; overflow:hidden !important; padding:4px 12px !important; }
+  [data-dsh-mobile-history-loader] { position:relative !important; display:grid !important; grid-template-columns:minmax(0,1fr) !important; justify-items:center !important; flex:0 0 auto !important; min-height:48px !important; font-size:var(--dsh-content-font-size-secondary,13px); line-height:1.5; }
+  [data-dsh-mobile-history-loader]::before,[data-dsh-mobile-history-loader] button { box-sizing:border-box !important; grid-area:1/1 !important; min-height:48px !important; max-width:100% !important; padding:8px 12px !important; font:inherit !important; white-space:normal !important; overflow-wrap:anywhere; }
+  [data-dsh-mobile-history-loader]::before { content:attr(data-dsh-mobile-history-label); visibility:hidden; pointer-events:none; }
+  [data-dsh-mobile-history-loader] button { min-width:48px !important; touch-action:manipulation; }
   /* DSH's sibling margins exclude hidden and empty Chat Node Seats. Keep that
      spacing rule so searchable hidden seats contribute no folded-turn gaps. */
   [data-dsh-mobile-message-column] { box-sizing:border-box !important; width:100% !important; max-width:none !important; margin:0 !important; padding:0 !important; gap:0 !important; --dsh-chat-flow-gap:10px; }
@@ -530,9 +531,22 @@ export function shouldAutoLoadEarlier(previousTop: number, currentTop: number): 
 }
 
 /**
- * How long an armed auto-load survives without fresh user input. It outlasts the
- * pauses inside one deliberate drag, and expires long before a reader reaches the
- * top of a loaded page on their own.
+ * Retain the native idle label's wrapping space while its button displays a shorter busy label.
+ * @param loader - the row whose hidden sizing text shares the button's grid cell.
+ * @param button - the upstream control which owns the localized idle and busy labels.
+ */
+export function syncHistoryLoaderLabel(
+  loader: Pick<HTMLElement, 'dataset'>,
+  button: Pick<HTMLButtonElement, 'disabled' | 'textContent'>,
+): void {
+  if (button.disabled) return
+  const label = button.textContent?.trim() ?? ''
+  if (loader.dataset.dshMobileHistoryLabel !== label) loader.dataset.dshMobileHistoryLabel = label
+}
+
+/**
+ * Maximum gap between input or scrolling events before an unused loading intent expires.
+ * A held finger may re-arm on its next owned move; an undelivered touch end cannot keep the lease alive.
  */
 export const HISTORY_SCROLL_QUIET_MS = 1600
 
@@ -561,10 +575,10 @@ export interface HistoryAutoLoadHooks {
   readonly cancel: (id: unknown) => void
 }
 
-/** A touch event carries its remaining contacts; other events carry none. */
+/** Touch changes identify the contacts whose start/end this scroller actually observed. */
 export interface HistoryIntentEvent {
   readonly type: string
-  readonly touches?: { readonly length: number }
+  readonly changedTouches?: ArrayLike<{ readonly identifier: number }>
 }
 
 export interface HistoryAutoLoadGate {
@@ -614,7 +628,7 @@ export function resolveHistoryGateIdentity(input: HistoryGateIdentityInput): His
  */
 export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryAutoLoadGate {
   let armed = false
-  let touchActive = false
+  const touchIds = new Set<number>()
   let disposed = false
   let previousTop = hooks.getTop()
   let quietPending = false
@@ -629,8 +643,6 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
   const onQuiet = (): void => {
     quietPending = false
     quietId = undefined
-    // A finger still on the glass is an unfinished intent, not a quiet one.
-    if (touchActive) return
     armed = false
   }
   const restartQuiet = (): void => {
@@ -667,20 +679,24 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
       if (disposed) return
       switch (event.type) {
         case 'touchstart':
-          // A real event carries its contact list; synthetic taps may not.
-          touchActive = event.touches === undefined ? true : event.touches.length > 0
-          arm()
+          for (const touch of Array.from(event.changedTouches ?? [])) touchIds.add(touch.identifier)
+          if ((event.changedTouches?.length ?? 0) > 0) arm()
           break
         case 'touchmove':
+          if (Array.from(event.changedTouches ?? []).some(touch => touchIds.has(touch.identifier))) arm()
+          break
         case 'wheel':
           arm()
           break
         case 'touchend':
-        case 'touchcancel':
-          // One lifted finger leaves the gesture unfinished while others remain.
-          touchActive = event.touches === undefined ? false : event.touches.length > 0
-          restartQuiet()
+        case 'touchcancel': {
+          let endedOwnedTouch = false
+          for (const touch of Array.from(event.changedTouches ?? [])) {
+            if (touchIds.delete(touch.identifier)) endedOwnedTouch = true
+          }
+          if (endedOwnedTouch) restartQuiet()
           break
+        }
         case 'scrollend':
           armed = false
           cancelQuiet()
@@ -695,12 +711,14 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
     reset: top => {
       armed = false
       // The finger belonged to the previous session or node; it cannot arm this one.
-      touchActive = false
+      touchIds.clear()
       previousTop = top
       cancelQuiet()
     },
     dispose: () => {
       disposed = true
+      armed = false
+      touchIds.clear()
       cancelQuiet()
     },
     state: () => ({ armed, previousTop }),
@@ -1526,6 +1544,20 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   let historyScroller: HTMLElement | undefined
   let historySessionId: string | null = null
   let disposeHistoryGate: (() => void) | undefined
+  let historyLoaderBinding: { readonly element: HTMLElement; readonly originalLabel: string | undefined } | undefined
+  const historyLabelObserver = new MutationObserver(() => schedule())
+  const bindHistoryLoader = (next: HTMLElement | undefined): void => {
+    if (historyLoaderBinding?.element === next) return
+    historyLabelObserver.disconnect()
+    if (historyLoaderBinding !== undefined) {
+      const { element, originalLabel } = historyLoaderBinding
+      if (originalLabel === undefined) delete element.dataset.dshMobileHistoryLabel
+      else element.dataset.dshMobileHistoryLabel = originalLabel
+    }
+    historyLoaderBinding = next === undefined ? undefined : { element: next, originalLabel: next.dataset.dshMobileHistoryLabel }
+    // Native locale changes may replace only the button's text node.
+    if (next !== undefined) historyLabelObserver.observe(next, { childList: true, characterData: true, subtree: true })
+  }
   const historyLoadButton = (): HTMLButtonElement | undefined => {
     const loader = historyScroller === undefined ? undefined : firstByClassSuffix(historyScroller, '_older')
     return loader?.querySelector<HTMLButtonElement>('button') ?? undefined
@@ -1644,6 +1676,7 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
       syncPanHeader(undefined)
       syncComposerEnterNewline(null)
       bindHistoryScroller(undefined, null)
+      bindHistoryLoader(undefined)
       syncMediaBinding(null)
       setCameraActionDisabled(true, label('Apri prima una sessione', 'Open a session first', '请先打开会话'))
       cameraButton.remove()
@@ -1662,14 +1695,13 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
       const composerCard = center.querySelector<HTMLElement>('[data-composer-card]')
       bindHistoryScroller(conversation ?? undefined, composerCard ?? null)
       const historyLoader = conversation === null ? undefined : firstByClassSuffix(conversation, '_older')
+      bindHistoryLoader(historyLoader)
       if (historyLoader !== undefined) {
         historyLoader.dataset.dshMobileHistoryLoader = 'true'
         historyLoader.setAttribute('aria-live', 'polite')
         const button = historyLoader.querySelector<HTMLButtonElement>('button')
         if (button !== null) {
-          button.tabIndex = -1
-          if (button.disabled) button.removeAttribute('aria-hidden')
-          else button.setAttribute('aria-hidden', 'true')
+          syncHistoryLoaderLabel(historyLoader, button)
         }
       }
       const messageColumn = conversation === null ? undefined : firstByClassSuffix(conversation, '_column')
@@ -1844,6 +1876,7 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     disposeHistoryGate?.()
     disposeHistoryGate = undefined
     historyAutoLoadGate.dispose()
+    bindHistoryLoader(undefined)
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('keydown', onKeyDown, true)
     document.removeEventListener('pointerdown', onTogglePointerDown, true)

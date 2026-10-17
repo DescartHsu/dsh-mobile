@@ -22,7 +22,7 @@ class RestoreNavigationWiringTest {
     fun theActivityUsesTheProductionGateForRetriesRenewalAndCookieCallbacks() {
         val activity = activitySource()
         val cancellation = methodBody(activity, "cancelRestoreForConfiguration")
-        assertTrue(cancellation.contains("cancelRestoreEscape()"))
+        assertTrue(cancellation.contains("withdrawConnectionAttempt()"))
         assertTrue(cancellation.contains("cancelAutomaticRecovery()"))
         assertTrue(cancellation.contains("invalidateRestoreAttempts()"))
         assertTrue(methodBody(activity, "beginRestoreAttempt").contains("restoreAttemptGate.begin()"))
@@ -31,7 +31,7 @@ class RestoreNavigationWiringTest {
         assertTrue(methodBody(activity, "scheduleAutomaticRecovery").contains("restoreAttemptGate.retryCallback"))
         val restore = methodBody(activity, "restoreTrustedDevice")
         assertTrue(restore.contains("runOnUiThread(restoreAttemptGate.callback(generation)"))
-        assertTrue(restore.contains("isCurrent = { restoreAttemptGate.isCurrent(generation) }"))
+        assertTrue(restore.contains("isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) }"))
     }
 
     @Test
@@ -46,7 +46,7 @@ class RestoreNavigationWiringTest {
         for (name in listOf("openExternal", "onBlocked", "onFailure", "onRendererGone", "onTopLevelUrlChanged", "onLoaded")) {
             assertTrue("Missing callback owner $name", callbacks.contains("$name ="))
             val body = callbacks.substringAfter("$name =").substringBefore("\n            },")
-            assertTrue("Late $name must not act on the current Activity browser", body.contains("if (ownsBrowser())"))
+            assertTrue("Late $name must not act on the current Activity browser", body.contains("if (ownsBrowser()"))
         }
     }
 

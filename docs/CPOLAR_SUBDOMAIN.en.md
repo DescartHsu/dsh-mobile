@@ -6,7 +6,7 @@
 
 cpolar assigns a temporary public address by default. Reserving a subdomain lets an account request a fixed address, reducing bookmark updates and re-pairing after tunnel restarts. A fixed address does not keep the tunnel permanently online or remove re-pairing requirements after credentials expire or a device is revoked.
 
-The public entry still reaches the DSH Mobile Gateway with HTTPS, device pairing and authorization checks; it does not expose the ordinary DSH WebServer directly.
+The public entry still reaches the DSH Mobile Gateway with HTTPS, device pairing and authorization checks; it does not expose the ordinary DSH WebServer directly. The computer connects out to cpolar, so this channel needs neither a home-network inbound port nor Tencent Cloud DNSPod. Availability and speed still depend on the cpolar plan and both network paths.
 
 ## Prerequisites
 

@@ -24,21 +24,22 @@
   <a href="#third-party-plugin-compatibility">Third-party plugins</a> ·
   <a href="#security">Security</a> ·
   <a href="#compatibility">Compatibility</a> ·
+  <a href="docs/README.md">Documentation</a> ·
   <a href="#contributors">Contributors</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.10">Release notes</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.11">Release notes</a> ·
   <a href="README.md">简体中文</a>
 </p>
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.10**. Preserve Tailscale Funnel's specific failure and authorization entry when its process exits, restore error codes and actionable guidance in all three diagnostic languages, and clarify extension file delivery. Existing remote channels and pairings are retained; no Android app update is required. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.10) · [Full changelog](CHANGELOG.md).
+> **Current stable release: 0.6.11**. Improve scroll stability while loading history, retain a manual loading action, and add sanitized HTTP authentication-rejection diagnostics. Android app **0.6.5** independently improves connection cancellation, timeouts and loading presentation. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.11) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.4/dsh-mobile-android-v0.6.4.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.4/dsh-mobile-android-v0.6.4.apk"><strong>Download Android app 0.6.4</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.4">Release notes and checksums</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.5/dsh-mobile-android-v0.6.5.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.5/dsh-mobile-android-v0.6.5.apk"><strong>Download Android app 0.6.5</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, cloudflared, self-hosted FRP, or own reverse-proxy remote path. Both routes reach the same sessions, Workspaces, messages, and tools. The computer manages their switches and pairing authorizations separately; the Android app lists paired computers together. The plugin does not modify DeepSeek Harness source.
@@ -226,7 +227,7 @@ Extension manifests, scripts, styles, and assets are revisioned. When the plugin
 
 An extension action's `input` may use a callable Schemastery schema such as `api.schema.object(...)` or an adapter with `parse(value)`; mobile `api.host.invoke()` sends JSON explicitly, and the input is validated and normalized before the computer-side action runs.
 
-Prefer DSH's built-in file upload for attachments. If an extension must simulate a drop, its `dataTransfer` needs iterable `items` (file items) as well as `files`; a `files` array alone is insufficient. Some WebViews have incomplete native drag-and-drop constructors; see the [plugin's file-delivery implementation](src/native-mobile.ts) for compatibility handling. An accepted `dragover` or successfully dispatched event does not confirm attachment delivery: check the composer's attachments and previews.
+Prefer DSH's built-in file upload for attachments. If an extension must simulate a drop, its `dataTransfer` needs iterable `items` (file items) as well as `files`; a `files` array alone is insufficient. Some WebViews have incomplete native drag-and-drop constructors; see the [plugin's file-delivery implementation](https://github.com/saya-ch/dsh-mobile/blob/main/src/native-mobile.ts) for compatibility handling. An accepted `dragover` or successfully dispatched event does not confirm attachment delivery: check the composer's attachments and previews.
 
 The 0.6.3 release adds optional [Worker execution](docs/EXTENSION_WORKERS.en.md) for trusted local JavaScript hosts. It is disabled by default, selectable by extension, and recovers explicitly without replaying interrupted actions. It is not a permission sandbox and does not require a matching App version.
 
@@ -354,7 +355,7 @@ flowchart LR
   Gateway -->|"loopback proxy"| DSH["Stock DSH Web and Host"]
 ```
 
-Three layers: the Host face for discovery, pairing, HTTPS, loopback proxying, and extension registration; the Client face for the dedicated mobile layout and extension SDK; and the Android app for a narrow native bridge. The bridge uses `androidx.webkit` WebMessage, verifies the exact top-level origin and main frame on every bounded message, and never uses `addJavascriptInterface`. Neither the DeepSeek Harness source nor its active Web page (port 3080 by default, configurable through `dsh web --port`) is modified.
+Three layers: the Host face for discovery, pairing, HTTPS, loopback proxying, and extension registration; the Client face for the dedicated mobile layout and extension SDK; and the Android app for a narrow native bridge. The bridge uses `androidx.webkit` WebMessage, verifies the exact top-level origin and main frame on every bounded message, and never uses `addJavascriptInterface`. The plugin does not rewrite source or webpage files in the DeepSeek Harness installation. Its mobile gateway serves the startup compatibility layer and dedicated layout per request; installation and removal use the plugin mechanism. The upstream DSH Web port defaults to 3080 and is configurable through `dsh web --port`.
 
 ## Security
 
@@ -385,9 +386,7 @@ See [SECURITY.md](SECURITY.md).
 
 ## Compatibility
 
-The table records tested DSH and plugin version combinations; it does not imply automatic compatibility with other versions. Since 0.3.6 the plugin has not rejected DSH solely by version number. If mobile access breaks after upgrading DSH, check this table and update the plugin first. History lives in [CHANGELOG.md](CHANGELOG.md).
-
-Version 0.5.2 keeps the DSH host peer names but does not block installation by DSH version. New releases still need the source-contract and paired-browser checks below; an unlisted version is not automatically verified.
+The plugin retains DSH host peer declarations without rejecting installation or startup solely by DSH version. If mobile access breaks after a DSH update, update the plugin and check the verified scope below. An installable version does not establish that every feature is compatible. Release history lives in [CHANGELOG.md](CHANGELOG.md).
 
 ### OS support matrix
 
@@ -405,6 +404,13 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 
 | DSH Mobile plugin | Verified DeepSeek Harness version |
 | --- | --- |
+| `0.6.11` | Isolated packed-browser CI on `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-alpha.2` and `0.2.1-alpha.3`; additional real history-pagination, viewport-preservation and manual-loading checks on `0.2.0-rc.2` and `0.2.1-alpha.3`. Browser checks do not establish acceptance of every phone engine, third-party plugin or public route |
+
+<details>
+<summary>Historical version checks</summary>
+
+| DSH Mobile plugin | Verified DeepSeek Harness version |
+| --- | --- |
 | `0.5.5` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2` (npm installation, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
 | `0.6.0` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1` and `0.2.0-rc.2` (packed installation, pairing, mobile-page boot and WebSocket Workspace reads); additional checks cover the mobile composer, module settings and component loading after a normal official Desktop restart |
 | `0.6.2` | Packed legacy-WebView boot, touch scrolling and missing-API/viewport negative controls passed on `0.2.0-rc.2`, with release CI passing. The reporter's physical old devices in #187 were not claimed as accepted |
@@ -413,12 +419,6 @@ On macOS, local network, cloudflared, self-hosted FRP and the own reverse proxy 
 | `0.6.5` | Packed module-management and mobile-settings regressions on `0.2.0-rc.2` and `0.2.1-alpha.2`; additionally Windows cpolar extraction and populated Trajectory layout with published `maid-atelier` 0.1.7. This does not establish acceptance of every third-party skin or reporter device |
 | `0.6.6` | Packed attachment intake and decoded-preview regressions on `0.2.0-rc.2` and `0.2.1-alpha.2`, covering multiple images, cancellation, late results and superseded requests. Android system-picker changes are released independently, not through the npm update |
 | `0.6.8` | Packed mobile boot, legacy-WebView API simulation, WebSocket Workspace reads, mobile settings, module management, sidebar and composer regressions on `0.2.1-alpha.3`; separate real HTTP/TLS and legacy-credential upgrade tests cover the identity fix. The local official Desktop `0.2.0-rc.2` loads this plugin version with existing pairings preserved. This does not establish phone cellular or every third-party plugin combination |
-
-<details>
-<summary>Historical version checks</summary>
-
-| DSH Mobile plugin | Verified DeepSeek Harness version |
-| --- | --- |
 | `0.5.4` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2` (npm installation, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
 | `0.5.3` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2` (source contract, npm installation, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
 | `0.5.2` | `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, and `0.2.0-rc.1` (carried forward from earlier verification); `0.2.0-rc.2` (source contract, isolated pairing, mobile-page boot, and WebSocket Workspace baseline) |
@@ -477,6 +477,6 @@ npm ci
 npm run verify
 ```
 
-Use `npm run check:docs` for quick documentation checks. [CONTRIBUTING.md](CONTRIBUTING.md) covers behavior-specific browser tests, isolated packed DSH acceptance, captures and release steps; the [Android manual](apps/mobile/README.md#build) covers app builds. Do not substitute real user profiles or official app data for test fixtures.
+Use `npm run check:docs` for quick documentation checks. [CONTRIBUTING.md](https://github.com/saya-ch/dsh-mobile/blob/main/CONTRIBUTING.md) covers behavior-specific browser tests, isolated packed DSH acceptance, captures and release steps; the [Android manual](apps/mobile/README.md#build) covers app builds. Do not substitute real user profiles or official app data for test fixtures.
 
 Licensed under [Apache-2.0](LICENSE).

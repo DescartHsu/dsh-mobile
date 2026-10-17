@@ -4,6 +4,8 @@
 
 The remote page may open and `/mobile-access/health` may respond normally while DSH stays on “Reconnecting” or delays model and Workspace lists. HTTP reachability only shows that requests pass through; DSH's live data also needs a WebSocket connection to finish initialization and remain connected.
 
+Start with the actual channel rather than treating every delay as a DSH heartbeat problem. [Cloudflare Quick Tunnels](CLOUDFLARE_TUNNEL.en.md#quick-tunnel-feature-limits) do not support SSE, so completion or online-revocation notices may be missing; an external proxy's [Backend listening](SELF_HOSTED_ORIGIN.en.md#state-and-phone-verification) only confirms its private HTTP listener; [Managed Caddy](CADDY_MANAGED.en.md#requirements) needs Tencent Cloud DNSPod validation and real public HTTPS ingress, which DNS-01 cannot create through CGNAT. Check ingress, certificates, authentication, WebSockets, and notification streams separately before lengthening timeouts.
+
 ## Identify the stage that fails
 
 First record the DSH, DSH Mobile plugin and Android app versions. On the computer, check the current channel under **Mobile Access → Connection diagnostics**, then inspect DSH startup logs and the browser's developer tools under Network → WS and update the component involved. The plugin and app release independently; their version numbers do not need to match. Remove Tokens, Cookies, and complete pairing URLs before sharing logs.
@@ -13,6 +15,10 @@ First record the DSH, DSH Mobile plugin and Android app versions. On the compute
 - **Initialization reaches its deadline**: a console message such as `connection generation was not ready within 15000ms` means that attempt did not finish initializing in time. Check server errors, proxy interference, and incomplete data subscriptions as well as slow transfers.
 
 Both [#126](https://github.com/saya-ch/dsh-mobile/issues/126) and [#146](https://github.com/saya-ch/dsh-mobile/issues/146) report healthy HTTP access with a reconnecting live connection. The same interface message does not establish the same cause.
+
+### HTTP rejection diagnostics (plugin 0.6.11+)
+
+Plugin 0.6.11 and later write limited `auth failure` HTTP diagnostics to the plugin log (`$DSH_HOME/mobile-access/logs/dsh-mobile.log`): authorization versus CSRF rejection, status, method, a safe route or route category, related Cookie/header presence and counts, normalized Origin and recognized fetch-site values. It omits tokens, Cookie values, query strings and arbitrary original paths. Each Gateway rate-limits its two categories separately: the first event is immediate and same-category rejections aggregate within a 30-second window; `suppressed` counts previously suppressed records of that category, not all requests or only the current path. This helps investigate missing credentials and CSRF failures; it does not automatically repair a 401/403. The absence of a record does not establish successful authentication: earlier Host/Origin rejections, WebSocket upgrades and native pairing/renewal are outside these two recording points. Review logs before sharing them.
 
 ## Slow transfers can exceed the default deadlines
 

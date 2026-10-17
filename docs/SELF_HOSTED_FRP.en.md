@@ -4,7 +4,7 @@
 
 This page covers a new FRP entry, deployed manually or managed by the plugin over SSH. If your VPS already runs frps, plugin 0.4.6 or later can attach to it without deployment; see the [attachment guide](ATTACH_EXISTING_FRPS.en.md).
 
-Self-hosted FRP is for users who already operate a VPS and want to avoid the bandwidth limits of public tunnels. The phone reaches Caddy on the VPS over HTTPS, crosses the encrypted FRP tunnel, and then reaches DSH on the computer. FRP only transports the request; DSH pairing is still required.
+Self-hosted FRP suits users who already operate a VPS and want to manage the public entry themselves. The computer connects out to the VPS, so a home-network inbound port is unnecessary; the VPS still needs reachable public ingress, matching firewall rules, and sufficient bandwidth. The phone reaches Caddy on the VPS over HTTPS, crosses the encrypted FRP tunnel, and then reaches DSH on the computer. FRP only transports the request; DSH pairing is still required.
 
 ```text
 Android app
@@ -77,4 +77,4 @@ When several computers share one frps, proxy names are unique across the server 
 
 ## Acceptance check
 
-After deployment, check the certificate, public discovery endpoint, app pairing, and a live conversation on your own VPS and phone network. The repository's historical tests are recorded in the [self-hosted FRP handoff](HANDOFF_SELF_HOSTED_FRP.md); they cannot replace your own acceptance test.
+After deployment, check the certificate, public discovery endpoint, app pairing, and a live conversation on your own VPS and phone network. The repository's historical tests are recorded in the [self-hosted FRP handoff](https://github.com/saya-ch/dsh-mobile/blob/main/docs/HANDOFF_SELF_HOSTED_FRP.md); they cannot replace your own acceptance test.

@@ -483,6 +483,7 @@ async function gateway(
   blockedUpgradeLog?: BlockedUpgradePathLog,
   onDiscoveryDegraded?: (source: 'broadcast' | 'mdns', code: string) => void,
   startForTest?: (instance: MobileAccessGateway) => Promise<void>,
+  authFailureLog?: (entry: AuthFailureEntry) => void,
 ): Promise<MobileAccessGateway> {
   const resolved = parseGatewayConfig({
     listenHost: '127.0.0.1',
@@ -499,6 +500,7 @@ async function gateway(
   const instance = new MobileAccessGateway(
     effective, new MemoryDeviceStore(), undefined, upstreamAuthenticatedUrl,
     { has: (pathname: string) => extra.has(pathname) }, blockedUpgradeLog, onDiscoveryDegraded,
+    undefined, authFailureLog,
   )
   if (startForTest === undefined) await instance.start()
   else await startForTest(instance)
@@ -3131,7 +3133,7 @@ describe('auth failure recording', () => {
 
     // No session cookie: rejected before the CSRF gate is reached.
     const anonymous = await request(instance.address().port, '/mobile-access/compat.js', {
-      headers: browserHeaders(instance),
+      headers: { ...browserHeaders(instance), origin: `${instance.address().origin.toUpperCase()}, undefined` },
     })
     expect(anonymous.status).toBe(401)
 
@@ -3148,11 +3150,67 @@ describe('auth failure recording', () => {
 
     expect(entries.map(entry => [entry.kind, entry.status])).toEqual([['authorize', 401], ['csrf', 403]])
     expect(entries[0]).toMatchObject({ method: 'GET', path: '/mobile-access/compat.js', sessionCookie: false, csrfHeader: false })
+    expect(entries[0]?.origin).toBe(instance.address().origin)
     expect(entries[1]).toMatchObject({ method: 'POST', path: '/api/session/prompt', sessionCookie: true, csrfHeader: false, device: paired.deviceId.slice(0, 8) })
 
     // Presence flags only: neither credential may reach the log.
     const serialized = JSON.stringify(entries)
     expect(serialized).not.toContain(paired.session)
     expect(serialized).not.toContain(paired.csrf)
+  })
+
+  it('retains 401, 403 and 302 responses when the diagnostic observer throws, without replaying a mutation', async () => {
+    const inner = await upstream()
+    const observer = vi.fn(() => { throw new Error('isolated diagnostic failure') })
+    for (const expected of [401, 403, 302]) {
+      const instance = await gateway(inner.port, {}, undefined, undefined, [], undefined, undefined, undefined, observer)
+      const base = browserHeaders(instance)
+      const path = expected === 302 ? '/workspace/private-document?token=private-query' : '/api/session/prompt'
+      const paired = expected === 403 ? await pair(instance) : undefined
+      const rejected = await request(instance.address().port, path, {
+        method: paired === undefined ? 'GET' : 'POST',
+        headers: {
+          ...base,
+          ...(expected === 302 ? { accept: 'text/html', 'sec-fetch-dest': 'document' } : {}),
+          ...(paired === undefined ? {} : { cookie: `${SESSION_COOKIE}=${paired.session}` }),
+        },
+      })
+      expect(rejected.status).toBe(expected)
+      if (expected === 302) {
+        expect(rejected.headers.location).toBe(`/mobile-access/login?return=${encodeURIComponent(path)}`)
+      }
+    }
+    expect(observer).toHaveBeenCalledTimes(3)
+    expect(inner.observations).toHaveLength(0)
+  })
+
+  it('bounds real unauthenticated request logs even when each path and cookie value changes', async () => {
+    const entries: AuthFailureEntry[] = []
+    const instance = await gateway(1, {}, undefined, undefined, [], undefined, undefined, undefined, entry => { entries.push(entry) })
+    for (let index = 0; index < 32; index += 1) {
+      const rejected = await request(instance.address().port, `/api/private-file-${index}?token=private-${index}`, {
+        headers: { ...browserHeaders(instance), cookie: `unrelated=${CSRF_COOKIE}; ${SESSION_COOKIE}_other=private-${index}` },
+      })
+      expect(rejected.status).toBe(401)
+    }
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ path: '/api/*', sessionCookie: false, csrfCookies: 0 })
+    expect(JSON.stringify(entries)).not.toContain('private-')
+  })
+
+  it('counts duplicate host and ordinary CSRF cookie names, but not substrings, on an actual rejected mutation', async () => {
+    const entries: AuthFailureEntry[] = []
+    const instance = await gateway(1, {}, undefined, undefined, [], undefined, undefined, undefined, entry => { entries.push(entry) })
+    const paired = await pair(instance)
+    const rejected = await request(instance.address().port, '/api/session/prompt', {
+      method: 'POST',
+      headers: {
+        ...browserHeaders(instance),
+        cookie: `${SESSION_COOKIE}=${paired.session}; unrelated=${CSRF_COOKIE}; ${CSRF_COOKIE}_other=no; ${CSRF_COOKIE}=${paired.csrf}; ${HOST_CSRF_COOKIE}=${paired.csrf}; ${CSRF_COOKIE}=`,
+      },
+    })
+    expect(rejected.status).toBe(403)
+    expect(entries[0]).toMatchObject({ csrfCookies: 3, csrfHeader: false, sessionCookie: true })
+    expect(JSON.stringify(entries)).not.toContain(paired.csrf)
   })
 })

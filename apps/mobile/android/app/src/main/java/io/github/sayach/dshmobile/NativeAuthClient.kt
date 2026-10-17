@@ -95,12 +95,14 @@ internal object NativeAuthClient {
         token: String,
         caCertificate: ByteArray?,
         expectedInstanceId: String,
+        cancellation: NativeConnectionCancellation? = null,
     ): NativeSession = post(
         origin,
         "/mobile-access/auth/native-pair",
         JSONObject().put("token", token).put("label", "DeepSeek Harness Android"),
         caCertificate,
         expectedInstanceId,
+        cancellation,
     ) { input -> parseNativeSessionResponse(input, origin, expectedInstanceId, requireDeviceCredential = true) }
 
     fun renew(
@@ -108,12 +110,14 @@ internal object NativeAuthClient {
         deviceToken: String,
         caCertificate: ByteArray?,
         expectedInstanceId: String,
+        cancellation: NativeConnectionCancellation? = null,
     ): NativeSession = post(
         origin,
         "/mobile-access/auth/native-renew",
         JSONObject().put("deviceToken", deviceToken),
         caCertificate,
         expectedInstanceId,
+        cancellation,
     ) { input -> parseNativeSessionResponse(input, origin, expectedInstanceId, requireDeviceCredential = false) }
 
     fun probe(
@@ -121,17 +125,21 @@ internal object NativeAuthClient {
         deviceToken: String,
         caCertificate: ByteArray?,
         expectedInstanceId: String,
+        cancellation: NativeConnectionCancellation? = null,
     ): NativeProbe = post(
         origin,
         "/mobile-access/auth/native-probe",
         JSONObject().put("deviceToken", deviceToken),
         caCertificate,
         expectedInstanceId,
+        cancellation,
     ) { input -> parseNativeProbeResponse(input, origin, expectedInstanceId) }
 
     /** Only an explicit 404 yields an absent CA; the pairing key decides whether that is allowed. */
-    fun fetchPairingCa(origin: GatewayOrigin): ByteArray? = try {
-        bootstrapGet(origin, "/mobile-access/ca.cer", 16 * 1024, allowMissing = true)
+    fun fetchPairingCa(origin: GatewayOrigin, cancellation: NativeConnectionCancellation? = null): ByteArray? = try {
+        bootstrapGet(origin, "/mobile-access/ca.cer", 16 * 1024, allowMissing = true, cancellation = cancellation)
+    } catch (failure: NativeConnectionCancelled) {
+        throw failure
     } catch (failure: NativeAuthFailure) {
         throw failure
     } catch (failure: SocketTimeoutException) {
@@ -139,17 +147,18 @@ internal object NativeAuthClient {
     } catch (failure: SSLException) {
         throw NativeAuthFailure(NativeAuthFailureKind.TLS, failure)
     } catch (failure: IOException) {
+        cancellation?.throwIfCancelled()
         throw NativeAuthFailure(NativeAuthFailureKind.NETWORK, failure)
     }
 
     /** Compatibility discovery probe. Its metadata remains untrusted until pairing-key verification. */
-    fun fetchDiscovery(origin: GatewayOrigin): JSONObject = JSONObject(
-        requireNotNull(bootstrapGet(origin, "/mobile-access/discovery", 8 * 1024)).toString(Charsets.UTF_8),
+    fun fetchDiscovery(origin: GatewayOrigin, cancellation: NativeConnectionCancellation? = null): JSONObject = JSONObject(
+        requireNotNull(bootstrapGet(origin, "/mobile-access/discovery", 8 * 1024, cancellation = cancellation)).toString(Charsets.UTF_8),
     )
 
     /** Reads optional compatibility metadata. A 404 identifies a compatible legacy gateway. */
-    fun fetchMetadata(origin: GatewayOrigin): GatewayMetadata? {
-        val bytes = bootstrapGet(origin, "/mobile-access/metadata", 8 * 1024, allowMissing = true) ?: return null
+    fun fetchMetadata(origin: GatewayOrigin, cancellation: NativeConnectionCancellation? = null): GatewayMetadata? {
+        val bytes = bootstrapGet(origin, "/mobile-access/metadata", 8 * 1024, allowMissing = true, cancellation = cancellation) ?: return null
         return parseGatewayMetadata(JSONObject(bytes.toString(Charsets.UTF_8)))
     }
 
@@ -158,7 +167,9 @@ internal object NativeAuthClient {
         path: String,
         maxBytes: Int,
         allowMissing: Boolean = false,
+        cancellation: NativeConnectionCancellation? = null,
     ): ByteArray? {
+        cancellation?.throwIfCancelled()
         val trustManager = object : X509TrustManager {
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
@@ -169,13 +180,13 @@ internal object NativeAuthClient {
         }
         val connection = URL(origin.serialized + path).openConnection() as HttpsURLConnection
         val timeouts = nativeAuthTimeouts(origin.host)
-        try {
+        return withCancellableNativeConnection(connection, cancellation) {
             connection.sslSocketFactory = context.socketFactory
             connection.connectTimeout = timeouts.bootstrapConnectMs
             connection.readTimeout = timeouts.bootstrapReadMs
             connection.instanceFollowRedirects = false
             val responseCode = connection.responseCode
-            if (allowMissing && responseCode == HttpURLConnection.HTTP_NOT_FOUND) return null
+            if (allowMissing && responseCode == HttpURLConnection.HTTP_NOT_FOUND) return@withCancellableNativeConnection null
             if (responseCode != HttpURLConnection.HTTP_OK) {
                 throw NativeAuthFailure(nativeAuthFailureForStatus(responseCode))
             }
@@ -183,9 +194,8 @@ internal object NativeAuthClient {
             if (length > maxBytes) throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE)
             val body = connection.inputStream.use { readAtMost(it, maxBytes + 1) }
             if (body.size > maxBytes) throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE)
-            return body
-        } finally {
-            connection.disconnect()
+            cancellation?.throwIfCancelled()
+            body
         }
     }
 
@@ -195,44 +205,51 @@ internal object NativeAuthClient {
         body: JSONObject,
         caCertificate: ByteArray?,
         expectedInstanceId: String,
+        cancellation: NativeConnectionCancellation?,
         parser: (InputStream) -> T,
     ): T {
+        cancellation?.throwIfCancelled()
         val connection = URL(origin.serialized + path).openConnection() as HttpsURLConnection
         val timeouts = nativeAuthTimeouts(origin.host)
-        try {
-            if (caCertificate != null) connection.sslSocketFactory = PinnedTls.socketFactory(caCertificate)
-            connection.requestMethod = "POST"
-            connection.connectTimeout = timeouts.authConnectMs
-            connection.readTimeout = timeouts.authReadMs
-            connection.instanceFollowRedirects = false
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Origin", origin.serialized)
-            connection.setRequestProperty("Sec-Fetch-Site", "same-origin")
-            connection.outputStream.use { it.write(body.toString().toByteArray()) }
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                throw NativeAuthFailure(nativeAuthFailureForStatus(responseCode, readErrorCode(connection)))
+        return withCancellableNativeConnection(connection, cancellation) {
+            try {
+                if (caCertificate != null) connection.sslSocketFactory = PinnedTls.socketFactory(caCertificate)
+                connection.requestMethod = "POST"
+                connection.connectTimeout = timeouts.authConnectMs
+                connection.readTimeout = timeouts.authReadMs
+                connection.instanceFollowRedirects = false
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("Origin", origin.serialized)
+                connection.setRequestProperty("Sec-Fetch-Site", "same-origin")
+                cancellation?.throwIfCancelled()
+                connection.outputStream.use { it.write(body.toString().toByteArray()) }
+                val responseCode = connection.responseCode
+                if (responseCode !in 200..299) {
+                    throw NativeAuthFailure(nativeAuthFailureForStatus(responseCode, readErrorCode(connection)))
+                }
+                if (!connection.contentType.orEmpty().substringBefore(';').equals("application/json", ignoreCase = true)) {
+                    throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE)
+                }
+                if (connection.contentLengthLong > MAX_NATIVE_AUTH_RESPONSE_BYTES) {
+                    throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE)
+                }
+                connection.inputStream.use(parser).also { cancellation?.throwIfCancelled() }
+            } catch (failure: NativeConnectionCancelled) {
+                throw failure
+            } catch (failure: NativeAuthFailure) {
+                throw failure
+            } catch (failure: SocketTimeoutException) {
+                cancellation?.throwIfCancelled()
+                throw NativeAuthFailure(NativeAuthFailureKind.TIMEOUT, failure)
+            } catch (failure: SSLException) {
+                throw NativeAuthFailure(NativeAuthFailureKind.TLS, failure)
+            } catch (failure: JSONException) {
+                throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE, failure)
+            } catch (failure: IOException) {
+                cancellation?.throwIfCancelled()
+                throw NativeAuthFailure(NativeAuthFailureKind.NETWORK, failure)
             }
-            if (!connection.contentType.orEmpty().substringBefore(';').equals("application/json", ignoreCase = true)) {
-                throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE)
-            }
-            if (connection.contentLengthLong > MAX_NATIVE_AUTH_RESPONSE_BYTES) {
-                throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE)
-            }
-            return connection.inputStream.use(parser)
-        } catch (failure: NativeAuthFailure) {
-            throw failure
-        } catch (failure: SocketTimeoutException) {
-            throw NativeAuthFailure(NativeAuthFailureKind.TIMEOUT, failure)
-        } catch (failure: SSLException) {
-            throw NativeAuthFailure(NativeAuthFailureKind.TLS, failure)
-        } catch (failure: JSONException) {
-            throw NativeAuthFailure(NativeAuthFailureKind.INVALID_RESPONSE, failure)
-        } catch (failure: IOException) {
-            throw NativeAuthFailure(NativeAuthFailureKind.NETWORK, failure)
-        } finally {
-            connection.disconnect()
         }
     }
 

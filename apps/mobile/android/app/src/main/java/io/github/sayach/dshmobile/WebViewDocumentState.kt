@@ -5,10 +5,13 @@ import java.net.URI
 /** Tracks whether the existing WebView still contains a successfully loaded DSH document. */
 internal class WebViewDocumentState(private val origin: GatewayOrigin) {
     private var failed = false
+    var generation: Int = 0
+        private set
     var usable: Boolean = false
         private set
 
     fun started() {
+        generation += 1
         usable = false
         failed = false
     }
@@ -23,6 +26,22 @@ internal class WebViewDocumentState(private val origin: GatewayOrigin) {
         usable = successful
         return successful
     }
+
+    /** Visible commits may start DOM inspection before nonessential resources have finished. */
+    fun canInspectContent(url: String, currentUrl: String): Boolean = generation > 0 && !failed
+        && isDshDocumentUrl(origin, url) && isDshDocumentUrl(origin, currentUrl)
+        && sameMainDocumentUrl(origin, currentUrl, url)
+
+    /** Only the current, nonfailed document can accept its asynchronous DOM readiness result. */
+    fun confirmContentReady(expectedGeneration: Int): Boolean {
+        if (generation == 0 || generation != expectedGeneration || failed) return false
+        usable = true
+        return true
+    }
+
+    /** A cancelled timer must not fail a newer document or already usable content. */
+    fun shouldTimeout(expectedGeneration: Int): Boolean = generation > 0
+        && generation == expectedGeneration && !failed && !usable
 }
 
 /** Only the root DSH shell is a page whose JavaScript state we may retain. */
@@ -48,6 +67,34 @@ internal enum class RenewedDocumentAction { IGNORE, KEEP, RELOAD }
 
 /** The WebView JavaScript result is true only after the dedicated React shell mounts. */
 internal const val MOUNTED_DSH_PROBE = "document.querySelector('.dshm-shell') !== null"
+/** Usable page controls release the native loading surface without waiting for background resources. */
+internal val INITIAL_DSH_READY_PROBE = """
+    (() => {
+        if (!document.body) return false;
+        const root = document.body;
+        const visible = element => {
+            if (element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+            const style = getComputedStyle(element);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+            for (let parent = element; parent; parent = parent.parentElement) {
+                if (getComputedStyle(parent).opacity === '0') return false;
+            }
+            const box = element.getBoundingClientRect();
+            return box.width > 0 && box.height > 0 && box.right > 0 && box.bottom > 0
+                && box.left < innerWidth && box.top < innerHeight;
+        };
+        if ([...document.querySelectorAll('[data-dsh-boot]')].some(visible)) return false;
+        return [...root.querySelectorAll('button, a[href], input:not([type="hidden"]), textarea, [contenteditable="true"], [role="button"], [role="textbox"]')]
+            .some(element => {
+                if (element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true'
+                    || element.closest('[aria-disabled="true"]') || getComputedStyle(element).pointerEvents === 'none' || !visible(element)) return false;
+                const box = element.getBoundingClientRect();
+                const hit = document.elementFromPoint((Math.max(0, box.left) + Math.min(innerWidth, box.right)) / 2,
+                    (Math.max(0, box.top) + Math.min(innerHeight, box.bottom)) / 2);
+                return hit !== null && (hit === element || element.contains(hit));
+            });
+    })()
+""".trimIndent()
 internal fun mountedDshProbeResult(result: String?): Boolean = result == "true"
 
 /** Ask the current page to close one mobile-owned layer before native navigation. */

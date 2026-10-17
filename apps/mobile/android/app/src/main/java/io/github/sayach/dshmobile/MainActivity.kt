@@ -29,6 +29,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
 import android.webkit.MimeTypeMap
 import android.webkit.PermissionRequest
@@ -121,8 +122,37 @@ class MainActivity : Activity() {
     private var legacyStorageUnavailable = false
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val restoreExecutor = Executors.newFixedThreadPool(3)
+    private val connectionCancellationExecutor = Executors.newFixedThreadPool(2)
     private val recoveryHandler = Handler(Looper.getMainLooper())
     private val restoreUiHandler = Handler(Looper.getMainLooper())
+    private val connectionAttempts by lazy {
+        ConnectionAttemptController(
+            schedule = { delay, task ->
+                restoreUiHandler.postDelayed(task, delay)
+                val remove: () -> Unit = { restoreUiHandler.removeCallbacks(task) }
+                remove
+            },
+            cancellationFactory = {
+                NativeConnectionCancellation(
+                    dispatchCancellation = { task -> connectionCancellationExecutor.execute(task) },
+                    onCleanupFailure = { android.util.Log.w("DSHMobile", "Connection cleanup failed") },
+                )
+            },
+        )
+    }
+    private var pendingConnection: ConnectionAttemptController.Attempt? = null
+    private var connectionCancellationAction: ((ConnectionAttemptController.Reason) -> Unit)? = null
+    private var connectionWaitingView: FrameLayout? = null
+    private var connectionCancelButton: Button? = null
+    private var connectionFullWaitingView: FrameLayout? = null
+    private var connectionFullCancelButton: Button? = null
+    private var connectionPageVisible = false
+    private val waitingRootAccessibility = mutableMapOf<View, Int>()
+    private val waitingRootFocusability = mutableMapOf<ViewGroup, Int>()
+    private var pageReadyCheck: Runnable? = null
+    private var loadingConnectionAttempt: ConnectionAttemptController.Attempt? = null
+    private var loadingDocumentGeneration: Int? = null
+    private var recoveryStoppedBrowser: WebView? = null
     private val deviceStatusHandler = Handler(Looper.getMainLooper())
     private val backUiHandler = Handler(Looper.getMainLooper())
     private var webView: WebView? = null
@@ -163,7 +193,6 @@ class MainActivity : Activity() {
     private var connectionCenterStatus: TextView? = null
     private var recoveryAttempt = 0
     private val recoveryScheduled: Boolean get() = restoreAttemptGate.retryPending
-    private var restoreEscapeRunnable: Runnable? = null
     private val warnedTailscaleOrigins = mutableSetOf<String>()
     private val deviceStatusPoller by lazy {
         DeviceStatusPoller(
@@ -299,10 +328,10 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        withdrawConnectionAttempt()
         dismissDeviceUndo()
         stopDeviceListRefresh()
         cancelAutomaticRecovery()
-        cancelRestoreEscape()
         invalidateRestoreAttempts()
         invalidatePairingAttempts()
         failureDialog?.dismiss()
@@ -314,11 +343,22 @@ class MainActivity : Activity() {
         }
         ioExecutor.shutdownNow()
         restoreExecutor.shutdownNow()
+        // A cancelled worker may register its final disconnect after Activity teardown.
+        Thread({
+            for (executor in listOf(ioExecutor, restoreExecutor)) {
+                while (!executor.awaitTermination(1, java.util.concurrent.TimeUnit.DAYS)) Unit
+            }
+            connectionCancellationExecutor.shutdown()
+        }, "dsh-mobile-connection-teardown").start()
         super.onDestroy()
     }
 
     private fun handleBack() {
         if (isFinishing || isDestroyed) return
+        pendingConnection?.let {
+            connectionAttempts.cancel(it)
+            return
+        }
         val browser = webView
         if (browser == null) {
             handleNativeBack(null)
@@ -457,6 +497,236 @@ class MainActivity : Activity() {
         AccessMode.REMOTE -> PREFERENCE_REMOTE_ORIGIN
     }
 
+    /** Own the complete user wait, including queued work, retries, cookies and initial page boot. */
+    private fun startConnectionAttempt(
+        mode: AccessMode,
+        message: CharSequence = getString(R.string.restoring_trust),
+        preserveBrowser: WebView? = null,
+        onCancelled: (ConnectionAttemptController.Reason) -> Unit = { showConnectionCenter() },
+    ): ConnectionAttemptController.Attempt {
+        withdrawConnectionAttempt()
+        connectionCancellationAction = onCancelled
+        val attempt = connectionAttempts.start(
+            if (mode == AccessMode.LAN) LAN_CONNECTION_BUDGET_MS else REMOTE_CONNECTION_BUDGET_MS,
+        ) { reason ->
+            val returnToOwner = connectionCancellationAction
+            connectionCancellationAction = null
+            pendingConnection = null
+            dismissConnectionProgress()
+            cancelAutomaticRecovery()
+            invalidateRestoreAttempts()
+            invalidatePairingAttempts()
+            scanCanceled.set(true)
+            if (preserveBrowser != null && webView === preserveBrowser) recoveryStoppedBrowser = preserveBrowser
+            if (!isFinishing && !isDestroyed) {
+                if (preserveBrowser == null || webView !== preserveBrowser) returnToOwner?.invoke(reason)
+                else {
+                    failureDialog?.dismiss()
+                    returnFromStoppedRecoveryIfPageLost(preserveBrowser)
+                }
+                toastError(when {
+                    reason == ConnectionAttemptController.Reason.TIMED_OUT -> R.string.connection_timed_out
+                    preserveBrowser != null -> R.string.reconnect_stopped
+                    else -> R.string.connection_cancelled
+                })
+            }
+        }
+        pendingConnection = attempt
+        failureDialog?.dismiss()
+        currentFocus?.let { focused ->
+            getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(focused.windowToken, 0)
+        }
+        val waiting = FrameLayout(this).apply {
+            setBackgroundColor(getColor(R.color.app_background))
+            isClickable = true
+            isFocusableInTouchMode = true
+            accessibilityPaneTitle = message
+            // Receive unconsumed Insets before the real page while still drawing above it.
+            translationZ = dp(1).toFloat()
+        }
+        addSetupArtwork(waiting)
+        for (index in 0 until waiting.childCount) waiting.getChildAt(index).importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            setPadding(dp(32), dp(32), dp(32), dp(32))
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            addView(ProgressBar(this@MainActivity).apply {
+                indeterminateTintList = ColorStateList.valueOf(getColor(R.color.app_accent))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            addView(spacer(16))
+            addView(TextView(this@MainActivity).apply {
+                text = message
+                textSize = 16f
+                gravity = Gravity.CENTER
+                setTextColor(getColor(R.color.app_secondary))
+                accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(spacer(24))
+            val cancel = secondaryButton(
+                if (preserveBrowser == null) R.string.connection_cancel else R.string.connection_stop_reconnecting,
+                48,
+            ) { connectionAttempts.cancel(attempt) }
+            connectionCancelButton = cancel
+            addView(cancel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        scroll.addView(content, FrameLayout.LayoutParams(
+            min((resources.displayMetrics.widthPixels - dp(64)).coerceAtLeast(1), dp(400)),
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.CENTER_HORIZONTAL,
+        ))
+        scroll.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
+            val width = (right - left - scroll.paddingLeft - scroll.paddingRight).coerceIn(1, dp(400))
+            if (content.layoutParams.width != width) content.layoutParams = content.layoutParams.apply { this.width = width }
+        }
+        waiting.addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        waiting.setOnApplyWindowInsetsListener { _, insets ->
+            val edges = resolveWebViewSafeArea(insets)
+            scroll.setPadding(dp(32) + edges.left, dp(32) + edges.top, dp(32) + edges.right, dp(32) + edges.bottom)
+            insets
+        }
+        connectionWaitingView = waiting
+        connectionFullWaitingView = waiting
+        connectionFullCancelButton = connectionCancelButton
+        applyStatusBarIconContrast(window, getColor(R.color.app_background))
+        attachConnectionWaitingView()
+        return attempt
+    }
+
+    /** Only presentation is detached when the real form/browser root changes. */
+    private fun detachConnectionWaitingView() {
+        connectionWaitingView?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        for ((root, previous) in waitingRootAccessibility) root.importantForAccessibility = previous
+        waitingRootAccessibility.clear()
+        for ((root, previous) in waitingRootFocusability) root.descendantFocusability = previous
+        waitingRootFocusability.clear()
+    }
+
+    private fun attachConnectionWaitingView() {
+        val waiting = connectionWaitingView ?: return
+        val attempt = pendingConnection ?: return
+        if (!connectionAttempts.isCurrent(attempt)) return
+        detachConnectionWaitingView()
+        val container = findViewById<FrameLayout>(android.R.id.content)
+        if (!connectionPageVisible) {
+            for (index in 0 until container.childCount) {
+                val root = container.getChildAt(index)
+                waitingRootAccessibility[root] = root.importantForAccessibility
+                root.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                if (root is ViewGroup) {
+                    waitingRootFocusability[root] = root.descendantFocusability
+                    root.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                }
+            }
+        }
+        container.addView(waiting, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        if (!connectionPageVisible) waiting.requestFocus()
+        window.decorView.rootWindowInsets?.let { waiting.dispatchApplyWindowInsets(it) }
+        container.requestApplyInsets()
+    }
+
+    /** A committed page renders its own progress; native cancellation remains until it is usable. */
+    private fun revealConnectionPage(browser: WebView, attempt: ConnectionAttemptController.Attempt, generation: Int) {
+        if (connectionPageVisible || loadingConnectionAttempt !== attempt || !connectionAttempts.isCurrent(attempt)
+            || loadingDocumentGeneration != generation || secureWebViewClient?.currentDocumentGeneration != generation
+            || webView !== browser || isFinishing || isDestroyed) return
+        detachConnectionWaitingView()
+        val cancel = secondaryButton(R.string.connection_cancel, 48) { connectionAttempts.cancel(attempt) }
+        val compact = FrameLayout(this).apply {
+            isClickable = false
+            isFocusable = false
+            translationZ = dp(1).toFloat()
+            addView(cancel, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.END,
+            ))
+            setOnApplyWindowInsetsListener { _, insets ->
+                val edges = resolveWebViewSafeArea(insets)
+                val layout = cancel.layoutParams as FrameLayout.LayoutParams
+                if (layout.leftMargin != dp(16) + edges.left || layout.topMargin != dp(16) + edges.top
+                    || layout.rightMargin != dp(16) + edges.right || layout.bottomMargin != dp(16) + edges.bottom) {
+                    layout.leftMargin = dp(16) + edges.left
+                    layout.topMargin = dp(16) + edges.top
+                    layout.rightMargin = dp(16) + edges.right
+                    layout.bottomMargin = dp(16) + edges.bottom
+                    cancel.layoutParams = layout
+                }
+                insets
+            }
+        }
+        connectionPageVisible = true
+        connectionWaitingView = compact
+        connectionCancelButton = cancel
+        attachConnectionWaitingView()
+        applyStatusBarIconContrast(window, preferences.getInt(PREFERENCE_WEB_CHROME_COLOR, getColor(R.color.app_background)))
+    }
+
+    /** A replacement document cannot inherit the outgoing document's visible-commit confirmation. */
+    private fun restoreConnectionWaitingScreen() {
+        if (!connectionPageVisible) return
+        detachConnectionWaitingView()
+        connectionPageVisible = false
+        connectionWaitingView = connectionFullWaitingView
+        connectionCancelButton = connectionFullCancelButton
+        attachConnectionWaitingView()
+        applyStatusBarIconContrast(window, getColor(R.color.app_background))
+    }
+
+    private fun setPageContent(root: View) {
+        detachConnectionWaitingView()
+        setContentView(root)
+        attachConnectionWaitingView()
+    }
+
+    private fun dismissConnectionProgress() {
+        loadingConnectionAttempt = null
+        loadingDocumentGeneration = null
+        pageReadyCheck?.let(restoreUiHandler::removeCallbacks)
+        pageReadyCheck = null
+        detachConnectionWaitingView()
+        connectionWaitingView = null
+        connectionCancelButton = null
+        connectionFullWaitingView = null
+        connectionFullCancelButton = null
+        connectionPageVisible = false
+        applyStatusBarIconContrast(window, if (webView == null) getColor(R.color.app_background)
+            else preferences.getInt(PREFERENCE_WEB_CHROME_COLOR, getColor(R.color.app_background)))
+    }
+
+    private fun finishConnectionAttempt(attempt: ConnectionAttemptController.Attempt? = pendingConnection) {
+        if (attempt != null && connectionAttempts.finish(attempt)) {
+            pendingConnection = null
+            connectionCancellationAction = null
+            dismissConnectionProgress()
+        }
+    }
+
+    private fun withdrawConnectionAttempt() {
+        connectionAttempts.withdraw()
+        pendingConnection = null
+        connectionCancellationAction = null
+        dismissConnectionProgress()
+    }
+
+    /** A stopped recovery keeps usable content, not a blank/error document with no controls. */
+    private fun returnFromStoppedRecoveryIfPageLost(browser: WebView) {
+        val origin = gatewayOrigin ?: return
+        val generation = restoreGeneration
+        val documentGeneration = secureWebViewClient?.currentDocumentGeneration ?: return
+        val url = browser.url
+        probeMountedDshPage(browser, origin, INITIAL_DSH_READY_PROBE) { mounted ->
+            if (!mounted && !isFinishing && !isDestroyed && pendingConnection == null
+                && restoreGeneration == generation && webView === browser && browser.url == url
+                && secureWebViewClient?.currentDocumentGeneration == documentGeneration
+                && gatewayOrigin == origin && recoveryStoppedBrowser === browser
+            ) showConnectionCenter()
+        }
+    }
+
     private fun restoreColdStartConnection(preferredMode: AccessMode?) {
         val devices = pairedDeviceStore.load()
         if (legacyStorageUnavailable || pairedDeviceStore.storageUnavailable) {
@@ -485,7 +755,7 @@ class MainActivity : Activity() {
     private fun restoreStartupDevice(device: PairedDeviceRecord) {
         // Direct startup should not flash the device list. Keep a small native
         // loading surface while the most recently used device is renewed.
-        showRestoringTrust(device.key)
+        showRestoringTrust()
         activeDeviceKey = device.key
         restoreTrustedDevice(
             preferredOrigin = device.origin,
@@ -516,7 +786,7 @@ class MainActivity : Activity() {
 
     /** Render the stable device-management root used when more than one computer is paired. */
     private fun showDeviceList() {
-        cancelRestoreEscape()
+        withdrawConnectionAttempt()
         stopDeviceListRefresh()
         invalidateRestoreAttempts()
         invalidatePairingAttempts()
@@ -960,28 +1230,27 @@ class MainActivity : Activity() {
             showDeviceActions(device)
             return
         }
+        withdrawConnectionAttempt()
+        cancelAutomaticRecovery()
+        invalidatePairingAttempts()
         activeDeviceKey = device.key
         accessMode = device.mode
         (deviceListStatus ?: connectionCenterStatus)?.apply {
             text = getString(R.string.connecting_to_device, device.displayName)
             visibility = View.VISIBLE
         }
-        restoreTrustedDevice(device.origin, device.credential(), device.mode, beginRestoreAttempt(), deviceKey = device.key) { disposition ->
-            if (disposition != RestoreFailureDisposition.RETRY_TRANSIENT) {
-                withCredentialStorage { pairedDeviceStore.update(device.key) {
-                    if (it.status == PairedDeviceStatus.REVOKED
-                        || it.status == PairedDeviceStatus.EXPIRED
-                        || it.status == PairedDeviceStatus.ADDRESS_CHANGED
-                    ) it else it.copy(status = PairedDeviceStatus.UNREACHABLE)
-                }
-                }
-                showDeviceList()
+        restoreTrustedDevice(device.origin, device.credential(), device.mode, beginRestoreAttempt(), deviceKey = device.key) { _ ->
+            // Explicit selection always settles; retryable failures are not an active retry.
+            showDeviceList()
+            deviceListStatus?.apply {
+                setText(R.string.connection_failed)
+                visibility = View.VISIBLE
             }
         }
     }
 
     private fun showConnectionChoices() {
-        cancelRestoreEscape()
+        withdrawConnectionAttempt()
         stopDeviceListRefresh()
         deviceListVisible = false
         invalidateRestoreAttempts()
@@ -1234,8 +1503,8 @@ class MainActivity : Activity() {
         Toast.makeText(this, R.string.tailscale_vpn_warning, Toast.LENGTH_LONG).show()
     }
 
-    private fun showRestoringTrust(retryDeviceKey: String? = null) {
-        cancelRestoreEscape()
+    private fun showRestoringTrust() {
+        withdrawConnectionAttempt()
         stopDeviceListRefresh()
         deviceListVisible = false
         showingSetup = false
@@ -1251,67 +1520,12 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(dp(32), dp(32), dp(32), dp(32))
         }
-        content.addView(ProgressBar(this))
-        content.addView(spacer(16))
         content.addView(textView(R.string.restoring_trust, 16f, Typeface.NORMAL, R.color.app_secondary).apply {
             gravity = Gravity.CENTER
         })
-        content.addView(spacer(12))
-        val escapeMessage = textView(
-            if (retryDeviceKey == null) R.string.restore_taking_longer_no_retry else R.string.restore_taking_longer,
-            14f,
-            Typeface.NORMAL,
-            R.color.app_secondary,
-        ).apply {
-            gravity = Gravity.CENTER
-            visibility = View.GONE
-        }
-        content.addView(escapeMessage)
-        content.addView(spacer(12))
-        val escapeActions = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
-        }
-        if (retryDeviceKey != null) {
-            escapeActions.addView(
-                secondaryButton(R.string.retry, 48) { retryStartupRestore(retryDeviceKey) },
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-            )
-            escapeActions.addView(spacer(8))
-        }
-        escapeActions.addView(
-            primaryButton(R.string.restore_show_devices, 48) { showDeviceList() },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
-        content.addView(escapeActions)
         root.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        setContentView(root)
+        setPageContent(root)
         applySafeAreaInsets(root)
-        restoreEscapeRunnable = Runnable {
-            if (!isFinishing && !isDestroyed && webView == null && !showingSetup) {
-                escapeMessage.visibility = View.VISIBLE
-                escapeActions.visibility = View.VISIBLE
-            }
-        }.also { restoreUiHandler.postDelayed(it, RESTORE_ESCAPE_DELAY_MS) }
-    }
-
-    private fun retryStartupRestore(deviceKey: String) {
-        val device = ConnectionRestorePolicy.retryDevice(
-            pairedDeviceStore.load(),
-            deviceKey,
-            System.currentTimeMillis(),
-        )
-        if (device == null) {
-            showConnectionCenter()
-            return
-        }
-        cancelAutomaticRecovery()
-        restoreStartupDevice(device)
-    }
-
-    private fun cancelRestoreEscape() {
-        restoreEscapeRunnable?.let(restoreUiHandler::removeCallbacks)
-        restoreEscapeRunnable = null
     }
 
     private fun showPairing(harness: DiscoveredHarness, prefilledInput: String = "", autoConnect: Boolean = false) {
@@ -1419,7 +1633,7 @@ class MainActivity : Activity() {
                 card.layoutParams = card.layoutParams.apply { this.width = width }
             }
         }
-        setContentView(root)
+        setPageContent(root)
         applySafeAreaInsets(root)
         return card
     }
@@ -1510,15 +1724,20 @@ class MainActivity : Activity() {
         status.visibility = View.VISIBLE
         val mode = accessMode
         val store = credentialStore(mode)
+        val attempt = startConnectionAttempt(mode, getString(R.string.pairing_in_progress), onCancelled = { reason ->
+            button.isEnabled = true
+            status.setTextColor(getColor(R.color.app_secondary))
+            status.setText(if (reason == ConnectionAttemptController.Reason.TIMED_OUT) R.string.connection_timed_out else R.string.connection_cancelled)
+        })
         ioExecutor.execute {
             if (generation != pairingGeneration) return@execute
-            val compatibility = runCatching { NativeAuthClient.fetchMetadata(origin) }
+            val compatibility = runCatching { NativeAuthClient.fetchMetadata(origin, attempt.cancellation) }
                 .getOrNull()
                 ?.let { VersionCompatibility.evaluate(BuildConfig.VERSION_NAME, it) }
             if (compatibility != null) {
                 runOnUiThread {
                     if (generation == pairingGeneration) {
-                        pairingAttemptGate.complete(generation)
+                        completePairingAttempt(generation)
                         showCompatibilityIssue(compatibility, status, button)
                     }
                 }
@@ -1537,7 +1756,7 @@ class MainActivity : Activity() {
             // credential, so restore, renewal and probing keep the very same anchor.
             val trustAttempt = runCatching {
                 PairingTrust.selectTrustAnchor(mode, trustKey) {
-                    NativeAuthClient.fetchPairingCa(origin)
+                    NativeAuthClient.fetchPairingCa(origin, attempt.cancellation)
                 }
             }
             val trustFailure = trustAttempt.exceptionOrNull()
@@ -1546,7 +1765,7 @@ class MainActivity : Activity() {
                     if (generation != pairingGeneration) return@runOnUiThread
                     status.setTextColor(getColor(R.color.app_error))
                     status.setText(pairingFailureMessage(trustFailure, origin))
-                    pairingAttemptGate.complete(generation)
+                    completePairingAttempt(generation)
                     button.isEnabled = true
                 }
                 return@execute
@@ -1557,7 +1776,7 @@ class MainActivity : Activity() {
                     if (generation != pairingGeneration) return@runOnUiThread
                     status.setTextColor(getColor(R.color.app_error))
                     status.setText(R.string.pairing_tls_failed)
-                    pairingAttemptGate.complete(generation)
+                    completePairingAttempt(generation)
                     button.isEnabled = true
                 }
                 return@execute
@@ -1584,6 +1803,7 @@ class MainActivity : Activity() {
                         existingCredential.deviceToken,
                         existingCredential.caCertificate,
                         existingCredential.instanceId,
+                        cancellation = attempt.cancellation,
                     )
                 }
                 val renewed = renewal.getOrNull()
@@ -1593,18 +1813,18 @@ class MainActivity : Activity() {
                         if (renewed.instanceId != existingCredential.instanceId) {
                             status.setTextColor(getColor(R.color.app_error))
                             status.setText(R.string.pairing_failed)
-                            pairingAttemptGate.complete(generation)
+                            completePairingAttempt(generation)
                             button.isEnabled = true
                         } else {
                             if (savePairedDevice(mode, origin, renewed, existingCredential) == null) {
                                 status.setText(R.string.device_storage_unavailable)
-                                pairingAttemptGate.complete(generation); button.isEnabled = true
+                                completePairingAttempt(generation); button.isEnabled = true
                                 return@runOnUiThread
                             }
                             installNativeSession(
                                 origin = origin,
                                 session = renewed,
-                                isCurrent = { generation == pairingGeneration && accessMode == mode },
+                                isCurrent = { generation == pairingGeneration && accessMode == mode && connectionAttempts.isCurrent(attempt) },
                             ) {
                                 pairingAttemptGate.complete(generation)
                                 showBrowser(origin, existingCredential.caCertificate)
@@ -1620,7 +1840,7 @@ class MainActivity : Activity() {
                         if (generation != pairingGeneration) return@runOnUiThread
                         status.setTextColor(getColor(R.color.app_error))
                         status.setText(pairingFailureMessage(renewalFailure, origin))
-                        pairingAttemptGate.complete(generation)
+                        completePairingAttempt(generation)
                         button.isEnabled = true
                     }
                     return@execute
@@ -1632,14 +1852,14 @@ class MainActivity : Activity() {
                         if (generation != pairingGeneration) return@runOnUiThread
                         status.setTextColor(getColor(R.color.app_error))
                         status.setText(R.string.device_storage_unavailable)
-                        pairingAttemptGate.complete(generation)
+                        completePairingAttempt(generation)
                         button.isEnabled = true
                     }
                     return@execute
                 }
             }
             if (generation != pairingGeneration) return@execute
-            runCatching { NativeAuthClient.pair(origin, key.token, certificate, key.instanceId) }
+            runCatching { NativeAuthClient.pair(origin, key.token, certificate, key.instanceId, attempt.cancellation) }
                 .onSuccess { session -> runOnUiThread {
                     if (generation != pairingGeneration) return@runOnUiThread
                     val deviceToken = session.deviceToken
@@ -1648,7 +1868,7 @@ class MainActivity : Activity() {
                         || (expectedInstanceId != null && session.instanceId != expectedInstanceId)) {
                         status.setTextColor(getColor(R.color.app_error))
                         status.setText(R.string.pairing_failed)
-                        pairingAttemptGate.complete(generation)
+                        completePairingAttempt(generation)
                         button.isEnabled = true
                     } else if (!runCatching {
                             pairedDeviceStore.requireReadable()
@@ -1658,7 +1878,7 @@ class MainActivity : Activity() {
                         }.isSuccess) {
                         status.setTextColor(getColor(R.color.app_error))
                         status.setText(R.string.device_storage_unavailable)
-                        pairingAttemptGate.complete(generation)
+                        completePairingAttempt(generation)
                         button.isEnabled = true
                     } else {
                         val record = savePairedDevice(
@@ -1668,17 +1888,24 @@ class MainActivity : Activity() {
                             credential = DeviceCredential(session.instanceId, deviceToken, expiresAt, certificate),
                         ) ?: run {
                             status.setText(R.string.device_storage_unavailable)
-                            pairingAttemptGate.complete(generation); button.isEnabled = true
+                            completePairingAttempt(generation); button.isEnabled = true
                             return@runOnUiThread
                         }
                         installNativeSession(
                             origin = origin,
                             session = session,
-                            isCurrent = { generation == pairingGeneration && accessMode == mode },
+                            isCurrent = { generation == pairingGeneration && accessMode == mode && connectionAttempts.isCurrent(attempt) },
                         ) {
                             pairingAttemptGate.complete(generation)
-                            if (record.displayName == localizedDefaultDeviceName(record.mode)) showPairedDeviceNamePrompt(record) { showBrowser(origin, certificate) }
-                            else showBrowser(origin, certificate)
+                            if (record.displayName == localizedDefaultDeviceName(record.mode)) {
+                                finishConnectionAttempt(attempt)
+                                showPairedDeviceNamePrompt(record) {
+                                    if (generation == pairingGeneration && !isFinishing && !isDestroyed) {
+                                        startConnectionAttempt(mode)
+                                        showBrowser(origin, certificate)
+                                    }
+                                }
+                            } else showBrowser(origin, certificate)
                         }
                     }
                 } }
@@ -1686,7 +1913,7 @@ class MainActivity : Activity() {
                     if (generation != pairingGeneration) return@runOnUiThread
                     status.setTextColor(getColor(R.color.app_error))
                     status.setText(pairingFailureMessage(error, origin))
-                    pairingAttemptGate.complete(generation)
+                    completePairingAttempt(generation)
                     button.isEnabled = true
                 } }
         }
@@ -1741,11 +1968,18 @@ class MainActivity : Activity() {
             return
         }
         button.isEnabled = false
-        scanCanceled.set(false)
+        val scanCancellation = AtomicBoolean(false)
+        scanCanceled = scanCancellation
         results.removeAllViews()
         status.setTextColor(getColor(R.color.app_secondary))
         status.setText(if (nearbyPermissionLimited) R.string.scanning_lan_limited else R.string.scanning_lan)
         status.visibility = View.VISIBLE
+        val attempt = startConnectionAttempt(AccessMode.LAN, status.text, onCancelled = { reason ->
+            button.isEnabled = true
+            results.removeAllViews()
+            status.setTextColor(getColor(R.color.app_secondary))
+            status.setText(if (reason == ConnectionAttemptController.Reason.TIMED_OUT) R.string.connection_timed_out else R.string.scan_prompt)
+        })
 
         val cancelButton = Button(this).apply {
             setText(R.string.cancel)
@@ -1757,18 +1991,20 @@ class MainActivity : Activity() {
             setTextColor(getColor(R.color.app_foreground))
         }
         cancelButton.setOnClickListener {
-            scanCanceled.set(true)
-            cancelButton.isEnabled = false
+            connectionAttempts.cancel(attempt)
         }
         results.addView(cancelButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         ioExecutor.execute {
-            val found = runCatching { LanDiscovery.scan(this, canceled = scanCanceled) }.getOrDefault(emptyList())
+            if (attempt.cancellation.isCancelled) return@execute
+            val found = runCatching { LanDiscovery.scan(this, canceled = scanCancellation, cancellation = attempt.cancellation) }.getOrDefault(emptyList())
             runOnUiThread {
+                if (!connectionAttempts.isCurrent(attempt) || isFinishing || isDestroyed) return@runOnUiThread
+                finishConnectionAttempt(attempt)
                 button.isEnabled = true
                 cancelButton.isEnabled = true
                 cancelButton.visibility = View.GONE
-                if (scanCanceled.get()) {
+                if (scanCancellation.get()) {
                     status.setTextColor(getColor(R.color.app_secondary))
                     status.setText(R.string.scan_prompt)
                 } else if (found.isEmpty()) {
@@ -1994,6 +2230,10 @@ class MainActivity : Activity() {
     }
 
     private fun recoverAutomatically() {
+        loadingConnectionAttempt = null
+        loadingDocumentGeneration = null
+        pageReadyCheck?.let(restoreUiHandler::removeCallbacks)
+        pageReadyCheck = null
         val paired = activeDeviceKey?.let { key -> pairedDeviceStore.load().firstOrNull { it.key == key } }
         if (paired != null) {
             if (paired.status == PairedDeviceStatus.REVOKED
@@ -2024,25 +2264,34 @@ class MainActivity : Activity() {
             return
         }
         val mode = accessMode
-        val credential = legacyCredentialForRestore(mode) ?: return
+        val credential = legacyCredentialForRestore(mode) ?: run {
+            showConnectionCenter()
+            return
+        }
         if (credential.expiresAt <= System.currentTimeMillis()) {
             withCredentialStorage { credentialStore(mode).clear() }
+            showConnectionCenter()
             return
         }
         val preferred = gatewayOrigin
             ?: GatewayOrigin.parse(preferences.getString(originPreference(mode), "").orEmpty())
-            ?: return
+            ?: run {
+                showConnectionCenter()
+                return
+            }
         val generation = beginRestoreAttempt()
         restoreTrustedDevice(preferred, credential, mode, generation, preserveWebView = webView) { disposition ->
             if (disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
                 if (!scheduleAutomaticRecovery()) finishAutomaticRecoveryAfterRetryBudget { showConnectionCenter() }
             } else {
                 cancelAutomaticRecovery()
+                showConnectionCenter()
             }
         }
     }
 
     private fun canRecoverAutomatically(): Boolean {
+        if (webView != null && recoveryStoppedBrowser === webView) return false
         val paired = activeDeviceKey?.let { key -> pairedDeviceStore.load().firstOrNull { it.key == key } }
         if (paired != null) {
             return paired.status != PairedDeviceStatus.REVOKED
@@ -2056,6 +2305,7 @@ class MainActivity : Activity() {
     private fun scheduleAutomaticRecovery(): Boolean {
         if (recoveryScheduled) return true
         if (recoveryAttempt >= RECOVERY_DELAYS_MS.size || !canRecoverAutomatically()) return false
+        if (pendingConnection == null) startConnectionAttempt(accessMode, preserveBrowser = webView)
         val delay = RECOVERY_DELAYS_MS[recoveryAttempt++]
         recoveryHandler.postDelayed(restoreAttemptGate.retryCallback {
             if (!isFinishing && !isDestroyed) recoverAutomatically()
@@ -2082,7 +2332,11 @@ class MainActivity : Activity() {
         probeMountedDshPage(candidate, origin) { mounted ->
             if (isFinishing || isDestroyed) return@probeMountedDshPage
             when (exhaustedRecoveryAction(generation, restoreGeneration, webView === candidate, mounted)) {
-                ExhaustedRecoveryAction.IGNORE, ExhaustedRecoveryAction.KEEP_PAGE -> Unit
+                ExhaustedRecoveryAction.IGNORE -> Unit
+                ExhaustedRecoveryAction.KEEP_PAGE -> {
+                    finishConnectionAttempt()
+                    showLoadFailure(LoadFailure.NETWORK)
+                }
                 ExhaustedRecoveryAction.SHOW_CONNECTIONS -> fallback()
             }
         }
@@ -2098,12 +2352,16 @@ class MainActivity : Activity() {
     }
 
     private fun cancelRestoreForConfiguration() {
-        cancelRestoreEscape()
+        withdrawConnectionAttempt()
         cancelAutomaticRecovery()
         invalidateRestoreAttempts()
     }
 
     private fun beginPairingAttempt(): Int? = pairingAttemptGate.begin()
+
+    private fun completePairingAttempt(generation: Int) {
+        if (pairingAttemptGate.complete(generation)) finishConnectionAttempt()
+    }
 
     private fun invalidatePairingAttempts() {
         pairingAttemptGate.invalidate()
@@ -2121,6 +2379,7 @@ class MainActivity : Activity() {
     ) {
         val requestedDevice = deviceKey?.let { key -> pairedDeviceStore.load().firstOrNull { it.key == key } }
         if (deviceKey != null && (requestedDevice == null || requestedDevice.status == PairedDeviceStatus.REVOKED)) {
+            finishConnectionAttempt()
             onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
             return
         }
@@ -2133,12 +2392,21 @@ class MainActivity : Activity() {
                     preferences.edit().remove(originPreference(mode)).apply()
                 }
             }
-            if (generation == restoreGeneration) onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
+            if (generation == restoreGeneration) {
+                finishConnectionAttempt()
+                onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
+            }
             return
         }
+        val attempt = pendingConnection ?: startConnectionAttempt(
+            mode,
+            message = requestedDevice?.let { getString(R.string.connecting_to_device, it.displayName) }
+                ?: getString(R.string.restoring_trust),
+            preserveBrowser = preserveWebView,
+        )
         try {
             restoreExecutor.execute {
-                if (!restoreAttemptGate.isCurrent(generation)) return@execute
+                if (!restoreAttemptGate.isCurrent(generation) || attempt.cancellation.isCancelled) return@execute
                 var selectedOrigin = preferredOrigin
                 var lastFailure: Throwable? = null
                 var instanceMismatch = false
@@ -2152,6 +2420,7 @@ class MainActivity : Activity() {
                             credential.deviceToken,
                             credential.caCertificate,
                             credential.instanceId,
+                            cancellation = attempt.cancellation,
                         ).also { session ->
                             if (session.instanceId != credential.instanceId) instanceMismatch = true
                         }.takeUnless { instanceMismatch }
@@ -2165,7 +2434,7 @@ class MainActivity : Activity() {
                 var disposition = ConnectionRestorePolicy.failureDisposition(lastFailure, instanceMismatch)
                 if (generation != restoreGeneration) return@execute
                 if (session == null && mode == AccessMode.LAN && disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
-                    val found = runCatching { LanDiscovery.scan(this) }.getOrDefault(emptyList())
+                    val found = runCatching { LanDiscovery.scan(this, cancellation = attempt.cancellation) }.getOrDefault(emptyList())
                         .singleOrNull { it.instanceId == credential.instanceId }
                     if (generation != restoreGeneration) return@execute
                     if (found != null) {
@@ -2179,7 +2448,7 @@ class MainActivity : Activity() {
                 val finalDisposition = disposition
                 val failureKind = (lastFailure as? NativeAuthFailure)?.kind
                 runOnUiThread(restoreAttemptGate.callback(generation) {
-                    if (isFinishing || isDestroyed) return@callback
+                    if (isFinishing || isDestroyed || !connectionAttempts.isCurrent(attempt)) return@callback
                     if (deviceKey != null) {
                         val current = pairedDeviceStore.load().firstOrNull { it.key == deviceKey }
                         if (current == null || requestedDevice == null ||
@@ -2212,7 +2481,7 @@ class MainActivity : Activity() {
                         installNativeSession(
                             origin = selectedOrigin,
                             session = renewed,
-                            isCurrent = { restoreAttemptGate.isCurrent(generation) },
+                            isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) },
                         ) {
                             if (preserveWebView == null) {
                                 failureDialog?.dismiss()
@@ -2230,12 +2499,19 @@ class MainActivity : Activity() {
             }
         } catch (_: RejectedExecutionException) {
             // Activity teardown owns executor shutdown; no UI result is needed afterwards.
-            if (generation == restoreGeneration) onFailure(RestoreFailureDisposition.RETRY_TRANSIENT)
+            if (generation == restoreGeneration) {
+                onFailure(RestoreFailureDisposition.RETRY_TRANSIENT)
+            }
         }
     }
 
     /** The dedicated React shell appears after DSH boot; HTML completion alone is not readiness. */
-    private fun probeMountedDshPage(candidate: WebView, origin: GatewayOrigin, complete: (Boolean) -> Unit) {
+    private fun probeMountedDshPage(
+        candidate: WebView,
+        origin: GatewayOrigin,
+        script: String = MOUNTED_DSH_PROBE,
+        complete: (Boolean) -> Unit,
+    ) {
         if (webView !== candidate || gatewayOrigin != origin || !isDshDocumentUrl(origin, candidate.url.orEmpty())) {
             complete(false)
             return
@@ -2244,7 +2520,7 @@ class MainActivity : Activity() {
         val timeout = Runnable { if (completed.compareAndSet(false, true)) complete(false) }
         restoreUiHandler.postDelayed(timeout, LIVE_DOCUMENT_PROBE_TIMEOUT_MS)
         runCatching {
-            candidate.evaluateJavascript(MOUNTED_DSH_PROBE) { result ->
+            candidate.evaluateJavascript(script) { result ->
                 if (!completed.compareAndSet(false, true)) return@evaluateJavascript
                 restoreUiHandler.removeCallbacks(timeout)
                 complete(mountedDshProbeResult(result))
@@ -2289,8 +2565,41 @@ class MainActivity : Activity() {
         probeMountedDshPage(candidate, origin) { mounted ->
             when (action(mounted)) {
                 RenewedDocumentAction.IGNORE -> Unit
-                RenewedDocumentAction.KEEP -> failureDialog?.dismiss()
+                RenewedDocumentAction.KEEP -> {
+                    failureDialog?.dismiss()
+                    finishConnectionAttempt()
+                }
                 RenewedDocumentAction.RELOAD -> reload()
+            }
+        }
+    }
+
+    /** HTML completion alone does not release the initial connection's cancel button or deadline. */
+    private fun finishConnectionWhenPageReady(
+        browser: WebView,
+        origin: GatewayOrigin,
+        attempt: ConnectionAttemptController.Attempt,
+        documentGeneration: Int,
+    ) {
+        if (loadingDocumentGeneration != documentGeneration
+            || secureWebViewClient?.currentDocumentGeneration != documentGeneration
+            || loadingConnectionAttempt !== attempt || !connectionAttempts.isCurrent(attempt)
+            || webView !== browser || isFinishing || isDestroyed) return
+        probeMountedDshPage(browser, origin, INITIAL_DSH_READY_PROBE) { mounted ->
+            if (loadingDocumentGeneration != documentGeneration
+                || secureWebViewClient?.currentDocumentGeneration != documentGeneration
+                || loadingConnectionAttempt !== attempt || !connectionAttempts.isCurrent(attempt)
+                || webView !== browser || isFinishing || isDestroyed) return@probeMountedDshPage
+            if (mounted) {
+                if (secureWebViewClient?.confirmContentReady(documentGeneration) == true) {
+                    nativeBridge?.injectPage()
+                    finishConnectionAttempt(attempt)
+                }
+            }
+            else {
+                pageReadyCheck?.let(restoreUiHandler::removeCallbacks)
+                pageReadyCheck = Runnable { finishConnectionWhenPageReady(browser, origin, attempt, documentGeneration) }
+                    .also { restoreUiHandler.postDelayed(it, PAGE_READY_POLL_MS) }
             }
         }
     }
@@ -2309,7 +2618,7 @@ class MainActivity : Activity() {
             }
             return
         }
-        showRestoringTrust(activeDeviceKey)
+        showRestoringTrust()
         if (!scheduleAutomaticRecovery()) showDeviceList()
     }
 
@@ -2348,7 +2657,6 @@ class MainActivity : Activity() {
         caCertificate: ByteArray?,
         requestedInitialUrl: String = origin.serialized,
     ) {
-        cancelRestoreEscape()
         if (!isOriginAllowedForAccessMode(origin)) {
             val cleared = withCredentialStorage { credentialStore().clear() } != null
             if (cleared) preferences.edit().remove(originPreference()).apply()
@@ -2356,6 +2664,11 @@ class MainActivity : Activity() {
             if (!cleared) showCredentialStorageFailure()
             return
         }
+        if (pendingConnection == null) startConnectionAttempt(accessMode)
+        // The pairing form no longer owns cancellation once it has opened a browser.
+        connectionCancellationAction = { showConnectionCenter() }
+        restoreConnectionWaitingScreen()
+        connectionCancelButton?.setText(R.string.connection_cancel)
         destroyWebView()
         stopDeviceListRefresh()
         deviceListVisible = false
@@ -2382,6 +2695,8 @@ class MainActivity : Activity() {
         val browser = WebView(this)
         configureWebViewHttpCache(browser)
         webView = browser
+        loadingConnectionAttempt = pendingConnection
+        recoveryStoppedBrowser = null
         browser.setBackgroundColor(getColor(R.color.app_background))
         browser.settings.apply {
             javaScriptEnabled = true
@@ -2411,10 +2726,25 @@ class MainActivity : Activity() {
             setAcceptThirdPartyCookies(browser, false)
         }
         fun ownsBrowser(): Boolean = webView === browser && gatewayOrigin == origin && !isFinishing && !isDestroyed
+        fun withdrawPageReadiness() {
+            loadingDocumentGeneration = null
+            pageReadyCheck?.let(restoreUiHandler::removeCallbacks)
+            pageReadyCheck = null
+            restoreConnectionWaitingScreen()
+        }
+        fun inspectVisibleContent(generation: Int) {
+            val attempt = loadingConnectionAttempt ?: return
+            if (!ownsBrowser() || !connectionAttempts.isCurrent(attempt)
+                || secureWebViewClient?.currentDocumentGeneration != generation) return
+            loadingDocumentGeneration = generation
+            revealConnectionPage(browser, attempt, generation)
+            finishConnectionWhenPageReady(browser, origin, attempt, generation)
+        }
         if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.NAVIGATION_LISTENER)) {
             val listener = object : androidx.webkit.NavigationListener {
                 override fun onNavigationStarted(navigation: androidx.webkit.Navigation) {
                     if (ownsBrowser() && !navigation.isSameDocument && fileChooserTransitions.begin(navigation)) {
+                        withdrawPageReadiness()
                         invalidateWebFileChooser()
                     }
                 }
@@ -2430,7 +2760,10 @@ class MainActivity : Activity() {
         val secureClient = SecureWebViewClient(
             origin = origin,
             onBeforeTopLevelNavigation = {
-                if (ownsBrowser() && fileChooserNavigationListener == null) cancelWebFileChooser()
+                if (ownsBrowser() && fileChooserNavigationListener == null) {
+                    withdrawPageReadiness()
+                    cancelWebFileChooser()
+                }
             },
             caCertificate = caCertificate,
             openExternal = { uri ->
@@ -2440,13 +2773,14 @@ class MainActivity : Activity() {
                 if (ownsBrowser()) toastError(R.string.blocked_navigation)
             },
             onFailure = { failure ->
-                if (ownsBrowser()) showLoadFailure(failure)
+                if (ownsBrowser() && recoveryStoppedBrowser !== browser) showLoadFailure(failure)
             },
             onRendererGone = {
                 if (ownsBrowser()) handleRendererGone(browser)
             },
             onTopLevelUrlChanged = {
                 if (ownsBrowser()) {
+                    withdrawPageReadiness()
                     if (fileChooserNavigationListener == null) invalidateWebFileChooser()
                     displayScale.onDocumentStarted()
                     cancelPendingWebBack()
@@ -2460,6 +2794,13 @@ class MainActivity : Activity() {
                     retryUrl = origin.serialized
                     CookieManager.getInstance().flush()
                     nativeBridge?.injectPage()
+                    secureWebViewClient?.currentDocumentGeneration?.let(::inspectVisibleContent)
+                }
+            },
+            onContentVisible = { generation ->
+                if (ownsBrowser()) {
+                    displayScale.onDocumentReady()
+                    inspectVisibleContent(generation)
                 }
             },
         )
@@ -2508,7 +2849,7 @@ class MainActivity : Activity() {
             bridge.onPageBackgroundColor = { color ->
                 root.setBackgroundColor(color)
                 statusBarBackdrop.setBackgroundColor(color)
-                applyStatusBarIconContrast(window, color)
+                if (connectionWaitingView == null || connectionPageVisible) applyStatusBarIconContrast(window, color)
                 preferences.edit().putInt(PREFERENCE_WEB_CHROME_COLOR, color).apply()
             }
             bridge.onDeviceRevoked = ::handleDeviceRevoked
@@ -2532,7 +2873,7 @@ class MainActivity : Activity() {
         }
         root.addView(browser, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root.addView(statusBarBackdrop, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, Gravity.TOP))
-        setContentView(root)
+        setPageContent(root)
 
         // Reserve each occupied edge once. Chromium receives consumed insets,
         // preventing safe-area CSS from adding the same navigation or IME gap.
@@ -2821,8 +3162,9 @@ class MainActivity : Activity() {
         if ((failure == LoadFailure.NETWORK || failure == LoadFailure.AUTH_EXPIRED || failure == LoadFailure.SERVICE_UNAVAILABLE)
             && canRecoverAutomatically()
         ) {
-            scheduleAutomaticRecovery()
+            if (scheduleAutomaticRecovery()) return
         }
+        finishConnectionAttempt()
         val cpolarAddressFailure = isCpolarAddressFailure(failure, accessMode, gatewayOrigin)
         val (title, message) = if (cpolarAddressFailure) {
             R.string.cpolar_address_unreachable to R.string.cpolar_address_unreachable_message
@@ -2843,6 +3185,7 @@ class MainActivity : Activity() {
             .setTitle(title)
             .setMessage(message)
             .setPositiveButton(R.string.retry) { _, _ ->
+                recoveryStoppedBrowser = null
                 if ((failure == LoadFailure.NETWORK || failure == LoadFailure.AUTH_EXPIRED || failure == LoadFailure.SERVICE_UNAVAILABLE)
                     && canRecoverAutomatically()
                 ) {
@@ -2850,6 +3193,8 @@ class MainActivity : Activity() {
                 } else {
                     val target = retryUrl ?: gatewayOrigin?.serialized
                     if (target != null) {
+                        startConnectionAttempt(accessMode)
+                        loadingConnectionAttempt = pendingConnection
                         cancelWebFileChooser()
                         webView?.loadUrl(target)
                     }
@@ -2887,6 +3232,9 @@ class MainActivity : Activity() {
             destroy()
         }
         webView = null
+        loadingConnectionAttempt = null
+        loadingDocumentGeneration = null
+        recoveryStoppedBrowser = null
     }
 
     private fun textView(
@@ -3040,7 +3388,9 @@ class MainActivity : Activity() {
         const val DEVICE_UNDO_TIMEOUT_MS = 6_000L
         const val LIVE_DOCUMENT_PROBE_TIMEOUT_MS = 2_000L
         const val MOBILE_BACK_TIMEOUT_MS = 1_500L
-        const val RESTORE_ESCAPE_DELAY_MS = 12_000L
+        const val PAGE_READY_POLL_MS = 250L
+        const val LAN_CONNECTION_BUDGET_MS = 30_000L
+        const val REMOTE_CONNECTION_BUDGET_MS = 60_000L
         const val APP_RELEASES_URL = "https://github.com/saya-ch/dsh-mobile/releases/latest"
         val RECOVERY_DELAYS_MS = longArrayOf(0L, 1_000L, 3_000L, 8_000L)
         val MIME_TYPE = Regex("^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+*-]+$")

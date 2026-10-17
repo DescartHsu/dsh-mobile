@@ -175,7 +175,7 @@ jobs:
           fi
           node scripts/negative-control.mjs "$RUNNER_TEMP/scroll-negative.log" "Viewport negative control detected"
       - name: Verify history auto-load scroll stability
-        if: matrix.dsh == '0.2.0-rc.2'
+        if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.3'
         run: npm run smoke:history-scroll
       - name: Capture credential-masked Mobile surfaces
         if: matrix.dsh == '0.2.0-rc.2'

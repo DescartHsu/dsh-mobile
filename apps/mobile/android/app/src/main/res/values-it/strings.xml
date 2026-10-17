@@ -71,6 +71,12 @@
     <string name="clear">Cancella</string>
     <string name="cancel">Annulla</string>
     <string name="retry">Riprova</string>
+    <string name="connection_cancel">Annulla connessione</string>
+    <string name="connection_stop_reconnecting">Interrompi riconnessione</string>
+    <string name="connection_timed_out">Tempo di connessione scaduto. Riprova o scegli un altro computer.</string>
+    <string name="connection_failed">Impossibile connettersi a questo computer. Riprova, verifica di nuovo lo stato o scegli un altro computer.</string>
+    <string name="connection_cancelled">Connessione annullata.</string>
+    <string name="reconnect_stopped">Riconnessione automatica interrotta.</string>
     <string name="secure_connection_failed">Connessione sicura non riuscita</string>
     <string name="secure_connection_failed_message">Il certificato è scaduto o non corrisponde all\'identità salvata. Verifica il computer e l\'impronta del nuovo abbinamento, poi usa Aggiungi computer nell\'elenco dispositivi per scansionare il nuovo QR. Puoi eliminare solo il record locale di questo computer, senza cancellare gli altri abbinamenti.</string>
     <string name="page_load_failed">Impossibile caricare DSH</string>
@@ -88,9 +94,6 @@
     <string name="download_failed">Download non riuscito\nIl file potrebbe non essere più disponibile oppure la rete potrebbe essersi interrotta. Controlla la connessione e riprova.</string>
     <string name="share_gateway_title">Condividi indirizzo DSH</string>
     <string name="restoring_trust">Riconnessione a questo DSH attendibile…</string>
-    <string name="restore_taking_longer">La connessione richiede più tempo del previsto. Riprova o scegli un’altra connessione.</string>
-    <string name="restore_taking_longer_no_retry">La connessione richiede più tempo del previsto. Torna all’elenco dei dispositivi per scegliere un’altra connessione o eseguire di nuovo l’abbinamento.</string>
-    <string name="restore_show_devices">Mostra elenco dispositivi</string>
     <string name="open_harness_trusted">Riconnetti a %1$s attendibile</string>
     <string name="scanning_lan_limited">Scansione con rilevamento limitato… Il permesso per i dispositivi vicini è stato negato; i metodi alternativi UDP e HTTPS continueranno a funzionare.</string>
     <string name="pairing_expired">Link di abbinamento scaduto\nIl codice QR monouso è scaduto o è già stato usato. Generane uno nuovo sul computer e scansionalo subito.</string>

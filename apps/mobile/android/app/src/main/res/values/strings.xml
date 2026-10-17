@@ -70,6 +70,12 @@
     <string name="clear">Clear</string>
     <string name="cancel">Cancel</string>
     <string name="retry">Retry</string>
+    <string name="connection_cancel">Cancel connection</string>
+    <string name="connection_stop_reconnecting">Stop reconnecting</string>
+    <string name="connection_timed_out">This connection timed out. Retry or choose another computer.</string>
+    <string name="connection_failed">Could not connect to this computer. Retry, check its status again, or choose another computer.</string>
+    <string name="connection_cancelled">Connection cancelled.</string>
+    <string name="reconnect_stopped">Automatic reconnection stopped.</string>
     <string name="secure_connection_failed">Secure connection failed</string>
     <string name="secure_connection_failed_message">The certificate is expired or does not match the saved computer identity. Confirm the computer and its current pairing fingerprint, then use Add computer in the device list to scan its new QR code. You can delete only this computer\'s local record; other pairings do not need to be cleared.</string>
     <string name="page_load_failed">DSH could not be loaded</string>
@@ -87,9 +93,6 @@
     <string name="download_failed">Download failed\nThe file may no longer be available or the network was interrupted. Check the connection and try again.</string>
     <string name="share_gateway_title">Share DSH address</string>
     <string name="restoring_trust">Reconnecting to this trusted DSH…</string>
-    <string name="restore_taking_longer">Taking longer than expected. You can retry or choose another connection.</string>
-    <string name="restore_taking_longer_no_retry">Taking longer than expected. Return to the device list to choose another connection or pair again.</string>
-    <string name="restore_show_devices">Show device list</string>
     <string name="open_harness_trusted">Reconnect to trusted %1$s</string>
     <string name="scanning_lan_limited">Scanning with limited discovery… Nearby devices permission was declined; direct UDP and HTTPS fallbacks will still run.</string>
     <string name="pairing_expired">Pairing link expired\nThe one-time QR code was expired or already used. Generate a new QR code on the computer and scan it immediately.</string>

@@ -6,7 +6,7 @@ This is an internal design reference, not a promise that DSH Mobile replaces the
 
 ## Color
 
-The native colors below mirror `apps/mobile/android/app/src/main/res/values[-night]/colors.xml`; use DSH semantic tokens instead for WebView controls.
+The native colors below mirror the [light](../../apps/mobile/android/app/src/main/res/values/colors.xml) and [dark](../../apps/mobile/android/app/src/main/res/values-night/colors.xml) resources; use DSH semantic tokens instead for WebView controls.
 
 | Native role | Light | Dark |
 | --- | --- | --- |
@@ -23,19 +23,21 @@ Maintain at least 4.5:1 text contrast over cards and artwork scrims. Native scre
 
 ## Typography
 
-In WebView controls, inherit DSH's system font stack. Use 16px inputs on mobile to avoid browser zoom and preserve user font scaling. The existing repository hero asset includes its own brand title; do not overlay a duplicate title.
+In WebView controls, inherit DSH's system font stack. Use at least 16 CSS pixels for mobile inputs to avoid focus zoom while preserving larger user font preferences. The existing repository hero asset includes its own brand title; do not overlay a duplicate title.
+
+Keep per-Origin mobile font preferences separate from App-wide WebView zoom. Show advanced typography only when the theme consumes its public tokens; a terminal canvas needs its own supported font control. Native text uses scaled text units (`sp`), while native geometry uses `dp`; neither is a raw device pixel.
 
 ## Shape and depth
 
-- Card radius: 16px.
-- Button radius: 12px.
-- Touch target: at least 44px; prefer 48px for primary mobile actions.
+- Native card radius: 16–20dp according to the existing screen.
+- Native button radius: 12dp for secondary actions and 16dp for primary actions; preserve existing component variants.
+- Native touch target: at least 48dp. Web targets: at least 44 CSS pixels, with 48px for primary mobile actions where space permits.
 - Use a subtle theme-aware border and restrained shadows.
 - Never shift layout on hover or press.
 
 ## Motion
 
-Use only short 150-200ms state transitions. Respect `prefers-reduced-motion`; no decorative entrance animation or continuous animation.
+Use short 150–240ms state/navigation transitions. Respect `prefers-reduced-motion`; avoid decorative entrance or ambient animation. A loading indicator may run while an operation is pending, with a visible cancellation action for connection waits. Reveal a painted webpage without keeping the full-screen artwork above its progress; keep the smaller cancellation action until it becomes usable.
 
 ## Mobile layout
 
@@ -55,7 +57,7 @@ Use only short 150-200ms state transitions. Respect `prefers-reduced-motion`; no
 - [ ] Native light/dark colors or DSH semantic tokens, with readable artwork scrims.
 - [ ] No emoji icons, gradients, glow, particles, or glass effects.
 - [ ] Visible keyboard focus.
-- [ ] 44px minimum touch targets.
+- [ ] Native targets at least 48dp; Web targets at least 44 CSS pixels.
 - [ ] Safe-area and soft-keyboard handling.
 - [ ] Reduced motion supported.
 - [ ] No content hidden behind fixed controls.

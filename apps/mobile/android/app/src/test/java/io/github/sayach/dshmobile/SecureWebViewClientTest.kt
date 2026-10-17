@@ -1,5 +1,6 @@
 package io.github.sayach.dshmobile
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -25,6 +26,22 @@ class SecureWebViewClientTest {
         assertFalse(shouldBlockSubframeNavigation(origin, "https://trusted.example:3443/embed"))
         assertTrue(shouldBlockSubframeNavigation(origin, "https://other.example/embed"))
         assertTrue(shouldBlockSubframeNavigation(origin, "https://trusted.example/embed"))
+    }
+
+    @Test
+    fun visibleContentStartsAnOwnedProbeWithoutWaitingForAllResources() {
+        val source = clientSource()
+        val visible = source.substringAfter("override fun onPageCommitVisible(").substringBefore("\n    override fun ")
+        assertTrue(visible.contains("document.canInspectContent(url, view.url ?: url)"))
+        assertTrue(visible.contains("onContentVisible(document.generation)"))
+        assertFalse("A commit only permits DOM inspection, not unconditional connection completion", visible.contains("confirmContentReady"))
+        assertFalse(visible.contains("clearTimeout()"))
+        val confirm = source.substringAfter("fun confirmContentReady(").substringBefore("\n    fun dispose(")
+        assertTrue(confirm.indexOf("document.confirmContentReady(expectedGeneration)") >= 0)
+        assertTrue(confirm.indexOf("document.confirmContentReady(expectedGeneration)") < confirm.indexOf("clearTimeout()"))
+        val timeout = source.substringAfter("private fun armTimeout(").substringBefore("\n    private fun ")
+        assertTrue(timeout.contains("val expectedGeneration = document.generation"))
+        assertTrue(timeout.contains("!document.shouldTimeout(expectedGeneration)"))
     }
 
     // `onReceivedSslError` proceeds only when a CA is pinned, the error is SSL_UNTRUSTED, the
@@ -87,4 +104,9 @@ class SecureWebViewClientTest {
     }
 
     private fun leaf(der: ByteArray): java.security.cert.X509Certificate = TestCertificates.certificate(der)
+
+    private fun clientSource(): String = generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
+        .flatMap { base -> listOf("src/main", "app/src/main", "apps/mobile/android/app/src/main").asSequence()
+            .map { File(base, "$it/java/io/github/sayach/dshmobile/SecureWebViewClient.kt") } }
+        .first { it.isFile }.readText()
 }

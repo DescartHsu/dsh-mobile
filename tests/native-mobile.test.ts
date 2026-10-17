@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, BROWSER_COMPOSER_EDITOR_QUERY, bindBrowserComposerSoftEnter, bindComposerSoftEnter, bindHistoryAutoLoadGate, composerIsLandingHero, createDocumentCompositionGuard, createHeaderStripPanController, createHistoryAutoLoadGate, createSwitchComputerHold, dispatchComposerImageDrop, drawerScrimVisible, HISTORY_INTENT_LISTENER_OPTIONS, HISTORY_SCROLL_QUIET_MS, installNativeMobileSurface, installStockMobileBack, isBrowserTouchEnterLineBreak, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, nativeAppOwnsComposerEnter, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, NATIVE_MOBILE_TOGGLE_QUERY, preflightComposerImageDrop, resolveBrowserComposerEditor, resolveComposerSessionOrigin, resolveHistoryGateIdentity, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier, stockMainPanelOpen, SWITCH_COMPUTER_CLICK_SUPPRESSION_MS, SWITCH_COMPUTER_LONG_PRESS_MS, SWITCH_COMPUTER_MOVE_TOLERANCE_PX, SWITCH_COMPUTER_NATIVE_ACTION } from '../src/native-mobile.js'
+import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, BROWSER_COMPOSER_EDITOR_QUERY, bindBrowserComposerSoftEnter, bindComposerSoftEnter, bindHistoryAutoLoadGate, composerIsLandingHero, createDocumentCompositionGuard, createHeaderStripPanController, createHistoryAutoLoadGate, createSwitchComputerHold, dispatchComposerImageDrop, drawerScrimVisible, HISTORY_INTENT_LISTENER_OPTIONS, HISTORY_SCROLL_QUIET_MS, installNativeMobileSurface, installStockMobileBack, isBrowserTouchEnterLineBreak, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, nativeAppOwnsComposerEnter, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, NATIVE_MOBILE_TOGGLE_QUERY, preflightComposerImageDrop, resolveBrowserComposerEditor, resolveComposerSessionOrigin, resolveHistoryGateIdentity, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier, stockMainPanelOpen, syncHistoryLoaderLabel, SWITCH_COMPUTER_CLICK_SUPPRESSION_MS, SWITCH_COMPUTER_LONG_PRESS_MS, SWITCH_COMPUTER_MOVE_TOLERANCE_PX, SWITCH_COMPUTER_NATIVE_ACTION } from '../src/native-mobile.js'
 
 interface FakeElementOptions {
   readonly children?: readonly HTMLElement[]
@@ -240,8 +240,7 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-row] { display:flex !important; flex-wrap:wrap !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-trailing] { display:flex !important; flex:1 0 auto !important; flex-wrap:nowrap !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-composer-model-label] { flex:1 1 auto !important; max-width:none !important; min-width:0 !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:not(:disabled)')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:disabled')
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button { min-width:48px !important; touch-action:manipulation; }')
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_rowHead"]:has(> [class*="_rowIdentity"]) { flex-wrap:nowrap !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_rowActions"] { flex:0 0 auto !important; flex-wrap:nowrap !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[class*="_rowActions"] button { flex:none !important; width:auto !important; min-width:44px !important')
@@ -249,12 +248,20 @@ describe('native mobile presentation', () => {
     expect(NATIVE_MOBILE_STYLES).toContain('[data-variant="think"]) { margin-bottom:12px !important; }')
   })
 
-  it('pins a fixed loader row box independent of button state', () => {
-    // The row sits in the conversation's flex column: a plain height can still
-    // shrink under space pressure, so the box is a non-shrinking fixed basis.
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] { position:relative !important; flex:0 0 28px !important; height:28px !important; }')
-    expect(NATIVE_MOBILE_STYLES).not.toContain('min-height:1px !important')
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:disabled { position:absolute !important; left:50% !important; top:0 !important; transform:translateX(-50%) !important; height:28px !important; max-height:28px !important; overflow:hidden !important; padding:4px 12px !important; }')
+  it('reserves idle label space without hiding the native history button or clipping larger text', () => {
+    const loaderStyles = NATIVE_MOBILE_STYLES.substring(NATIVE_MOBILE_STYLES.indexOf('[data-dsh-mobile-history-loader] {'))
+      .split("/* DSH's sibling margins", 1)[0]
+    expect(loaderStyles).toContain('display:grid !important')
+    expect(loaderStyles).toContain('flex:0 0 auto !important; min-height:48px !important')
+    expect(loaderStyles).toContain('grid-area:1/1 !important; min-height:48px !important; max-width:100% !important')
+    expect(loaderStyles).toContain('font:inherit !important; white-space:normal !important; overflow-wrap:anywhere')
+    expect(loaderStyles).toContain('content:attr(data-dsh-mobile-history-label); visibility:hidden; pointer-events:none')
+    expect(loaderStyles).not.toContain('height:28px')
+    expect(loaderStyles).not.toContain('height:1px')
+    expect(loaderStyles).not.toContain('clip-path')
+    expect(loaderStyles).not.toContain('overflow:hidden')
+    expect(loaderStyles).not.toContain('button:not(:disabled)')
+    expect(loaderStyles).not.toContain('button:disabled')
   })
 
   it('caps only the draft scrollport when the narrow focused viewport is short', () => {
@@ -1322,24 +1329,79 @@ function historyGateHarness(options: HistoryGateHarnessOptions = {}) {
       clearTimeout(handle)
     },
   })
+  const touchEvent = (type: string, changed: readonly number[], active: readonly number[] = changed): Event => {
+    const event = new Event(type)
+    Object.defineProperty(event, 'changedTouches', { value: changed.map(identifier => ({ identifier })) })
+    Object.defineProperty(event, 'touches', { value: active.map(identifier => ({ identifier })) })
+    return event
+  }
   return {
     gate,
     scroller,
     bind: () => bindHistoryAutoLoadGate(scroller, gate),
     /** Fresh user input on the scroller. */
-    input: (type: string) => { scroller.dispatchEvent(new Event(type)) },
-    /** A touch event carrying its remaining contact list, as real TouchEvents do. */
-    touch: (type: string, touches: number) => {
-      const event = new Event(type)
-      Object.defineProperty(event, 'touches', { value: { length: touches } })
-      scroller.dispatchEvent(event)
-    },
+    input: (type: string) => { scroller.dispatchEvent(type.startsWith('touch')
+      ? touchEvent(type, [1], type === 'touchend' || type === 'touchcancel' ? [] : [1]) : new Event(type)) },
+    touchEvent,
+    /** Real touch changes can leave unrelated contacts elsewhere in the document. */
+    touch: (type: string, changed: readonly number[], active: readonly number[] = changed) => { scroller.dispatchEvent(touchEvent(type, changed, active)) },
     /** A scroll event after the top moved, whether a finger or a script moved it. */
     scroll: (value: number) => { top = value; scroller.dispatchEvent(new Event('scroll')) },
     clicks: () => clicks,
     pending: () => pending.size,
   }
 }
+
+describe('history loader label', () => {
+  it('retains the native idle locale while loading and adopts a changed idle locale', () => {
+    const loader: Pick<HTMLElement, 'dataset'> = { dataset: {} }
+    const button = { disabled: false, textContent: '  加载更早历史  ' }
+    syncHistoryLoaderLabel(loader, button)
+    expect(loader.dataset.dshMobileHistoryLabel).toBe('加载更早历史')
+    button.disabled = true
+    button.textContent = '加载中…'
+    syncHistoryLoaderLabel(loader, button)
+    expect(loader.dataset.dshMobileHistoryLabel).toBe('加载更早历史')
+    button.disabled = false
+    button.textContent = 'Load earlier history'
+    syncHistoryLoaderLabel(loader, button)
+    expect(loader.dataset.dshMobileHistoryLabel).toBe('Load earlier history')
+  })
+
+  it('writes the sizing label only when the native idle text changes', () => {
+    let label: string | undefined
+    const write = vi.fn((value: string) => { label = value })
+    const dataset: DOMStringMap = {}
+    Object.defineProperty(dataset, 'dshMobileHistoryLabel', { get: () => label, set: write })
+    const button = { disabled: false, textContent: 'Load earlier history' }
+    syncHistoryLoaderLabel({ dataset }, button)
+    syncHistoryLoaderLabel({ dataset }, button)
+    expect(write).toHaveBeenCalledTimes(1)
+    button.textContent = '加载更早历史'
+    syncHistoryLoaderLabel({ dataset }, button)
+    expect(write).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not invent an idle translation if a loader is first observed while busy', () => {
+    const loader: Pick<HTMLElement, 'dataset'> = { dataset: {} }
+    syncHistoryLoaderLabel(loader, { disabled: true, textContent: 'Loading…' })
+    expect(loader.dataset.dshMobileHistoryLabel).toBeUndefined()
+  })
+
+  it('observes only loader text changes, releases its sizing attribute, and preserves native accessibility', () => {
+    const source = readFileSync(new URL('../src/native-mobile.ts', import.meta.url), 'utf8')
+    expect(source).toContain('historyLabelObserver.observe(next, { childList: true, characterData: true, subtree: true })')
+    expect(source).toContain('historyLabelObserver.disconnect()')
+    expect(source).toContain('delete element.dataset.dshMobileHistoryLabel')
+    expect(source).toContain('element.dataset.dshMobileHistoryLabel = originalLabel')
+    expect(source).toContain('bindHistoryLoader(undefined)')
+    const start = source.indexOf('if (historyLoader !== undefined) {')
+    const loader = source.slice(start, source.indexOf('const messageColumn =', start))
+    expect(loader).toContain('syncHistoryLoaderLabel(historyLoader, button)')
+    expect(loader).not.toContain('tabIndex')
+    expect(loader).not.toContain('aria-hidden')
+  })
+})
 
 describe('history auto-load gate', () => {
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
@@ -1391,13 +1453,13 @@ describe('history auto-load gate', () => {
     expect(harness.clicks()).toBe(0)
   })
 
-  it('keeps the arm through a mid-drag pause without scrollend', () => {
+  it('expires a held pause without scrollend and re-arms on the next owned touchmove', () => {
     vi.useFakeTimers()
     const harness = historyGateHarness({ top: 400 })
     harness.bind()
     harness.input('touchstart')
     vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS * 2)
-    expect(harness.gate.state().armed).toBe(true)
+    expect(harness.gate.state().armed).toBe(false)
     expect(harness.pending()).toBe(0)
     harness.input('touchmove')
     harness.scroll(60)
@@ -1432,19 +1494,131 @@ describe('history auto-load gate', () => {
     expect(quiet.clicks()).toBe(0)
   })
 
-  it('keeps the arm while another finger remains after one touchend', () => {
+  it('retains another finger ownership after one touchend without making its input lease permanent', () => {
     vi.useFakeTimers()
     const harness = historyGateHarness({ top: 400 })
     harness.bind()
-    harness.touch('touchstart', 1)
-    harness.touch('touchstart', 2)
-    harness.touch('touchend', 1) // one finger lifted, one still on the glass
+    harness.touch('touchstart', [1], [1])
+    harness.touch('touchstart', [2], [1, 2])
+    harness.touch('touchend', [1], [2]) // one finger lifted, one still on the glass
     vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS + 1)
+    expect(harness.gate.state().armed).toBe(false)
+    harness.touch('touchmove', [2], [2])
     expect(harness.gate.state().armed).toBe(true)
-    harness.touch('touchend', 0) // the last finger lifted
+    harness.touch('touchend', [2], []) // the last finger lifted
     vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS + 1)
     expect(harness.gate.state().armed).toBe(false)
     harness.scroll(60)
+    expect(harness.clicks()).toBe(0)
+  })
+
+  it('expires after its last own contact ends even while another contact remains outside the scroller', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    const outside = new EventTarget()
+    harness.touch('touchstart', [1], [1])
+    outside.dispatchEvent(harness.touchEvent('touchstart', [2], [1, 2]))
+    harness.touch('touchend', [1], [2])
+    outside.dispatchEvent(harness.touchEvent('touchend', [2], []))
+
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS * 4)
+    expect(harness.gate.state().armed).toBe(false)
+    expect(harness.pending()).toBe(0)
+    harness.scroll(40)
+    expect(harness.clicks()).toBe(0)
+  })
+
+  it('retains contacts observed on different descendant targets until all of its contacts end', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    // Both starts reach the containing scroller even when their DOM targets differ.
+    harness.touch('touchstart', [11], [11])
+    harness.touch('touchstart', [22], [11, 22])
+    harness.touch('touchcancel', [11], [22])
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS * 2)
+    expect(harness.gate.state().armed).toBe(false)
+    harness.touch('touchmove', [22], [22])
+    harness.scroll(50)
+    expect(harness.clicks()).toBe(1)
+    harness.touch('touchend', [22], [])
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS * 2)
+    expect(harness.pending()).toBe(0)
+  })
+
+  it('expires when a detached original target delivers its ending outside the scroller', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    const detachedTarget = new EventTarget()
+    harness.touch('touchstart', [7], [7])
+    // A detached Touch.target still receives touchend, but its old ancestor does not.
+    detachedTarget.dispatchEvent(harness.touchEvent('touchend', [7], []))
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS * 4)
+    expect(harness.gate.state().armed).toBe(false)
+    expect(harness.pending()).toBe(0)
+    harness.scroll(40)
+    expect(harness.clicks()).toBe(0)
+    harness.touch('touchstart', [8], [8])
+    harness.scroll(20)
+    expect(harness.clicks()).toBe(1)
+  })
+
+  it('ignores moves and endings of contacts whose start this owner never observed', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    harness.touch('touchmove', [91], [91])
+    harness.touch('touchend', [91], [])
+    expect(harness.gate.state().armed).toBe(false)
+    expect(harness.pending()).toBe(0)
+    harness.scroll(40)
+    expect(harness.clicks()).toBe(0)
+  })
+
+  it('releases all owned contacts on a cancelled multi-touch gesture', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    harness.touch('touchstart', [1, 2], [1, 2])
+    harness.touch('touchcancel', [1, 2], [])
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS + 1)
+    expect(harness.gate.state().armed).toBe(false)
+    expect(harness.pending()).toBe(0)
+    harness.scroll(40)
+    expect(harness.clicks()).toBe(0)
+  })
+
+  it('withdraws held contacts across a session reset without accepting their later moves', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    harness.touch('touchstart', [7], [7])
+    harness.gate.reset(400)
+    harness.touch('touchmove', [7], [7])
+    harness.touch('touchend', [7], [])
+    expect(harness.pending()).toBe(0)
+    harness.scroll(40)
+    expect(harness.clicks()).toBe(0)
+    harness.touch('touchstart', [8], [8])
+    harness.scroll(20)
+    expect(harness.clicks()).toBe(1)
+  })
+
+  it('withdraws held contacts and rejects every touch stage after disposal', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    harness.touch('touchstart', [1, 2], [1, 2])
+    harness.gate.dispose()
+    harness.touch('touchmove', [1], [1, 2])
+    harness.touch('touchend', [1], [2])
+    harness.touch('touchcancel', [2], [])
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS * 2)
+    expect(harness.gate.state().armed).toBe(false)
+    expect(harness.pending()).toBe(0)
+    harness.scroll(40)
     expect(harness.clicks()).toBe(0)
   })
 

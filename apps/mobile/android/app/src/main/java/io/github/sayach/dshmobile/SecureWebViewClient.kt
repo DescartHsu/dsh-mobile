@@ -59,11 +59,21 @@ internal class SecureWebViewClient(
     private val onTopLevelUrlChanged: (String) -> Unit,
     private val onLoaded: () -> Unit,
     private val onBeforeTopLevelNavigation: () -> Unit,
+    private val onContentVisible: (documentGeneration: Int) -> Unit = {},
 ) : WebViewClient() {
     private val handler = Handler(Looper.getMainLooper())
     private val document = WebViewDocumentState(origin)
     private var timeout: Runnable? = null
     private var loadingUrl: String? = null
+
+    val currentDocumentGeneration: Int get() = document.generation
+
+    /** Release the transport timer only after this document's real DOM was found usable. */
+    fun confirmContentReady(expectedGeneration: Int): Boolean {
+        if (!document.confirmContentReady(expectedGeneration)) return false
+        clearTimeout()
+        return true
+    }
 
     fun dispose() {
         clearTimeout()
@@ -104,6 +114,12 @@ internal class SecureWebViewClient(
         if (sameMainDocumentUrl(origin, currentUrl, url)) {
             clearTimeout()
             if (document.finished(url, currentUrl)) onLoaded()
+        }
+    }
+
+    override fun onPageCommitVisible(view: WebView, url: String) {
+        if (document.canInspectContent(url, view.url ?: url)) {
+            onContentVisible(document.generation)
         }
     }
 
@@ -166,8 +182,9 @@ internal class SecureWebViewClient(
     private fun armTimeout(view: WebView, url: String) {
         clearTimeout()
         loadingUrl = url
+        val expectedGeneration = document.generation
         val task = Runnable {
-            if (loadingUrl != url) return@Runnable
+            if (loadingUrl != url || !document.shouldTimeout(expectedGeneration)) return@Runnable
             loadingUrl = null
             timeout = null
             document.failed()

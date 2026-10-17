@@ -44,6 +44,8 @@ Browser checks consume built client files. Run `npm run build` and `npx playwrig
 
 These fixtures do not submit a model request or read the normal DSH home. Browser evidence does not establish physical Android keyboard, camera or device-lifecycle behavior.
 
+`smoke:history-scroll` uses the isolated packed DSH runtime described below through `DSH_BOOT_SMOKE_BIN`, preferring `DSH_BOOT_SMOKE_MOBILE_TARBALL` when supplied. A test-only Host plugin appends and flushes completed Turns through DSH's public Session services without invoking an Agent/model. One real single-contact drag starts the first `/api/session/page` request; holding and releasing that response checks busy/enabled geometry, viewport preservation after prepend and absence of chained loading. Two Chromium CDP contacts away from the top threshold must not load history; Chromium treats that gesture as a pinch, so it is not evidence of two-finger scrolling. After 1600ms without input or scroll, scripted movement must not reuse the expired loading intent. Keyboard Enter loads the second page and a pointer click on the original button loads the third. Controlled default/24px button measurements check wrapping and visible manual access. This is real DSH pagination over generated test history, not an inserted imitation loader, Safari/iOS execution, physical multi-touch or screen-reader acceptance.
+
 `smoke:layout-ownership` captures the built layout stylesheet and checks an owned display-contents/virtualized-view fixture under broad unlayered skin overrides. It observes visible, scrollable and clickable content, narrow/wide geometry and an unchanged stock-layout control. Its controlled collapse case removes only the ownership layer and requires a zero-height ledger before reporting success. This is CSS regression evidence, not full compatibility with any particular skin.
 
 Transport recovery uses the same isolated packed DSH runtime described below and a loopback-only fault proxy. It requires healthy HTTP during an actual mux interruption, a new 101 handshake and fresh Workspace baseline, and an unchanged document/editor/draft. `--interactions` adds a test-only Host question through the real Loader, checks desktop/mobile delivery and reconnection, and rejects one answer request before an explicit retry. It does not simulate an approval audit or establish a reporter's Cloudflare deployment. `--negative-control-mux` deliberately leaves the mux unavailable and must fail with `Mux recovery negative control detected`; another setup error is not a passing negative control.
@@ -52,7 +54,7 @@ Transport recovery uses the same isolated packed DSH runtime described below and
 
 ## Test the packed plugin in DSH
 
-Use an isolated DSH installation rather than replacing the plugin's development dependencies. This PowerShell example uses the current checked version:
+Use an isolated DSH installation rather than replacing the plugin's development dependencies. This PowerShell example selects one version from the checked CI matrix; use the target DSH version when validating an upgrade:
 
 ```powershell
 $dshMobileTestRuntime = Join-Path $env:TEMP ('dsh-mobile-test-runtime-' + [Guid]::NewGuid().ToString('N'))

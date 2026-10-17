@@ -2,15 +2,15 @@
 
 [简体中文](MOBILE_COMPOSER_TOOLBAR.md) · [Third-party compatibility](../README.en.md#third-party-plugin-compatibility)
 
-> Layout changes in plugin 0.6.3. Android and mobile browsers use the same plugin-served page; this change does not require reinstalling the App.
+> Layout changes have been available since plugin 0.6.3, with public-slot wrapper touch-target corrections since 0.6.4. Android and mobile browsers use the plugin-served page; these web changes do not require reinstalling the App.
 
 The narrow-screen composer preserves DSH's native structure and handlers. Model names truncate when space is limited, additional controls wrap, and Send/Stop retain touch dimensions. Entire native groups wrap according to their actual width. Switches are not stretched into action buttons, and inline dialogs, menus and lists do not receive compact toolbar sizing.
 
-## Difference from the original PR
+## Layout and limits
 
-The original proposal combined plugins into one upper horizontal scrollport with native actions fixed below. Current DSH exposes no parent `conversation.input.toolbar` entry; left and right plugins belong to different React parents, and the core width observer measures those two native groups. This version does not provide a shared upper scrollport, move DOM, copy core callbacks or flatten the tree with `display:contents`.
+Current DSH puts left and right extensions under different React parents, and its width observer measures those two native groups. It exposes no parent `conversation.input.toolbar` entry. The current implementation does not combine all plugins into a shared upper scrollport, move DOM, copy core callbacks or flatten the tree with `display:contents`.
 
-It implements compact/overflow fixes through available public seams, retaining the original author commit with maintainer corrections. A future upstream parent-toolbar capability can be evaluated separately rather than registering a presenter that never renders.
+Compact/overflow fixes use the available public slots. A future upstream parent-toolbar capability can be evaluated separately.
 
 ## Compact extension boundaries
 
@@ -19,6 +19,12 @@ The layout preserves native parent groups and adjusts wrapping, spacing and reac
 Public-slot checks also cover compact shapes representing an auto-continue switch, Fast icon, quota summary and existing-task recovery entry. These are presentation fixtures without service behavior, not evidence that a particular community plugin's interfaces, task operations or quota requests work.
 
 On small screens, direct span/div wrappers with a non-switch button in the public left/right slots reserve room for the 44px target, preventing it from escaping a 30px wrapper into adjacent controls. The rule does not identify third-party classes; pure switches, popup wrappers and wrappers containing buttons only deeper in their trees are excluded, as are wide viewports.
+
+## Display size and available space
+
+When text is oversized or little reading space remains, first check **Settings → General → Mobile font size**. **More font settings** shows only the code size and text/code family controls actually supported by the current DSH theme. These web preferences are local to the current address, without changing the computer or other devices. They do not guarantee font changes in a terminal canvas or arbitrary third-party controls.
+
+The Android App's **Settings → General → Page zoom** resizes the entire WebView independently of web font size; reset it to 100% when comparing defaults. It appears only when the App advertises the required native capability, not in mobile browsers or unsupported older Apps. See the [App manual](../apps/mobile/README.md#devices-and-settings) for its range and App requirements.
 
 ## Verification scope
 

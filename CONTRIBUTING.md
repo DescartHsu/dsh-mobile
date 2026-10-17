@@ -54,7 +54,7 @@ Transport recovery uses the same isolated packed DSH runtime described below and
 
 ## Test the packed plugin in DSH
 
-Use an isolated DSH installation rather than replacing the plugin's development dependencies. This PowerShell example uses the current checked version:
+Use an isolated DSH installation rather than replacing the plugin's development dependencies. This PowerShell example selects one version from the checked CI matrix; use the target DSH version when validating an upgrade:
 
 ```powershell
 $dshMobileTestRuntime = Join-Path $env:TEMP ('dsh-mobile-test-runtime-' + [Guid]::NewGuid().ToString('N'))

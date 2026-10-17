@@ -12,7 +12,7 @@
 | 可用性 | 官方定位为测试用途：有限流、无可用性保证 | 由你的 Cloudflare 账号承载 |
 | 配置项 | 无 | 连接器令牌、公网域名、本机转发端口 |
 
-Cloudflare 提供公网域名与 TLS，插件在本机运行 `cloudflared`，把请求交给有设备配对认证的私有网关。在 Android App 中请选择 **远程访问**；手机浏览器也可打开公开 HTTPS 配对链接。隧道不能替代 DSH Mobile 配对。
+Cloudflare 提供公网域名与 TLS，插件在本机运行 `cloudflared`，把请求交给有设备配对认证的私有网关。电脑主动连接 Cloudflare，不要求家庭网络开放公网入站端口，也不使用托管 Caddy 的腾讯云 DNSPod 凭据。在 Android App 中请选择 **远程访问**；手机浏览器也可打开公开 HTTPS 配对链接。隧道不能替代 DSH Mobile 配对。
 
 ## 快速隧道的功能限制
 

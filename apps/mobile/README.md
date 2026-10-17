@@ -2,161 +2,128 @@
 
 [简体中文](README.zh-CN.md) · [Back to the project](../../README.en.md)
 
-DeepSeek Harness is the display name of this lightweight, community-maintained Android WebView shell. It does not bundle a second DSH frontend. The app and mobile browsers load the same authenticated HTTPS origin, so both receive the same DSH features plus live-editable `mobile.css` presentation and `mobile.js` functionality.
+DeepSeek Harness is the display name of this community-maintained Android WebView app. It opens the plugin's authenticated HTTPS page rather than bundling another DSH frontend. The app and mobile browsers receive the same DSH features and computer-side mobile customizations.
 
-Android is the only supported native target. The iOS client remains an unpublished local experiment and is outside the build, release, and support scope.
+The current stable app is **0.6.5** (build 81). The npm plugin and Android App have independent versions: a plugin update does not automatically require another APK. See the [0.6.5 changes](#065-update).
 
-The current stable app is **0.6.4** (build 80). The app and npm plugin update independently; plugin web UI or connection fixes do not require reinstalling the APK. Install a new signed release APK for native updates or when the app reports that its version is too old. Older official APKs with the same signer retain pairing during in-place upgrades; a differently signed Debug build cannot overwrite the official app.
+Android 10 or later is supported. The local iOS experiment is not a published or supported client.
 
-## 0.6.5 candidate changes
+## Install and pair
 
-The unpublished Android 0.6.5 candidate (build 81) adds an immediately available **Cancel connection** action during startup, saved-computer connection and pairing, for both LAN and remote access. Cancelling returns to the device list or editable pairing form without removing existing local pairings. When a live DSH page is recovering, **Stop reconnecting** stops automatic recovery without deliberately replacing that page; a blank or failed document returns to the device list. These native changes are not included in the published App 0.6.4 and cannot be installed by updating the npm plugin alone.
+1. Install and enable the plugin using the [project quick start](../../README.en.md#quick-start). Complete LAN setup from the command line or the computer's **Mobile Access** panel.
+2. Install the signed Android APK from [GitHub Releases](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5). Upgrade an official installation in place using the same release signer to retain its pairings. A differently signed Debug APK cannot replace it; do not uninstall or clear data just to bypass that mismatch.
+3. On the computer, generate a pairing key/link under **Mobile Access → Local network**, or configure a remote provider and generate its remote pairing QR code. In the app, choose the matching connection mode and scan or paste the link.
+4. Name the computer. The app stores each LAN or remote pairing as its own record. The phone does not need a cpolar, Cloudflare or Tailscale app.
 
-Each attempt has one overall connection budget: 30 seconds for LAN and 60 seconds for remote access, including the initial page load; retries do not restart it. A timeout ends the waiting state and offers an explicit retry or another computer. A previously unreachable status does not prevent a manual retry, and failure does not silently connect a different computer.
+For LAN, the app also offers a scan and manual `https://IP:port` entry. Discovery cannot bypass firewall rules, campus-network isolation or missing routes; use a reachable address or a remote channel when necessary. Browser pairing has its own [connection instructions](../../README.en.md).
 
-The connection screen retains the whale-girl background with a centered loading indicator and a Cancel connection button below it, without a separate modal dialog. As soon as the trusted page first becomes visible, it replaces the full-screen artwork and native animation, even while its components are still loading. A small Cancel connection button remains until the page has usable controls; cancellation and the overall deadline remain available if boot stalls. This does not wait for every image or other background resource or require a particular Mobile or community layout class.
+## Devices and settings
 
-Cancellation withdraws retries and late UI/navigation results and requests disconnection of owned native network work. An operation still leaving the network retains its execution slot until it exits. Cancellation does not undo a pairing already accepted by the computer; if its one-time QR code has been consumed, generate a new code before pairing again. Device-specific acceptance is required before a new signed App release.
+The **Paired computers** list shows names, connection types, addresses, reachability and recent connections. Tap a row to connect; long-press or use **More** to rename, check, reorder or delete its local record. New records append to the list; **Move up / Move to top** changes presentation, not the startup choice. **Add computer** accepts a fresh pairing link; pairing the same installation in the same mode retains its custom name.
 
-## 0.6.4 update
+| Location | Setting or action |
+| --- | --- |
+| Device list → Settings → Startup behavior | **Open DSH directly** (default) selects the last-used eligible pairing, even when several computers are saved. **Show device list** asks you to choose at each launch. |
+| Device list → Settings → App icon | Choose the mascot or one of six whale-mark colors without changing package identity or paired data. |
+| DSH page → Settings → General → Switch computer | Return to the paired-computer list. Holding the top-left drawer toggle provides another entry. These actions belong inside the app's webpage, not the device-list settings. |
+| <a id="062-update"></a>DSH page → Settings → General → Page zoom | App 0.6.2+ with plugin 0.6.3+: 80–125%, reset to 100%. Saved app-wide without reloading the conversation. |
+| DSH page → Settings → General → Mobile font size | Default 16px, range 12–32px; saved for the current address. Supported themes also expose code size and body/code font choices. Editable inputs retain a 16px minimum; terminal fonts remain DSH-owned. |
+| DSH page → Settings → General → Mobile page modules → Manage | Choose optional frontend modules for this paired device. This neither uninstalls computer plugins nor revokes their authorization; [module rules](../../docs/CLIENT_MODULES.en.md) describe dependencies and applying changes. |
+| DSH page → Settings → General → Task notifications | Request Android notification access or open the app's system notification settings. See [notification limits](#notifications-and-extensions). |
 
-Build 80 uses the system Photo Picker on Android 13+ when the webpage requests a single supported image MIME filter. Multiple selection follows the system limit; unavailable pickers, older systems, capture requests and filters that cannot be represented exactly use the document picker instead. Document requests start directly and retain MIME and multiple settings. The App does not promise a particular manufacturer's gallery. Standard callbacks are bound to the current WebView, exact Origin and document; obsolete Activity results cannot complete a newer request. These native changes require App 0.6.4 or later and are released independently from the npm plugin.
+Page zoom changes the whole page and is separate from per-address text preferences. App-only actions are shown only when the native bridge supports them. Native screens follow the Android system language in Simplified Chinese, English or Italian; webpage copy follows DSH's selected locale. DSH does not currently expose Italian.
 
-WebViews with navigation-listener support cancel a pending standard file request before replacing the document and do not open another selector while a document navigation is in progress. Older providers use the available navigation callbacks; if file selection stops opening after changing pages, update WebView or return to the paired-computer list and reopen the page. Clearing App data is unnecessary.
+Deleting a local record removes its saved token and pinned CA, not the computer's authorization or every short-lived WebView cookie. Use **Mobile Access** on the computer to revoke access immediately. A full Android clear-app-data reset removes all pairings and web data and is not a normal reconnection step.
 
-## 0.6.3 update
+## 0.6.5 update
 
-Build 79 adds per-computer recovery guidance, readable expired-CA records, duplicate-pairing protection and deduplicated status checks that leave capacity for an explicit connection. TLS still refuses expired certificates. It also improves dark-mode primary buttons and explicitly excludes encrypted pairings and WebView sessions from cloud backup and device transfer. The earlier automatic-recovery ownership corrections are included. This signed App is published independently from plugin 0.6.4.
+Android 0.6.5/build 81 adds an immediate **Cancel connection** action during startup, saved-computer connection, LAN scanning and pairing. Cancellation returns to the device list or editable form without deleting existing pairings. **Stop reconnecting** retains a usable DSH page; a blank or failed document returns to the list.
 
-## 0.6.2 update
+The initial wait uses the whale-girl background, a centered loading indicator and a cancellation button, without a separate modal dialog. A trusted page's first visible commit reveals its own loading progress immediately. A small, nonblocking Cancel button remains until usable page controls appear; the app does not wait for every image or require a particular layout class.
 
-Build 78 keeps web content clear of system navigation, display cutouts and the keyboard, and adds **Settings → General → Page zoom** (80–125%, reset to 100%). Zoom is saved in this App, independently from the per-address mobile font settings, and does not reload the current conversation. Its settings entry requires plugin 0.6.3 or later; older Apps and browsers do not show an inactive control.
+One overall budget covers each connection, including queued work, native authentication, retries and initial page loading: **30 seconds for LAN, 60 seconds for remote access**. Retries do not restart it. Manual failures settle visibly, a cached unreachable status still permits retry, and failure never silently selects another computer.
 
-WebViews reporting Chromium below 100 receive a nonblocking update reminder once per detected build. You may continue, but an obsolete WebView can still lack APIs required by DSH. Use the official WebView/Chrome update route available on your device; an unknown engine version is not treated as obsolete.
+Cancellation withdraws queued retries and late navigation results and requests native network disconnection. It cannot roll back a pairing already accepted on the computer; generate a new QR code if its one-time code was consumed. These native controls require App 0.6.5 or later; updating npm alone does not install them.
 
-This release also protects paired records and legacy migration when encrypted data is temporarily unreadable: it does not treat failed reads as an empty list or replace existing credentials. Storage errors are reported without automatically clearing pairings.
+## Connections, recovery and trust
 
-## 0.6.1 update
+Device records, long-lived revocable tokens and pinned CAs are encrypted with Android Keystore. Existing LAN/remote slots migrate without re-pairing. Temporarily unreadable encrypted data is reported, not treated as an empty list or overwritten. An expired CA record remains available for deletion or re-pairing, while TLS continues to reject the expired certificate.
 
-The app is rebuilt with matching release metadata. Native functionality, package identity and pairing/renewal protocol are unchanged from 0.6.0, using the established release signer. This release improves the computer-side remote settings and Caddy build/test tooling; it does not enable official managed Caddy installation. See the [release notes](../../CHANGELOG.md#061---2026-10-08).
+The app renews a short Web session only at the exact saved Origin. After a LAN address change, it can discover the same installation on the default port and renew under the existing pin. A rotated remote Origin cannot be discovered through its expired predecessor: scan the computer's current remote QR code to verify the new address. The old device token is never sent to that unverified address.
 
-## 0.6.0 updates
+Discovery carries metadata only. DNS-SD/mDNS, UDP announcements and active port-3443 queries are supplemented by bounded HTTPS probes of visible private Wi-Fi/hotspot `/24` subnets. For other ports or routed subnets, enter the address manually. Discovery success is not pairing authorization.
 
-- Fixed list order with new pairings appended. Move up / Move to top affect presentation only; startup still prefers the last-used computer.
-- The list's **Settings → App icon** offers the mascot and six whale-mark colors without changing package identity or paired data.
-- Proportionally cropped scanner preview, camera-supported continuous focus, pinch/double-tap zoom and 48dp zoom controls.
-- Hold the top-left drawer toggle inside the app to return to the list. **Settings → General → Switch computer** remains available.
+LAN and self-signed FRP pairings fetch the CA without device credentials, verify its validity and fingerprint against the pairing key, and pin it privately for the exact Origin. Other TLS errors are rejected; no CA is installed in Android's system trust store. A leaf renewed under the same CA does not require re-pairing, but a changed or expired CA does.
 
-These native features require app 0.6.0 or later. See the [release notes](../../CHANGELOG.md#060---2026-10-07) for plugin module management, mobile font size and compatibility improvements.
+Ordinary remote entries use publicly trusted HTTPS. The [managed FRP](../../docs/SELF_HOSTED_FRP.en.md) public-CA path supports App 0.3.3+; [existing-frps self-signed ingress](../../docs/ATTACH_EXISTING_FRPS.en.md) requires App 0.4.6+. Normal browsers do not automatically trust that private CA. Certificate lifetimes do not guarantee unattended availability.
 
-## Use the app
+Temporary network failures are not revocation. An online computer-side revocation marks the row **Removed on computer** and prevents later probes from restoring it. A device revoked while offline may instead receive the generic **Pairing expired** result; re-pair with a fresh code. The app does not reveal whether an unknown token belonged to a removed device.
 
-1. Install and enable the plugin using the [project quick start](../../README.en.md#quick-start). For a command-line LAN installation, run the setup command shown there; plugin-market users can complete LAN setup in **Mobile Access** instead.
-2. Install the signed Android APK from [GitHub Releases](https://github.com/saya-ch/dsh-mobile/releases).
-3. With no paired computers, choose **Local network** or **Remote access**. For LAN, create a pairing key or link under **Mobile Access → Local network**. For remote access, configure a provider and generate its pairing QR code. Scan the corresponding QR code or paste its link in the app.
-4. Name the computer after pairing. The app stores each LAN or remote pairing as a device record: LAN pins its private CA; ordinary remote paths use platform-trusted public HTTPS certificates; the self-signed FRP entry pins a remote CA. No provider app is needed on the phone.
+Automatic recovery tries to retain an already mounted DSH document after renewal. Renderer loss or a failed boot may require reopening, so unsaved state cannot always be recovered. Supported rotation, window and keyboard changes retain the WebView; system theme/font/language changes, process termination and renderer failure may recreate it.
 
-The **Paired computers** list shows each computer's name, connection type, address, reachability and last connection. Tap a row to connect; long-press or use its **More** button to connect, rename, check or delete the local record. Revoked, expired or address-changed rows offer **Re-pair** instead of Connect. To use a new pairing link for another row, choose **Add computer** and the appropriate connection mode; re-pairing the same installation in the same mode keeps its name. The list's settings offer **Open DSH directly** (the default, using the last-used eligible computer even when several are paired) and **Show device list**. In the app's DSH page, **Settings → General → Switch computer** returns to the list. Existing LAN and remote credentials migrate without re-pairing. Temporary unreachability is not treated as revocation.
+## Files, camera and input
 
-Startup options are under the list's **Settings → Startup behavior**. Deleting a local device does not revoke its authorization on the computer; use the computer's Mobile Access device controls for revocation.
+### Standard attachments
 
-### Connection recovery and certificates
+App 0.6.4+ uses the system Photo Picker on Android 13+ for supported image filters. It preserves the webpage's MIME and multiple-selection settings within system limits. Other filters, capture requests, older Android or an unavailable picker use Documents. No storage permission is added and no manufacturer's gallery is guaranteed.
 
-The managed self-hosted FRP path uses a public-CA HTTPS domain or IPv4 origin and requires Android app 0.3.3 or later. The existing-frps path, introduced in 0.4.6, can use the same public-CA pairing or a public-IPv4 self-signed entry that requires app 0.4.6 or later. See the [attachment guide](../../docs/ATTACH_EXISTING_FRPS.en.md); older supported apps continue to work with LAN, cpolar, and Tailscale Funnel.
+Standard file callbacks belong to the current WebView, Origin and document. With navigation-listener support, pending requests are withdrawn before document replacement and new selection waits for navigation to finish. Older WebViews use available callbacks; if selection stops opening after changing pages, update WebView or return to the device list and reopen the computer, without clearing data.
 
-See the [self-hosted FRP guide](../../docs/SELF_HOSTED_FRP.en.md) for manual and automatic VPS deployment, host-key verification, cleanup, and troubleshooting.
+DSH keeps its file action in **Add**; Mobile adds **Take photo** when the active attachment owner accepts images. Camera capture explicitly requests permission and returns a full-resolution JPEG. For troubleshooting, select one small JPEG/PNG and inspect the unsent draft preview. Files awaiting submission need not already exist as computer-side image objects; no model request is necessary to check selection.
 
-After the first pairing, the app encrypts its device records, including revocable long-lived tokens and any pinned CA, with Android Keystore. On a later launch it sends a stored token only to its exact saved Origin to renew a short Web session before opening DSH. If the computer receives another LAN address, the app scans the default port, matches the stable DSH installation identifier, and updates the saved origin automatically. A rotating remote address such as a free cpolar URL cannot be discovered through its expired predecessor; scan the computer's current remote QR code to validate the new Origin with a one-time pairing token. The app never sends the stored device token to that new Origin, and discovery never exposes device or Session credentials.
+### Keyboard and page space
 
-Before pairing, the app reads separate version metadata to distinguish an outdated app, an outdated plugin, and an unsupported protocol. A legacy plugin without that endpoint continues through the original flow. When direct launch is selected, the app attempts the saved connection within a bounded recovery budget and returns to the device list if it cannot reconnect. Automatic retries run only for transient network or provider failures. Native app screens automatically follow the Android system locale in Simplified Chinese, English, or Italian without a separate language switch. Plugin-owned UI inside the WebView follows DSH's selected locale. DSH does not currently expose Italian, but the dictionaries are ready to activate without another plugin change when it does.
+System Back first dismisses supported webpage layers, then handles same-origin WebView history, and exits at the root. Model submenus return to their parent before closing. No extra native toolbar is shown above the WebView.
 
-In the published App 0.6.4, if the initial trusted-connection screen remains open for 12 seconds, **View device list** appears without needing a server response. Retry is also available when the screen is bound to a saved computer. From the list, retry a connection, delete just its local record or use **Add computer** with a fresh pairing link; clearing all App data is unnecessary. App 0.6.3 also prevents previous recovery tasks from replacing a manually opened connection or pairing form. The [unpublished 0.6.5 connection controls](#065-candidate-changes) replace that delayed exit with an immediate action.
+The native soft-keyboard adapter uses plain Enter for a line break only with a visible inset-backed keyboard, no reported hardware keyboard, and a focused active-session composer. The plugin's separate touch-browser rule also uses Enter for draft line breaks, including external keyboards on touch-primary browsers. Menus, composition and modified shortcuts remain DSH-owned; non-touch desktop behavior is unchanged. Use Send for multiline messages or Shift+Enter where DSH's normal keyboard policy applies.
 
-When automatic recovery renews a Session, the app keeps the existing DSH page if its interface is still mounted. A page that did not finish starting or whose renderer stopped must be reopened; unsaved in-page state cannot be recovered in that case.
+System bars, cutouts and keyboard occupancy are reserved once. WebView 151+ receives a minimum 64 MiB HTTP-cache quota for reusable versioned DSH resources; older engines retain their default quota. A Chromium-below-100 reminder is advisory, not a promise that every DSH API is supported on that engine.
 
-The app keeps the live WebView when rotating, resizing the window or changing keyboard availability, preserving the page's scroll position, references and unsent images. It requests new layout and Insets without reloading. Android still recreates the Activity for language, font-scale or system-theme changes; process termination and renderer failure can also discard unpersisted page state. This follows the [Android WebView state-management guidance](https://developer.android.com/develop/adaptive-apps/cookbook/webview-state).
+### Voice
 
-Once the app receives a computer-side revocation notification, later probes cannot replace **Removed on computer** with an expiry or network status. Re-pairing obtains a new credential before the row becomes usable again. A device revoked while offline may still show **Pairing expired**, because the computer deletes its token record and returns the same generic failure as for an unknown token.
+DSH records audio through `getUserMedia` and sends it to the configured computer-side speech provider, not browser SpeechRecognition or the extension bridge. Android asks for microphone permission and accepts audio-only capture from the paired HTTPS Origin. Provider components, models and network access must work; granting recording permission does not verify transcription. Same-origin frontend plugins share that page permission.
 
-LAN discovery listens to DNS-SD/mDNS and periodic UDP announcements at the same time, sends an active UDP query on port `3443`, and retains bounded HTTPS scans of visible private Wi-Fi and phone-hotspot `/24` networks as a compatibility fallback. Every discovery path carries metadata only and results are merged by stable installation identifier, so a changed address updates the existing device. After choosing **Local network**, the setup screen offers **Scan QR code** (point the camera at the computer's QR code), Scan, a result list, and a manual address field (enter `https://IP:port` when discovery fails, e.g. across subnets, on a non-default port, or behind a firewall); select one DSH before entering its key. For a browser's first connection, open the **Copy pairing link** link on the phone (the pairing code is prefilled), or visit `/mobile-access/pair` on the shown HTTPS origin and enter the 43-character pairing code after the generated key's final dot.
+## Notifications and extensions
 
-The private CA is not discovery data. After explicit LAN or self-signed FRP pairing, Android retrieves the gateway CA from the chosen HTTPS Origin without sending a device credential, checks its validity and SHA-256 fingerprint against the pairing key, and stores it with the encrypted device credential. Native requests and WebView then trust only a valid leaf signed by that pinned CA for the exact Origin; other TLS errors are cancelled. For a public-CA remote entry, the gateway serves no private CA and Android uses platform trust instead. A leaf renewed under the same CA needs no re-pairing; an expired, replaced, or mismatched CA must never be silently accepted and requires a new pairing. No private CA is installed in Android's system trust settings.
+Task reminders use Host completion events and pending-input cards while the page remains alive. Lock-screen text is generic and tapping returns to the app. They are not an offline push service: completion reminders require SSE, with no event replay after disconnection. Cloudflare Quick Tunnels do not support this stream; see [channel limits](../../docs/CLOUDFLARE_TUNNEL.en.md#quick-tunnel-feature-limits).
 
-## Why use the app
+The authenticated page may use the `dshMobile` bridge for `files.pick`, `camera.capture`, `share`, clipboard read/write, task notifications/settings, computer switching and page scaling. The separate extension `files.pick` returns one file, follows its requested MIME types and limits bridge-returned file bytes to 8 MiB. This is not the standard DSH attachment selector's limit.
 
-- No browser address or tab bars.
-- System Back dismisses supported page layers before same-origin WebView history and exits the app at the root. Model submenus return to their parent before closing.
-- File selection, same-origin downloads and sharing use narrow native implementations; no extra native toolbar appears above the WebView.
-- The app remains a shell around the same Web UI and protocol used by browsers.
+Bridge file/camera operations are serialized with a five-minute deadline. Cancellation, document/session changes or WebView teardown reject stale results and clean up owned resources. Browser media selection waits for an actual result, explicit cancellation, abort or deadline; returning focus is not itself cancellation. Unsupported capabilities return `unsupported`.
 
-A mobile browser remains an alternative for LAN and publicly trusted remote entries. The self-signed FRP entry requires the 0.4.6 Android app: ordinary browsers do not trust its private CA automatically.
-
-On WebView 151 or later, the app gives its own HTTP cache a 64 MiB minimum quota so large versioned DSH scripts can be reused across page loads. Older WebViews keep their default quota; the app never lowers a larger existing quota.
-
-To remove one computer, delete its row from the device list. A full reset uses Android system app information → clear app data (labels vary by system). It deletes all pairings, cookies, cache and Web storage and requires pairing again; do not use it as the first response to an ordinary reconnection failure.
-
-Deleting a row removes the App's saved device token and pinned certificate, not computer-side authorization. WebView's short-lived site cookies are separate; revoke the device on the computer when access must end immediately. A full App reset clears all sites, so do not use it to remove only one computer.
+Computer-side `host.mjs` extensions are trusted Node.js code, separate from this native bridge; the bridge cannot edit or upload their source. Computer-managed frontend assets and extension activation are documented in the [project guide](../../README.en.md), and optional Worker execution in the [Worker guide](../../docs/EXTENSION_WORKERS.en.md).
 
 ## Security properties
 
 | Control | Android behavior |
 | --- | --- |
-| Transport | HTTPS origins only; cleartext traffic is disabled. |
-| TLS | LAN pins its pairing-key CA privately. The self-signed FRP entry requires a remote CA pin in app 0.4.6 or later. Both accept only an otherwise-untrusted, valid leaf for the exact Origin. Public-CA remote entries use platform trust; every other TLS error is cancelled. |
-| Origin | Only scheme, normalized host, and port persist. Ordinary paths, queries, and fragments do not. |
-| Navigation | Same-origin main frames stay inside; user-initiated external HTTPS links open in the system browser. |
-| Permissions | Standard file input uses the system Photo Picker or document picker according to Android version and the webpage's request, without storage permission. Camera permission is requested for QR scanning or photo capture; microphone permission is requested for DSH voice input. |
-| Downloads | Foreground GET from the exact origin only; authentication control paths are never downloads. |
-| Data | Android Keystore encrypts device records, including tokens, origins and pinned CAs; Web storage stays in the app sandbox. Deleting a device removes its record only; system clear-app-data removes all pairings and Web data. |
-| Backup | App backup is disabled; TLS private keys and signing keys must remain outside the repository. |
-
-The network security configuration does not trust user-installed CAs. For LAN, the plugin signs a new leaf for the selected interface address while the app retains the stable CA pin. For the self-signed FRP entry, the computer-side CA lasts five years and its public-IPv4 leaf lasts 397 days; the leaf can rotate under the same CA, but CA expiry or replacement requires a new fingerprint check and re-pairing. These are certificate lifetimes, not an unattended-availability guarantee.
-
-## Mobile extension bridge
-
-The authenticated page can call the Android bridge through `dshMobile` extensions. It uses an `androidx.webkit` WebMessage listener, checks the exact configured top-level origin and `isMainFrame` on every message, and never uses `addJavascriptInterface`. Inbound messages are capped at 1 MiB, clipboard text at 256 KiB, binary results at 8 MiB, and replies at 12 MiB. The bridge does not expose cookies, device tokens, pairing keys, CA private keys, or arbitrary Android APIs.
-
-Available actions include `files.pick`, `camera.capture`, `share`, `clipboard.read`, `clipboard.write`, `notification.notify`, `notification.settings` and `mobile.switch-computer`. DSH keeps its file-attachment action in Add; Mobile adds camera capture there when the current attachment owner accepts images. The separate `files.pick` returns one file, follows the caller's MIME types and returns at most 8 MiB through the bridge; that is not a limit on DSH's file selector. Camera capture requests permission when used, writes a full-resolution JPEG through `FileProvider` and returns a browser `File`.
-
-For ordinary DSH attachments, App 0.6.4 selects the system Photo Picker or document picker as described above, preserves the webpage's MIME and multiple-selection settings, and returns all selected items within the system picker limits. Available galleries and document providers depend on the device. This standard WebView path is independent of the extension `files.pick` action and its Bridge size limit. File-selection acceptance remains specific to the checked device, WebView provider and APK.
-
-Task reminders use Host completion events and explicit pending-input cards while the page remains alive. Enable notifications or open system settings from DSH **Settings → General** inside the app. Lock-screen text is generic and tapping opens the app. Plugin 0.6.4 distinguishes full session and turn IDs, including long and non-ASCII IDs; earlier versions can replace notifications when their tags collide. Completion reminders require SSE and have no offline event replay; Cloudflare Quick Tunnels do not support the stream. See [channel limits](../../docs/CLOUDFLARE_TUNNEL.en.md#quick-tunnel-feature-limits).
-
-Bridge file/camera actions are serialized with a five-minute deadline. Cancellation, WebView destruction, timeout and stale-session results are cleaned up or rejected. Standard WebView file inputs are a separate path. Since plugin 0.6.6, browser media selection waits for change, explicit cancellation, abort or the deadline rather than treating restored focus as cancellation. Unsupported browser capabilities return `unsupported`.
-
-For image attachment diagnosis, compare the native DSH file button and camera action using a small JPEG or PNG and check the unsent draft preview. DSH keeps images in the browser draft before submission, so no new computer-side image object does not establish picker failure. Checking the selected file count/type and the draft preview is sufficient without sending a model request; generic files can use a different storage path. File selection, webpage intake and later submission are separate stages.
-
-From App 0.4.7, its native keyboard adapter uses plain Enter for a new draft line when an inset-backed on-screen keyboard is visible, Android reports no hardware keyboard, and an active session composer is focused. The Send button still submits a multiline draft. Floating keyboards, unknown state and older Apps do not use this native rule; the plugin's touch-browser rule below can still apply. Physical keyboards can use Shift+Enter for a line break.
-
-From 0.6.0, the main composer in touch-primary browsers uses Enter to add a line to a nonempty draft and does nothing for an empty draft. DSH retains menus, composition and modified shortcuts. An external keyboard on a touch-primary browser uses that same rule; a non-touch desktop is unchanged. General settings offers a mobile font size of 12–32px, default 16px, saved for the current address only; editable inputs retain a 16px minimum.
-
-Plugin 0.6.3 adds **More font settings**. From plugin 0.6.5, code-size and body/code-family controls appear only when the current DSH theme consumes their public Markdown font variables; unsupported controls are hidden and saved preferences retained. These webpage preferences belong to the current address, not computer-wide settings, and need no new APK. Terminal fonts remain controlled by DSH. **Page zoom** is a separate native control described in the 0.6.2 update above.
-
-DSH records through `getUserMedia` and sends audio to the configured computer-side DSH speech provider for transcription, not browser-native SpeechRecognition or the extension bridge. The app requests microphone permission on first use and grants audio-only capture for the paired HTTPS Origin. Computer components, model and network must be available; permission does not guarantee transcription. Same-origin client plugins share the page's permissions, so grant recording only when you trust them.
-
-Computer-side extensions are separate: their `host.mjs` runs as trusted local Node.js code on the DSH host, while `mobile.js` calls its scoped actions and routes. The app bridge cannot edit or upload extension source files.
-
-The client validates the extension manifest and revisioned resource URLs. File changes trigger an authenticated server-sent event so the phone can refresh immediately; 45-second visible and 5-minute hidden polling remains a recovery fallback. Every UI activation is pinned to its Host, script, stylesheet, and asset generation. Failed Host staging keeps the current version; failed client activation closes that extension and retries instead of mixing generations.
+| Transport | HTTPS only; Manifest cleartext traffic is disabled. |
+| Trust | Exact-Origin platform trust or a privately pinned pairing CA. User-installed system CAs are not broadly trusted. |
+| Navigation | Same-origin main frames remain inside; explicit external HTTPS links open in the system browser. |
+| Permissions | Camera for explicit scanning/capture, microphone for DSH recording, notifications through a foreground permission/settings action; standard file selection needs no storage permission. |
+| Bridge | WebMessage listener validates exact top-level Origin and main frame; no `addJavascriptInterface` or arbitrary Android API. |
+| Limits | Inbound message 1 MiB, clipboard 256 KiB, binary bridge result 8 MiB, reply 12 MiB. |
+| Credentials | Bridge replies do not automatically include stored pairing credentials; there is no direct bridge API for reading the credential store or private keys. Clipboard contents and selected files may contain sensitive data: use only trusted extensions. |
+| Downloads | Foreground GET from the exact Origin only; authentication-control paths are excluded. |
+| Storage | Keystore-encrypted pairings and sandboxed web data; cloud backup and device transfer are disabled. Signing/TLS private keys must stay outside the repository. |
 
 ## Build
 
-Requirements: Android Studio or Android SDK 36 and JDK 17. The repository includes the Gradle 9.7.1 Wrapper.
+Use Android Studio or Android SDK 36 and JDK 17. The repository includes the Gradle 9.7.1 Wrapper.
 
 ```powershell
 Set-Location apps/mobile/android
 ./gradlew.bat :app:lintDebug :app:testDebugUnitTest :app:assembleDebug -x :app:lintAnalyzeDebugUnitTest -x :app:lintAnalyzeDebugAndroidTest
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub Releases build a signed release APK with a stable signing key stored only in repository secrets; signing keys and passwords never enter the source tree or build artifacts. The current signed release is [Android 0.6.4](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.4), with SHA-256 `b28f2e832a8596df2fa1bfbad7dc36eef59d519c9e4875dd2be1ea4713804adf`.
+The Debug APK is `app/build/outputs/apk/debug/app-debug.apk`. Official releases use the established signing key stored only in repository Secrets. A local unsigned Release build or a Debug install is not official-signer evidence.
 
-## Acceptance
+The verified stable release is [Android 0.6.5](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5), SHA-256 `41bd476c5ccf90020ecf624844a29886d55060a79533b599e9aa5bf0a1d71844`. Earlier release history belongs in [CHANGELOG](../../CHANGELOG.md).
 
-Development Debug builds of the unpublished connection controls, using development metadata 0.6.4/build 80, were checked on PJW110 (Android 16, WebView 153.0.8010.36) against an isolated DSH 0.2.0-rc.2 profile with plugin 0.6.10 over USB and pinned HTTPS. Checks covered pairing and saved-connection cancellation, system Back, startup cancellation, initial-load cancellation, failed manual connections and the return from a failed page after stopping native recovery. A later check held a frontend module response: the webpage became visible and received touches before application readiness, compact cancellation returned to the list, and releasing the module allowed normal completion without native loading controls. Same-signer updates retained the existing pairings; temporary test records were removed. This does not establish public-provider behavior, the remote 60-second deadline, native recovery with a still-live draft, or acceptance of the final 0.6.5/build 81 signed APK.
+## Acceptance and known limits
 
-Shared URL-policy tests cover origin normalization, pairing entry, same-origin navigation and download paths. Local acceptance of the clean App 0.6.4 / build 80 Debug APK used PJW110 with Android 16 and Google WebView 153.0.8010.36. With the same retained WebView, the real DSH stock input reopened Documents after document replacement, rejected the old selection, and received the exact controlled PNG bytes with a decoded draft preview. A held main-document response also confirmed that selection was refused during navigation and reopened after HTTP 204 retained the old document. No model prompt was submitted. These USB-isolated Debug checks do not establish physical acceptance of the official-signer APK, public tunnels, HyperOS, older providers or other devices.
-
-Earlier PJW110 checks with Android 16 and WebView 151 covered model-menu Back, rotation with draft/reference/image retention, known revocation through checks and restart, and re-pairing the same device. Those checks also used an isolated HTTPS instance over USB. A real VPS plus phone end-to-end test of the self-signed FRP entry has not been recorded; cutouts, font scaling, TLS failures, downloads and additional device/provider combinations still require their own acceptance.
-
-A 0.5.6 development build used to prepare 0.6.0 additionally verified in-place Debug upgrade with paired data retained, all seven Launcher choices, two isolated computers, explicit order surviving later connections, scanner buttons/double-tap zoom and camera release on this device. Physical pinch, real QR recognition, older-Android fallback and process-death restoration are not represented as completed device checks.
+- Connection-control development builds used Debug metadata 0.6.4/build 80 on PJW110, Android 16 and Google WebView 153.0.8010.36. Against an isolated DSH 0.2.0-rc.2/plugin 0.6.10 instance over USB and pinned HTTPS, checks covered pairing/startup/saved-connection cancellation, Back, failed manual connections and return from a failed page after stopping native recovery. Held module responses also verified early webpage display, touch-through outside compact cancellation, cancellation and later completion. Pairings were retained and owned QA records removed.
+- Debug builds of App 0.6.4 retained one WebView across document replacement/reload, rejected an old selection, and received controlled PNG bytes with a decoded DSH draft preview. A held navigation and HTTP 204 also checked selector availability. Earlier checks covered model-menu Back, rotation with draft/reference/image retention, known revocation, re-pairing, icon choices and list ordering. None required a model prompt.
+- These observations do not establish final 0.6.5/build 81 official-signer device acceptance, every public provider, remote 60-second timing, full native recovery with a still-live draft, HyperOS/older WebViews or every screen/gesture configuration. Self-signed FRP still lacks a recorded real-VPS-plus-phone end-to-end check. Permission grants alone do not establish voice transcription, and process-death restoration is not guaranteed.
 
 Apache-2.0 licensed. See [LICENSE](../../LICENSE).

@@ -24,23 +24,22 @@
   <a href="#第三方插件适配">第三方插件适配</a> ·
   <a href="#安全">安全</a> ·
   <a href="#兼容性">兼容性</a> ·
+  <a href="docs/README.md">文档</a> ·
   <a href="#贡献者">贡献者</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.10">更新记录</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.11">更新记录</a> ·
   <a href="README.en.md">English</a>
 </p>
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.10**。修复 Tailscale Funnel 的具体错误与授权入口被退出通知覆盖，补齐三语诊断中的错误码和操作说明，并完善扩展文件投递指南。已有远程通道和配对保留，无需更新 Android App。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.10) · [完整更新记录](CHANGELOG.md)。
->
-> **发布准备中**：插件 **0.6.11** 改善历史加载稳定性与 HTTP 认证拒绝诊断，Android App **0.6.5** 改善取消连接、超时与加载等待；两者均未发布。[候选内容](CHANGELOG.md#0611---unreleased)。
+> **当前正式版本：0.6.11**。改善历史加载时的滚动稳定性，保留手动加载入口，并增加脱敏的 HTTP 认证拒绝诊断。Android App **0.6.5** 独立更新取消连接、超时与加载等待。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.11) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.4/dsh-mobile-android-v0.6.4.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.4/dsh-mobile-android-v0.6.4.apk"><strong>下载 Android App 0.6.4</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.4">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.5/dsh-mobile-android-v0.6.5.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.5/dsh-mobile-android-v0.6.5.apk"><strong>下载 Android App 0.6.5</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、cloudflared、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。电脑端分别启停局域网与远程访问、分别管理配对授权；Android App 统一显示已配对电脑。插件不修改 DeepSeek Harness 源码。
@@ -228,7 +227,7 @@ Funnel 的运行组件把公开监听生命周期绑定到父进程和受限控�
 
 扩展动作的 `input` 可以直接使用 `api.schema.object(...)` 等 Schemastery schema，也可以使用带 `parse(value)` 的适配器；手机端 `api.host.invoke()` 会按 JSON 请求发送，输入会在电脑端动作执行前完成校验和规范化。
 
-附件功能优先复用 DSH 自带的文件上传。扩展若需模拟拖放，`dataTransfer` 除了 `files`，还须提供可迭代的 `items`（文件项列表），不能只拼一个 `files` 数组。部分 WebView 的原生拖放构造不完整，兼容处理可参考[插件内的文件投递实现](src/native-mobile.ts)；`dragover` 接受或事件派发成功不代表附件已加入，应检查输入框中的附件与预览。
+附件功能优先复用 DSH 自带的文件上传。扩展若需模拟拖放，`dataTransfer` 除了 `files`，还须提供可迭代的 `items`（文件项列表），不能只拼一个 `files` 数组。部分 WebView 的原生拖放构造不完整，兼容处理可参考[插件内的文件投递实现](https://github.com/saya-ch/dsh-mobile/blob/main/src/native-mobile.ts)；`dragover` 接受或事件派发成功不代表附件已加入，应检查输入框中的附件与预览。
 
 0.6.3 新增可选的 [Worker 执行模式](docs/EXTENSION_WORKERS.md)，用于约束可信本地扩展的 JavaScript 阻塞；默认关闭，按扩展选择，故障后显式恢复，不自动重放操作。这不是权限沙箱，也不要求 App 同步版本。
 
@@ -357,7 +356,7 @@ flowchart LR
   DSH -->|"同一工作区、会话和事件流"| Phone
 ```
 
-插件包含三层：Host face 负责发现、配对、HTTPS、回环代理和扩展注册表；Client face 提供独立的移动布局与扩展 SDK；Android App 提供受限的原生 Bridge。Bridge 使用 `androidx.webkit` WebMessage，每条消息都校验精确顶层 Origin 和主 Frame，并限制消息大小；不使用 `addJavascriptInterface`。DeepSeek Harness 的源码和当前 Web 页面（默认端口 3080，可通过 `dsh web --port` 修改）都不会被改动，安装和卸载完全通过插件机制完成。
+插件包含三层：Host face 负责发现、配对、HTTPS、回环代理和扩展注册表；Client face 提供独立的移动布局与扩展 SDK；Android App 提供受限的原生 Bridge。Bridge 使用 `androidx.webkit` WebMessage，每条消息都校验精确顶层 Origin 和主 Frame，并限制消息大小；不使用 `addJavascriptInterface`。插件不改写 DeepSeek Harness 安装目录中的源码或网页文件；移动网关按请求提供启动兼容层与专用布局，安装和卸载通过插件机制完成。DSH Web 上游端口默认为 3080，可通过 `dsh web --port` 修改。
 
 ## 安全
 
@@ -388,9 +387,7 @@ flowchart LR
 
 ## 兼容性
 
-下表记录已验证的 DSH 与插件版本组合，不表示其他版本自动兼容。0.3.6 起插件不会仅凭版本号拒绝启动；升级 DSH 后若遇到移动端异常，请先核对兼容表并更新插件。历史记录见 [CHANGELOG.md](CHANGELOG.md)。
-
-0.5.2 保留 DSH 宿主依赖名称，但不按 DSH 版本号拦截安装。新版本仍需经过下方的源码契约与配对启动检查；不在表中的版本不代表已验证。
+插件保留 DSH 宿主依赖声明，但不会仅凭 DSH 版本号拦截安装或启动。升级 DSH 后若遇到移动端异常，请先更新插件并核对下方验证范围；版本号可安装不等于所有功能自动兼容。历史更新见 [CHANGELOG.md](CHANGELOG.md)。
 
 ### 系统支持矩阵
 
@@ -406,6 +403,13 @@ flowchart LR
 
 macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funnel 与 cpolar 暂未提供 macOS 组件。诊断页的防火墙检查目前仅覆盖 Windows，其他系统显示“不适用”。
 
+| DSH Mobile 插件 | 已验证的 DeepSeek Harness 版本与范围 |
+| --- | --- |
+| `0.6.11` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-alpha.2`、`0.2.1-alpha.3` 的隔离打包浏览器 CI；`0.2.0-rc.2` 与 `0.2.1-alpha.3` 另通过真实历史分页、滚动位置保持和手动加载检查。浏览器检查不代表所有手机内核、第三方插件或公网线路已验收 |
+
+<details>
+<summary>历史版本验证记录</summary>
+
 | DSH Mobile 插件                         | 验证支持的 DeepSeek Harness 版本                             |
 | ----------------------------------------- | -------------------------------------------------------------- |
 | `0.5.5` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
@@ -416,12 +420,6 @@ macOS 上局域网、cloudflared、自建 FRP 与自有反向代理可用；Funn
 | `0.6.5` | `0.2.0-rc.2`、`0.2.1-alpha.2` 的打包模块管理与移动设置回归；另验证 Windows cpolar 解包及正式 `maid-atelier` 0.1.7 下有内容轨迹的布局修复。不代表全部第三方皮肤或报告者设备已验收 |
 | `0.6.6` | `0.2.0-rc.2`、`0.2.1-alpha.2` 的打包附件接收与图片预览回归，覆盖多图、取消、迟到结果和旧请求；Android 系统选择器改进独立发布，不包含在 npm 更新中 |
 | `0.6.8` | `0.2.1-alpha.3` 的打包移动页面、旧 WebView API 模拟、WebSocket 工作区读取、移动设置、模块管理、侧栏及输入栏回归；身份修复另有真实 HTTP/TLS 与旧凭据升级测试。本机官方 Desktop `0.2.0-rc.2` 已加载该版本插件，原配对保留；不代表手机 5G 或全部第三方插件组合已验收 |
-
-<details>
-<summary>历史版本验证记录</summary>
-
-| DSH Mobile 插件 | 验证支持的 DeepSeek Harness 版本 |
-| --- | --- |
 | `0.5.4` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
 | `0.5.3` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`（源码契约、npm 打包安装、隔离配对、移动页面启动及 WebSocket 工作区读取） |
 | `0.5.2` | `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`（延续既有验证）；`0.2.0-rc.2`（源码契约、隔离配对、移动页面启动和 WebSocket 工作区读取） |
@@ -480,6 +478,6 @@ npm ci
 npm run verify
 ```
 
-文档快速检查使用 `npm run check:docs`。按改动选择的浏览器测试、隔离 DSH 打包验收、截图和正式发布流程见 [CONTRIBUTING.md](CONTRIBUTING.md)；Android 构建见 [App 手册](apps/mobile/README.zh-CN.md#构建)。不要用真实用户配置或正式 App 数据替代测试资料。
+文档快速检查使用 `npm run check:docs`。按改动选择的浏览器测试、隔离 DSH 打包验收、截图和正式发布流程见 [CONTRIBUTING.md](https://github.com/saya-ch/dsh-mobile/blob/main/CONTRIBUTING.md)；Android 构建见 [App 手册](apps/mobile/README.zh-CN.md#构建)。不要用真实用户配置或正式 App 数据替代测试资料。
 
 Apache-2.0，详见 [LICENSE](LICENSE)。

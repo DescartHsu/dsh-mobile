@@ -4,15 +4,15 @@ GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/co
 
 GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-17. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
-## 0.6.11 候选代码贡献 / Code contributions in the 0.6.11 candidate
+## 0.6.11 代码贡献 / Code contributions in 0.6.11
 
-[@ayiejosh](https://github.com/ayiejosh) 的 [#226](https://github.com/saya-ch/dsh-mobile/pull/226) 为 HTTP 认证和 CSRF 拒绝添加诊断记录。整合保留原作者提交 [`115b174`](https://github.com/saya-ch/dsh-mobile/commit/115b174d65c5bcb33f96f671e83dcb15db461e3f)，并追加隐私、限频、统计和错误隔离修正；候选尚未发布。
+[@ayiejosh](https://github.com/ayiejosh) 的 [#226](https://github.com/saya-ch/dsh-mobile/pull/226) 为 HTTP 认证和 CSRF 拒绝添加诊断记录。0.6.11 保留原作者提交 [`115b174`](https://github.com/saya-ch/dsh-mobile/commit/115b174d65c5bcb33f96f671e83dcb15db461e3f)，并追加隐私、限频、统计和错误隔离修正。
 
-[@ayiejosh](https://github.com/ayiejosh)'s [#226](https://github.com/saya-ch/dsh-mobile/pull/226) adds diagnostic records for HTTP authentication and CSRF rejections. Integration retains author commit [`115b174`](https://github.com/saya-ch/dsh-mobile/commit/115b174d65c5bcb33f96f671e83dcb15db461e3f) alongside privacy, rate-limit, counting and failure-containment corrections. The candidate is not yet published.
+[@ayiejosh](https://github.com/ayiejosh)'s [#226](https://github.com/saya-ch/dsh-mobile/pull/226) adds diagnostic records for HTTP authentication and CSRF rejections. Version 0.6.11 retains author commit [`115b174`](https://github.com/saya-ch/dsh-mobile/commit/115b174d65c5bcb33f96f671e83dcb15db461e3f) alongside privacy, rate-limit, counting and failure-containment corrections.
 
-[@chintoleung](https://github.com/chintoleung) 在 [#228](https://github.com/saya-ch/dsh-mobile/issues/228) 定位历史加载时的滚动抖动，并在 [#229](https://github.com/saya-ch/dsh-mobile/pull/229) 提供加载行尺寸、自动加载输入判定及浏览器回归测试。整合保留原作者的五个提交，包括最终修正 [`675154d`](https://github.com/saya-ch/dsh-mobile/commit/675154d5739c3a2de663e7c35da6ba8657017a5e)，并追加维护者修正；0.6.11 候选尚未发布。
+[@chintoleung](https://github.com/chintoleung) 在 [#228](https://github.com/saya-ch/dsh-mobile/issues/228) 定位历史加载时的滚动抖动，并在 [#229](https://github.com/saya-ch/dsh-mobile/pull/229) 提供加载行尺寸、自动加载输入判定及浏览器回归测试。0.6.11 保留原作者的五个提交，包括最终修正 [`675154d`](https://github.com/saya-ch/dsh-mobile/commit/675154d5739c3a2de663e7c35da6ba8657017a5e)，并追加维护者修正。
 
-[@chintoleung](https://github.com/chintoleung) traced history-loading scroll oscillation in [#228](https://github.com/saya-ch/dsh-mobile/issues/228) and contributed loader sizing, input-aware auto-loading and browser regression checks in [#229](https://github.com/saya-ch/dsh-mobile/pull/229). Integration retains the author's five commits, including final correction [`675154d`](https://github.com/saya-ch/dsh-mobile/commit/675154d5739c3a2de663e7c35da6ba8657017a5e), alongside maintainer corrections. The 0.6.11 candidate is not yet published.
+[@chintoleung](https://github.com/chintoleung) traced history-loading scroll oscillation in [#228](https://github.com/saya-ch/dsh-mobile/issues/228) and contributed loader sizing, input-aware auto-loading and browser regression checks in [#229](https://github.com/saya-ch/dsh-mobile/pull/229). Version 0.6.11 retains the author's five commits, including final correction [`675154d`](https://github.com/saya-ch/dsh-mobile/commit/675154d5739c3a2de663e7c35da6ba8657017a5e), alongside maintainer corrections.
 
 ## 0.6.7 代码贡献 / Code contributions in 0.6.7
 

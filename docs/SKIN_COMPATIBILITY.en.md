@@ -13,6 +13,7 @@ If saving reports a dependency conflict, retain the required module or also dese
 ## Diagnose a missing background
 
 - Identify the running plugin, App and skin versions; plugin and App versions need not match.
+- When text and controls are oversized throughout the page, check [mobile font size and App page zoom](MOBILE_COMPOSER_TOOLBAR.en.md#display-size-and-available-space) and compare defaults before attributing it to layout. Terminals and third-party controls may not consume the same font settings.
 - Omit the skin only on this device, reopen manually and compare the conversation, composer and sidebar. Recovery points to styles or mounting, not necessarily a network or pairing failure.
 - First compare the normal computer layout. Developers can also open `/?frontend=stock` on the authenticated mobile Origin to diagnose boot and layout behavior. Gateway authentication and HTTPS checks remain; this entry skips dedicated mobile boot rewriting and module selection, but installed client adaptation and authenticated customizations may still apply. It is not a plugin-free control; some API operations may be rejected, so it does not replace normal mobile access.
 - When stock has a background but mobile does not, inspect the skin's mounting container and fallback for other layouts. WebSocket approval, APK reinstallation or making every container transparent cannot guarantee a fix.

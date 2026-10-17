@@ -4,6 +4,8 @@
 
 远程页面能打开、`/mobile-access/health` 返回正常，仍可能出现“重连中”、模型或工作区迟迟不显示。HTTP 可达只说明请求能通过；DSH 的实时数据还需要 WebSocket 连接完成初始化并保持在线。
 
+先按实际通道排查，不要把所有等待都归因于 DSH 心跳。[Cloudflare 快速隧道](CLOUDFLARE_TUNNEL.md#快速隧道的功能限制)不支持 SSE，可能缺少完成提醒或在线撤销提示；[自备反向代理](SELF_HOSTED_ORIGIN.md#状态与手机验证)的「后端已监听」只说明私有 HTTP 端口启动；[托管 Caddy](CADDY_MANAGED.md#适用条件)需要腾讯云 DNSPod 验证和真正的公网 HTTPS 入站，DNS-01 不能打通 CGNAT。分别检查入口、证书、认证、WebSocket 与通知流，避免只增大超时掩盖前一层故障。
+
 ## 先判断重连发生在哪一步
 
 先记录 DSH、DSH Mobile 插件和 Android App 的版本，再在电脑端 **移动访问 → 连接诊断** 检查当前通道；查看 DSH 启动日志和浏览器开发者工具的 Network → WS，按问题涉及的组件更新。插件与 App 独立发版，版本号不必相同。分享日志时去掉 Token、Cookie 和完整配对地址。
@@ -14,9 +16,9 @@
 
 [#126](https://github.com/saya-ch/dsh-mobile/issues/126) 和 [#146](https://github.com/saya-ch/dsh-mobile/issues/146) 都报告过“HTTP 正常但实时连接重连”，它们不能仅凭界面文案判定为同一个原因。
 
-### 候选 0.6.11 的 HTTP 拒绝诊断
+### HTTP 拒绝诊断（插件 0.6.11 起）
 
-尚未发布的插件 0.6.11 会在插件日志（`$DSH_HOME/mobile-access/logs/dsh-mobile.log`）记录有限的 `auth failure` HTTP 诊断：区分授权与 CSRF 拒绝，包含状态、方法、安全路径或路径类别、相关 Cookie／请求头是否存在及计数、规范化 Origin 和受支持的 fetch-site 值，不记录令牌、Cookie 值、查询参数或任意原始路径。每个网关的两类诊断分别限频，首条立即记录，30 秒窗口内同类拒绝聚合；`suppressed` 表示此前被抑制的同类记录数量，不是全部请求数，也不限定于当前路径。它帮助排查凭据未携带或 CSRF 校验失败，不会自动修复 401／403。没有日志也不代表认证成功：更早的 Host／Origin 拒绝、WebSocket 升级和原生配对／续期不在这两处记录范围内。分享前仍应检查日志；正式版 0.6.10 尚不包含此记录。
+插件 0.6.11 起会在插件日志（`$DSH_HOME/mobile-access/logs/dsh-mobile.log`）记录有限的 `auth failure` HTTP 诊断：区分授权与 CSRF 拒绝，包含状态、方法、安全路径或路径类别、相关 Cookie／请求头是否存在及计数、规范化 Origin 和受支持的 fetch-site 值，不记录令牌、Cookie 值、查询参数或任意原始路径。每个网关的两类诊断分别限频，首条立即记录，30 秒窗口内同类拒绝聚合；`suppressed` 表示此前被抑制的同类记录数量，不是全部请求数，也不限定于当前路径。它帮助排查凭据未携带或 CSRF 校验失败，不会自动修复 401／403。没有日志也不代表认证成功：更早的 Host／Origin 拒绝、WebSocket 升级和原生配对／续期不在这两处记录范围内。分享前仍应检查日志。
 
 ## 慢速传输可能超过默认等待时间
 

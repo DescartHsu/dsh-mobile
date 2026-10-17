@@ -12,7 +12,7 @@ The built-in cloudflared provider runs in one of two modes, chosen in the panel 
 | Availability | Officially for testing: rate-limited, no uptime guarantee | Carried by your own Cloudflare account |
 | Settings | None | Connector token, public hostname, local forward port |
 
-Cloudflare provides the public hostname and TLS. The plugin runs `cloudflared` locally and forwards requests to its paired-device gateway. Select **Remote access** in the Android app; a mobile browser can also use the public HTTPS pairing link. The tunnel does not replace DSH Mobile pairing.
+Cloudflare provides the public hostname and TLS. The plugin runs `cloudflared` locally and forwards requests to its paired-device gateway. The computer connects out to Cloudflare, so a home-network inbound port and managed Caddy's Tencent Cloud DNSPod credentials are not required. Select **Remote access** in the Android app; a mobile browser can also use the public HTTPS pairing link. The tunnel does not replace DSH Mobile pairing.
 
 ## Quick tunnel feature limits
 

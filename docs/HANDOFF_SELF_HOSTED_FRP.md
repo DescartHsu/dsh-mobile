@@ -93,5 +93,5 @@ cd apps/mobile/android
 
 - 公开证书 HTTP 档的 frps vhost 仅可由回环访问；端口须为该实例实际配置的 `vhostHTTPPort`（托管默认 7080），公网只暴露 Caddy HTTPS。自签 TCP 档没有 DSH 的明文 HTTP vhost，但要审查既有 frps 的其他代理监听。
 - 永远不回退到 `accept-new`；已知密钥静默替换必须失败。
-- 卸载脚本只删 DSH Mobile 前缀路径、自有 systemd 单元、带标记 UFW 规则；Caddyfile 仅在含管理标记时清空为占位。
+- 卸载脚本只删 DSH Mobile 自有路径、systemd 单元和带标记 UFW 规则；Caddyfile 只移除本项目的 `import` 行并保留其他内容，删空时留下占位注释。旧版整文件站点不由脚本推断删除，须按当前用户指南手动检查。
 - 私钥路径只在本机使用；Token 不进日志/状态/localStorage。

@@ -8,7 +8,7 @@
 > 插件不装不改你的 frps、**零 SSH**；还提供**完全不用公开证书**的自签穿透档（frps 只做 TCP 透传，
 > 网关自己终止 TLS，证书有效期与更换要求见专门指南）。
 
-自建 FRP 适合已有 VPS、希望避开公共隧道带宽限制的用户。手机经 VPS 上的 Caddy 进入加密 FRP 隧道，再到达电脑上的 DSH；FRP 只负责传输，仍需完成 DSH 配对才能进入。
+自建 FRP 适合已有 VPS、希望自己管理公网入口的用户。电脑主动连接 VPS，因此家中即使没有公网入站也可使用；VPS 本身仍须有可达的公网入口、相应防火墙放行和足够的带宽。手机经 VPS 上的 Caddy 进入加密 FRP 隧道，再到达电脑上的 DSH；FRP 只负责传输，仍需完成 DSH 配对才能进入。
 
 ```text
 手机 App
@@ -81,4 +81,4 @@ curl -v https://PUBLIC_HOST/mobile-access/discovery
 
 ## 上线前验收
 
-部署后，请在你的实际 VPS 与手机网络上检查证书、外网发现接口、App 配对和实时对话；本仓库的历史实测记录见[自建 FRP 交接记录](HANDOFF_SELF_HOSTED_FRP.md)，不能替代你自己的验收。
+部署后，请在你的实际 VPS 与手机网络上检查证书、外网发现接口、App 配对和实时对话；本仓库的历史实测记录见[自建 FRP 交接记录](https://github.com/saya-ch/dsh-mobile/blob/main/docs/HANDOFF_SELF_HOSTED_FRP.md)，不能替代你自己的验收。

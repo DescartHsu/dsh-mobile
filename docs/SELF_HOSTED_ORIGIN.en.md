@@ -4,7 +4,7 @@
 
 > This provider ships from **0.4.2** onward.
 
-This guide covers the default **external proxy** mode, where you manage public HTTPS. To have the plugin install and manage Caddy and certificates instead, choose [Managed Caddy](CADDY_MANAGED.en.md) in the same panel. Its configuration and readiness checks are separate.
+This guide covers the default **external proxy** mode, where you manage public HTTPS. On Windows/Linux x64, you can instead choose [Managed Caddy](CADDY_MANAGED.en.md) in the same panel; it requires Tencent Cloud DNSPod credentials and public HTTPS ingress to the computer, and does not traverse CGNAT. The two modes have separate configuration and readiness checks.
 
 ## When to use it
 

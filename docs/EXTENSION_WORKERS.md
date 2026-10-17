@@ -14,7 +14,7 @@ Worker **不是安全沙箱**：代码仍有本机用户权限，可以访问文
 
 ## 按需启用
 
-在当前 DSH profile 的 `mobile-access` 配置中添加以下字段，再正常重启或重新加载插件；不要修改 `extension.json`：
+将以下字段合入当前 DSH profile 中已有 `mobile-access` 条目的 `config`，再正常重启或重新加载插件；不要修改 `extension.json`。这是配置片段，不是完整 profile 补丁。DSH 的条目覆盖会替换整个 `config`，请保留原有网卡、证书、状态文件等必需字段，不要用这个片段替换它们：
 
 ```yaml
 hostExecution:
@@ -44,6 +44,6 @@ hostExecution:
 | 动作 JSON 与流 | `resultMaxBytes`、`streamWindowBytes`、`streamChunkBytes`、`streamAggregateBytes` |
 | 日志 | `logWindowMs`、`logMessagesPerWindow`、`logMessageBytes` |
 
-参数必须是范围内的整数；流块不能大于单流窗口，单流窗口不能大于聚合预算。初次启用建议保留默认值。配置定义与校验由 `src/extension-worker-config.ts` 管理。Node 的全局堆参数可能覆盖 Worker 资源配置，因此检测到会覆盖限制的父进程启动参数时，Worker 会在导入扩展前拒绝启动并报告 `extension_worker_heap_override`。请检查 DSH 的启动参数；需要保留这些参数时可继续使用进程内模式，不会静默绕过。
+参数必须是范围内的整数；流块不能大于单流窗口，单流窗口不能大于聚合预算。初次启用建议保留默认值。[配置定义与校验](https://github.com/saya-ch/dsh-mobile/blob/main/src/extension-worker-config.ts)列出全部默认值和范围。Node 的全局堆参数可能覆盖 Worker 资源配置，因此检测到会覆盖限制的父进程启动参数时，Worker 会在导入扩展前拒绝启动并报告 `extension_worker_heap_override`。请检查 DSH 的启动参数；需要保留这些参数时可继续使用进程内模式，不会静默绕过。
 
 流量按消费确认回填，未读完的 EOF 数据继续占预算；日志和结果在 Worker 内先转换为受限数据，再交给网关。该机制约束传输与 JavaScript 阻塞风险，不是整个操作系统或进程的资源沙箱。

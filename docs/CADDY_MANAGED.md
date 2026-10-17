@@ -6,9 +6,9 @@
 
 ## 适用条件
 
-托管 Caddy 为自建连接管理 HTTPS 代理和证书，不提供内网穿透。你需要自己的域名、由腾讯云 DNSPod 管理的 DNS，以及可从公网访问的入站端口；路由器需把公网端口映射到运行 DSH 的电脑。CGNAT、校园网隔离或没有入站权限的网络不能仅靠 DNS-01 绕过限制，可以使用 Cloudflare Tunnel、cpolar，或已有 VPS 上的 FRP。
+托管 Caddy 为自建连接管理 HTTPS 代理和证书，不提供内网穿透。你需要自己的域名、可由腾讯云 DNSPod 凭据修改的 DNS-01 验证记录，以及能到达运行 DSH 电脑的公网 HTTPS 入站端口。电脑位于可管理的路由器之后时，需要把公网端口映射到本机 Caddy 端口；云主机则需检查安全组和主机防火墙。DNS-01 只验证域名控制权，不会打通 CGNAT、校园网隔离或没有入站权限的网络；这类网络可选择 Cloudflare Tunnel、cpolar，或已有 VPS 上的 FRP。
 
-当前面板仅提供腾讯云 DNSPod 的 DNS-01 配置。使用 Cloudflare DNS 的用户可以继续使用 Cloudflared，无需为本功能迁移 DNS；不要把 Cloudflared 连接器 Token 填入腾讯云密钥栏。
+当前面板只支持 `tencentcloud` DNS 模块与腾讯云 DNSPod 凭据，不支持把其他 DNS 服务商的密钥填入此模式。使用 Cloudflare DNS 的用户可以继续使用 Cloudflared，无需为本功能迁移 DNS；不要把 Cloudflared 连接器 Token 填入腾讯云密钥栏。
 
 ```text
 Android App / 浏览器 → 公网 HTTPS 域名（Caddy 终止 TLS）
@@ -27,7 +27,7 @@ Android App / 浏览器 → 公网 HTTPS 域名（Caddy 终止 TLS）
 1. 在电脑端打开 **移动访问 → 远程 → 自建连接 → 自有反向代理**，选择 **托管 Caddy**。
 2. 点击 **安装托管 Caddy** 并确认下载。插件从固定的 [DSH Mobile 组件分发](https://github.com/saya-ch/dsh-mobile/releases/tag/caddy-component-2.11.7-tencentcloud-0.4.3-r1) 下载，核对完整大小、SHA-256、Caddy 核心与 DNS 模块版本；来源不可用或校验失败时不会执行文件。
 3. 填写公网 HTTPS 地址，例如 `https://dsh.example.com`，选择腾讯云 DNSPod，填写具有所需区域权限的 `SecretId` 和 `SecretKey`，再设置本机 HTTPS 端口，例如 `8443`。让域名解析到你的公网入口，并按需将公网 TCP 443 映射至电脑的 8443。
-4. 点击 **保存并启动 Caddy**。组件已安装不等于连接就绪：只有公网 HTTPS 证书通过验证，并确认入口属于当前 DSH 实例后，面板才显示已就绪。
+4. 点击 **保存并启动 Caddy**。组件已安装不等于连接就绪：只有电脑端经公网 HTTPS 验证证书，并确认入口属于当前 DSH 实例后，面板才显示已就绪。这个探测仍不能证明手机网络可达。
 5. 生成远程配对二维码，在 Android App 的 **远程访问** 中扫码，或用手机浏览器打开配对链接。用手机流量验证实际页面加载、会话同步与 WebSocket；不要只以电脑端健康检查代替手机访问。
 
 首次 DNS-01 签发需要等待 DNS 生效和证书签发。期间电脑保持在线，避免反复重启触发签发限流。托管模式不安装系统服务、不修改 PATH、不设置开机启动、不导入系统证书；Caddy 的管理 API 和自动配置落盘均关闭。
@@ -42,7 +42,7 @@ Android App / 浏览器 → 公网 HTTPS 域名（Caddy 终止 TLS）
 
 以下构建和验证工具需在本仓库源码 checkout 中运行；npm 插件包不包含这些维护脚本，也不需要普通用户自行编译 Caddy。
 
-[构建脚本](<../scripts/build-caddy-component.mjs>) 固定 Go 1.26.9、xcaddy v0.4.7、Caddy v2.11.7、腾讯云 DNS v0.4.3 及 golang.org/x/net v0.60.0。[输入锁](<../scripts/caddy-component-lock.json>) 固定源码提交和编译依赖版本/校验和。每次构建使用全新的私有编译缓存及模块缓存，执行 Go 校验和、源码来源与保留模块校验；未知依赖、替换模块、编译器或原生设置漂移会在运行生成的 Caddy 前拒绝。
+[构建脚本](<https://github.com/saya-ch/dsh-mobile/blob/main/scripts/build-caddy-component.mjs>) 固定 Go 1.26.9、xcaddy v0.4.7、Caddy v2.11.7、腾讯云 DNS v0.4.3 及 golang.org/x/net v0.60.0。[输入锁](<https://github.com/saya-ch/dsh-mobile/blob/main/scripts/caddy-component-lock.json>) 固定源码提交和编译依赖版本/校验和。每次构建使用全新的私有编译缓存及模块缓存，执行 Go 校验和、源码来源与保留模块校验；未知依赖、替换模块、编译器或原生设置漂移会在运行生成的 Caddy 前拒绝。
 
 选择精确 Go 编译器（可用 `GO_BINARY`），输出目录必须是全新绝对路径：
 
@@ -52,7 +52,7 @@ node scripts/build-caddy-component.mjs --output-dir /absolute/new/second
 node scripts/compare-caddy-builds.mjs --first /absolute/new/first --second /absolute/new/second --target linux-x64
 ```
 
-Windows 使用原生绝对路径和 `--target win32-x64`。可复现指二进制字节、大小、SHA-256 一致，不保证操作系统镜像或所有元数据/许可证文本逐字一致。[工作流](<../.github/workflows/caddy-component.yml>) 在 Windows/Linux x64 分别独立构建两次，审核完整产物，并使用独立 manifest 测试真正安装后的二进制：默认版本/模块检查、目录提升、无重复下载的重启、损坏下载回滚、TLS/配对/API/WSS、持久设备凭据与停止后清理，保留邻近文件及配对数据。其他架构仍未审核。
+Windows 使用原生绝对路径和 `--target win32-x64`。可复现指二进制字节、大小、SHA-256 一致，不保证操作系统镜像或所有元数据/许可证文本逐字一致。[工作流](<https://github.com/saya-ch/dsh-mobile/blob/main/.github/workflows/caddy-component.yml>) 在 Windows/Linux x64 分别独立构建两次，审核完整产物，并使用独立 manifest 测试真正安装后的二进制：默认版本/模块检查、目录提升、无重复下载的重启、损坏下载回滚、TLS/配对/API/WSS、持久设备凭据与停止后清理，保留邻近文件及配对数据。其他架构仍未审核。
 
 PR 和普通手动运行只产生只读审查产物。只有授权的 `abworks-dev/dsh-mobile` fork 上已有 `caddy-component-2.11.7-tencentcloud-0.4.3-review.N` 标签，经明确手动启用且两个原生任务均通过，才发布 **TEST 预发布版**：
 
@@ -60,9 +60,9 @@ PR 和普通手动运行只产生只读审查产物。只有授权的 `abworks-d
 gh workflow run caddy-component.yml --repo abworks-dev/dsh-mobile --ref caddy-component-2.11.7-tencentcloud-0.4.3-review.1 -f publish_review_prerelease=true
 ```
 
-组件标签不以 `v` 开头，避免触发插件正式发布。独立写权限任务拒绝已有 Release，创建非 latest 的预发布草稿，不覆盖资产；下载所有草稿资产与准备字节逐一对比后才公开。产物包括区分平台的原始二进制、manifest、编译/模块/版本/许可证证据、双构建证明、源码提交/运行标识和 SHA256SUMS。[发布后验证器](<../scripts/verify-caddy-release.mjs>) 用 GitHub 元数据及安装器实际 HTTPS/受限重定向下载链路复核 **所有公开资产**，成功后才输出仅供审核的目录。公开后验证失败会保留已公开的标记预发布版、使任务失败且不输出校验目录，不擅自删除或回滚 Release。CI 产物保留 14 天，Release 资产另行保存。
+组件标签不以 `v` 开头，避免触发插件正式发布。独立写权限任务拒绝已有 Release，创建非 latest 的预发布草稿，不覆盖资产；下载所有草稿资产与准备字节逐一对比后才公开。产物包括区分平台的原始二进制、manifest、编译/模块/版本/许可证证据、双构建证明、源码提交/运行标识和 SHA256SUMS。[发布后验证器](<https://github.com/saya-ch/dsh-mobile/blob/main/scripts/verify-caddy-release.mjs>) 用 GitHub 元数据及安装器实际 HTTPS/受限重定向下载链路复核 **所有公开资产**，成功后才输出仅供审核的目录。公开后验证失败会保留已公开的标记预发布版、使任务失败且不输出校验目录，不擅自删除或回滚 Release。CI 产物保留 14 天，Release 资产另行保存。
 
-公开定制下载端点曾在请求 v2.11.6 时返回 v2.11.7，动态最新版不能成为信任来源。版本化 GitHub URL 仍可被仓库所有者替换；信任边界是审核过的精确大小/哈希，而非 URL 名称或远端自报校验和。fork 的目录只是审核候选，不会自动写入[生产组件表](<../src/caddy-component.ts>)。
+公开定制下载端点曾在请求 v2.11.6 时返回 v2.11.7，动态最新版不能成为信任来源。版本化 GitHub URL 仍可被仓库所有者替换；信任边界是审核过的精确大小/哈希，而非 URL 名称或远端自报校验和。fork 的目录只是审核候选，不会自动写入[生产组件表](<https://github.com/saya-ch/dsh-mobile/blob/main/src/caddy-component.ts>)。
 
 ### 正式分发与安装开放
 

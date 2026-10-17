@@ -37,6 +37,8 @@
     "packages/question-fixes/lib/**",
     "packages/question-fixes/LICENSE",
     "apps/mobile/release.json",
+    "apps/mobile/README.md",
+    "apps/mobile/README.zh-CN.md",
     "cordis.patch.yml",
     "README.md",
     "README.en.md",

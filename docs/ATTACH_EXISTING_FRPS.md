@@ -92,7 +92,7 @@ curl -k -sS -o /dev/null -w '%{http_code}\n' https://YOUR_PUBLIC_IPV4:33080/mobi
 | `frp_attach_mode_requires_vhost_port` | 选了公开 CA 证书档却没填你 frps 的真实 `vhostHTTPPort`。填上真实值即可（插件不会替你假定 7080） |
 | `frp_vhost_publicly_reachable` | 公开 CA 档的明文 vhost 端口从公网可达。限制其监听或改用独立 frps 实例；若同一实例还要提供自签档公网 TCP 入口，不要盲目把全局 `proxyBindAddr` 改为回环或公网地址。 |
 | `frp_attach_cert_unknown` | 自签入口证书缺失或不可读；检查面板证书状态与私有目录的 `remote/ingress/`，不要绕过指纹验证。 |
-| `frp_ingress_ca_expired` | 自签 CA 已过期，插件不会静默替换受信任 CA；重新生成 CA 后，手机须核对新指纹并重新配对。Android 0.6.3 候选保留过期记录可读、可删除；当前正式 App 0.6.2 的过期 CA 可能使整个设备库不可读，遇到时请保留 App 数据并等待该修正，不要为一台电脑清除全部配对。 |
+| `frp_ingress_ca_expired` | 自签 CA 已过期，插件不会静默替换受信任 CA；重新生成 CA 后，手机须核对新指纹并重新配对。Android App 0.6.3 及更新版本仍可读取、删除该设备记录，但 TLS 继续拒绝过期证书。若使用 0.6.2 或更早版本且设备库因此不可读，请保留 App 数据，并按 [App 手册](../apps/mobile/README.zh-CN.md)安装 0.6.3 或更新的同签名正式版，不要为一台电脑清除全部配对。 |
 | 手机浏览器提示证书不受信任 | 自签档的正常现象；请在 App 内配对使用 |
 | 自检显示「公网入口不可达」 | 端口未放行、frpc 未启动，或 frps 未把该 `remotePort` 转发出来 |
 | `frp_proxy_name_in_use` | frps 的代理名在**整台服务器**上唯一。本机安装名（`dsh-mobile-<安装标识前 12 位>`）已被占用：多半是另一台 DSH 电脑，或本机上一次连接尚未等到 frps 心跳超时。到那台机器上关闭自建 FRP，或在 frps 上移除该代理。frpc 此时仍在运行、只是入口端口没被发布，应检查代理是否注册成功，不能仅凭进程存在判断就绪。 |

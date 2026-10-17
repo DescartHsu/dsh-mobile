@@ -6,6 +6,8 @@
 
 Choose which client components the dedicated mobile page loads. This does not uninstall computer plugins, stop their services, or restrict device permissions. A paired device remains a trusted DSH operator.
 
+Selection applies to whole module IDs, not individual buttons, cards or sidebars inside a module. A plugin may register several modules or share/depend on a module with other features. A feature not delivered as an optional client module may not be independently removable here.
+
 ## Computer defaults and this device
 
 - On the **computer: Settings → General → Mobile page modules → Manage**, set defaults for this computer's mobile access. Enable a LAN or remote access entry first so the current DSH module catalog can be read.

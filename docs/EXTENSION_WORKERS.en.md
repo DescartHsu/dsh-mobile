@@ -14,7 +14,7 @@ Workers are **not a security sandbox**. Code retains local-user access to files,
 
 ## Enable selectively
 
-Add these fields to the current DSH profile's `mobile-access` configuration, then normally restart or reload the plugin; do not modify `extension.json`:
+Merge these fields into the existing `mobile-access` entry's `config` in the current DSH profile, then normally restart or reload the plugin; do not modify `extension.json`. This is a configuration fragment, not a complete profile patch. A DSH entry override replaces the entire `config`, so retain existing required interface, certificate and state-file fields rather than replacing them with this fragment:
 
 ```yaml
 hostExecution:
@@ -44,6 +44,6 @@ New calls can still receive `extension_busy` while abandoned work remains unfini
 | Action JSON and streams | `resultMaxBytes`, `streamWindowBytes`, `streamChunkBytes`, `streamAggregateBytes` |
 | Logging | `logWindowMs`, `logMessagesPerWindow`, `logMessageBytes` |
 
-Values must be integers within the accepted ranges. Chunks cannot exceed the per-stream window, and a window cannot exceed the aggregate budget. Start with the defaults. `src/extension-worker-config.ts` owns their definitions and validation. Global Node heap flags can override Worker settings, so detected overriding parent launch flags reject startup before importing the extension with `extension_worker_heap_override`. Check DSH's launch options; keep in-process execution when those flags are required rather than silently bypassing the limits.
+Values must be integers within the accepted ranges. Chunks cannot exceed the per-stream window, and a window cannot exceed the aggregate budget. Start with the defaults; [configuration definitions and validation](https://github.com/saya-ch/dsh-mobile/blob/main/src/extension-worker-config.ts) list every default and range. Global Node heap flags can override Worker settings, so detected overriding parent launch flags reject startup before importing the extension with `extension_worker_heap_override`. Check DSH's launch options; keep in-process execution when those flags are required rather than silently bypassing the limits.
 
 Consumption refills stream credit, and unread EOF bytes retain their budget. Logs and results are converted to bounded data inside the Worker before reaching the gateway. This contains transport and JavaScript-blocking risks, not all operating-system or process resources.

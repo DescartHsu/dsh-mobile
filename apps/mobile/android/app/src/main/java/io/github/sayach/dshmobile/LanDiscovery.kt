@@ -13,6 +13,7 @@ import java.net.NetworkInterface
 import java.net.SocketTimeoutException
 import java.util.Collections
 import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -27,15 +28,26 @@ private data class LocalSubnet(val first: Int, val second: Int, val third: Int, 
 
 /** Concurrent passive NSD/UDP discovery with active UDP and HTTPS compatibility fallbacks. */
 internal object LanDiscovery {
-    fun scan(context: Context, port: Int = 3443, canceled: AtomicBoolean? = null): List<DiscoveredHarness> {
+    fun scan(
+        context: Context,
+        port: Int = 3443,
+        canceled: AtomicBoolean? = null,
+        cancellation: NativeConnectionCancellation? = null,
+    ): List<DiscoveredHarness> {
+        cancellation?.throwIfCancelled()
         if (canceled?.get() == true) return emptyList()
         val subnets = localSubnets(context)
         val discoveryExecutor = Executors.newFixedThreadPool(2)
+        val stopObservingDiscovery = cancellation?.onCancel { discoveryExecutor.shutdownNow() }
         val discovered = try {
+            cancellation?.throwIfCancelled()
             discoveryExecutor.invokeAll(
                 listOf(
-                    Callable { udpDiscovery(port, subnets, canceled) },
-                    Callable { NsdDiscovery.scan(context, PASSIVE_TIMEOUT_MS, canceled) },
+                    Callable { udpDiscovery(port, subnets, canceled, cancellation) },
+                    Callable {
+                        cancellation?.throwIfCancelled()
+                        NsdDiscovery.scan(context, PASSIVE_TIMEOUT_MS, canceled)
+                    },
                 ),
                 PASSIVE_TIMEOUT_MS + 1_000,
                 TimeUnit.MILLISECONDS,
@@ -43,26 +55,52 @@ internal object LanDiscovery {
                 if (future.isCancelled) emptyList() else runCatching { future.get() }.getOrDefault(emptyList())
             }
         } finally {
-            discoveryExecutor.shutdownNow()
+            stopObservingDiscovery?.invoke()
+            stopExecutor(discoveryExecutor, retainPhysicalSlot = cancellation != null)
         }
+        cancellation?.throwIfCancelled()
+        if (canceled?.get() == true) return emptyList()
         if (discovered.isNotEmpty()) return mergeByInstance(discovered)
         if (subnets.isEmpty()) return emptyList()
 
         val probeExecutor = Executors.newFixedThreadPool(32)
+        val stopObservingProbes = cancellation?.onCancel { probeExecutor.shutdownNow() }
         return try {
+            cancellation?.throwIfCancelled()
             val tasks = subnets.flatMap { subnet ->
                 (1..254).filter { it !in subnet.ownHosts }.map { host ->
                     Callable {
-                        if (canceled?.get() == true) null
-                        else probe("${subnet.first}.${subnet.second}.${subnet.third}.$host", port)
+                        if (canceled?.get() == true || cancellation?.isCancelled == true) null
+                        else probe("${subnet.first}.${subnet.second}.${subnet.third}.$host", port, cancellation)
                     }
                 }
             }
-            mergeByInstance(probeExecutor.invokeAll(tasks, 12, TimeUnit.SECONDS).mapNotNull { future ->
+            val found = probeExecutor.invokeAll(tasks, 12, TimeUnit.SECONDS).mapNotNull { future ->
                 if (future.isCancelled) null else runCatching { future.get() }.getOrNull()
-            })
+            }
+            cancellation?.throwIfCancelled()
+            mergeByInstance(found)
         } finally {
-            probeExecutor.shutdownNow()
+            stopObservingProbes?.invoke()
+            stopExecutor(probeExecutor, retainPhysicalSlot = cancellation != null)
+        }
+    }
+
+    /** A cancelled connection worker keeps its physical slot until its discovery workers exit. */
+    internal fun stopExecutor(executor: ExecutorService, retainPhysicalSlot: Boolean) {
+        executor.shutdownNow()
+        if (!retainPhysicalSlot) return
+        var interrupted = false
+        try {
+            while (!executor.isTerminated) {
+                try {
+                    executor.awaitTermination(1, TimeUnit.SECONDS)
+                } catch (_: InterruptedException) {
+                    interrupted = true
+                }
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
         }
     }
 
@@ -72,7 +110,12 @@ internal object LanDiscovery {
             entries
         }.values.toList()
 
-    private fun udpDiscovery(port: Int, subnets: List<LocalSubnet>, canceled: AtomicBoolean? = null): List<DiscoveredHarness> {
+    private fun udpDiscovery(
+        port: Int,
+        subnets: List<LocalSubnet>,
+        canceled: AtomicBoolean? = null,
+        cancellation: NativeConnectionCancellation? = null,
+    ): List<DiscoveredHarness> {
         val targets = buildSet {
             add("255.255.255.255")
             add("192.168.43.255")
@@ -83,28 +126,35 @@ internal object LanDiscovery {
         }
         return runCatching {
             DatagramSocket(null).use { socket ->
-                socket.reuseAddress = true
-                socket.bind(InetSocketAddress(port))
-                socket.broadcast = true
-                val query = DISCOVERY_QUERY.toByteArray(Charsets.US_ASCII)
-                targets.forEach { target ->
-                    socket.send(DatagramPacket(query, query.size, InetAddress.getByName(target), port))
-                }
-                val deadline = System.currentTimeMillis() + PASSIVE_TIMEOUT_MS
-                val found = mutableListOf<DiscoveredHarness>()
-                while (System.currentTimeMillis() < deadline && canceled?.get() != true) {
-                    socket.soTimeout = (deadline - System.currentTimeMillis()).coerceIn(1, 400).toInt()
-                    val buffer = ByteArray(1_024)
-                    val packet = DatagramPacket(buffer, buffer.size)
-                    try {
-                        socket.receive(packet)
-                    } catch (_: SocketTimeoutException) {
-                        continue
+                val stopObserving = cancellation?.onCancel { socket.close() }
+                try {
+                    cancellation?.throwIfCancelled()
+                    socket.reuseAddress = true
+                    socket.bind(InetSocketAddress(port))
+                    socket.broadcast = true
+                    val query = DISCOVERY_QUERY.toByteArray(Charsets.US_ASCII)
+                    targets.forEach { target ->
+                        cancellation?.throwIfCancelled()
+                        socket.send(DatagramPacket(query, query.size, InetAddress.getByName(target), port))
                     }
-                    parseAnnouncement(String(packet.data, 0, packet.length, Charsets.UTF_8), packet.address.hostAddress)
-                        ?.let(found::add)
+                    val deadline = System.currentTimeMillis() + PASSIVE_TIMEOUT_MS
+                    val found = mutableListOf<DiscoveredHarness>()
+                    while (System.currentTimeMillis() < deadline && canceled?.get() != true && cancellation?.isCancelled != true) {
+                        socket.soTimeout = (deadline - System.currentTimeMillis()).coerceIn(1, 400).toInt()
+                        val buffer = ByteArray(1_024)
+                        val packet = DatagramPacket(buffer, buffer.size)
+                        try {
+                            socket.receive(packet)
+                        } catch (_: SocketTimeoutException) {
+                            continue
+                        }
+                        parseAnnouncement(String(packet.data, 0, packet.length, Charsets.UTF_8), packet.address.hostAddress)
+                            ?.let(found::add)
+                    }
+                    mergeByInstance(found)
+                } finally {
+                    stopObserving?.invoke()
                 }
-                mergeByInstance(found)
             }
         }.getOrDefault(emptyList())
     }
@@ -170,10 +220,10 @@ internal object LanDiscovery {
 
     private fun unsigned(value: Byte): Int = value.toInt().and(0xff)
 
-    private fun probe(host: String, port: Int): DiscoveredHarness? {
+    private fun probe(host: String, port: Int, cancellation: NativeConnectionCancellation?): DiscoveredHarness? {
         val origin = GatewayOrigin.parse("https://$host:$port") ?: return null
         return runCatching {
-            val body = NativeAuthClient.fetchDiscovery(origin)
+            val body = NativeAuthClient.fetchDiscovery(origin, cancellation)
             if (body.length() != 5 || body.optInt("protocol") != PROTOCOL) return null
             val instanceId = body.optString("instanceId")
             val deviceName = body.optString("deviceName")

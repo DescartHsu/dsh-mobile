@@ -2,6 +2,14 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## Android - Unreleased
+
+- Keep an immediate Cancel connection action available during LAN/remote startup, saved-computer connection and pairing. Stop reconnecting keeps a usable DSH page; a blank or failed document returns to the device list. Preserve existing local pairings and prevent cancelled attempts or their queued retries from navigating later.
+- End transient connection failures visibly instead of leaving a saved-computer row indefinitely at Connecting. Apply an overall 30-second LAN or 60-second remote budget through initial page loading; retries do not reset it. A cached unreachable status still permits a manual retry, and failure does not silently select a different computer.
+- Retain the whale-girl connection background with a centered loading indicator and a cancellation button instead of a separate modal dialog. Reveal the trusted DSH page at its first visible commit while components continue loading; retain only a small cancellation button until usable controls appear. Keep the overall deadline during boot, discard stale readiness results and stop the completed document's loading timer instead of later reconnecting an already usable page.
+- Request native HTTP cancellation and keep physical work accounted for until it exits. Computer-side pairing already accepted is not rolled back; a consumed one-time code must be replaced explicitly. Add Chinese, English and Italian cancellation and timeout copy. Thanks @Void-LifeStream for [#225](https://github.com/saya-ch/dsh-mobile/issues/225).
+- These native changes are not yet published. The current signed Android App remains 0.6.4 (build 80); plugin 0.6.10 and the stable App download descriptor are unchanged.
+
 ## 0.6.10 - 2026-10-16
 
 - Preserve the first Funnel failure and its validated official authorization URL instead of replacing them with a later process-exit error. Discard queued events from the failed connection while allowing an explicit reconnect to start a new one. Failed resource cleanup remains visible and can be retried without discarding owned resources.

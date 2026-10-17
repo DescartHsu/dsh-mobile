@@ -14,6 +14,8 @@ A mounted shell and Workspace stream baseline can legitimately contain no worksp
 
 Android JVM gate tests and source-wiring checks do not execute an Activity or physical WebView. Build and lint evidence also does not establish keyboard, system Back, rotation or foreground/background behavior on a device. Follow the [App build guide](../../../../apps/mobile/README.md#build) and the [runtime/device guidance](runtime-ui-android.md#android-and-adb) for the affected native surface; do not replace formal signing or pairings to make a test runnable.
 
+Distinguish the webpage's WebSocket recovery from native session renewal. A provisional navigation aborted in CDP need not trigger WebView's native failure callback; require an observed native-renew request before claiming a native-recovery test. A failed main document may already have replaced the live page, so also compare the actual document/editor/draft before claiming retention. First-run notices and credential setup can block interaction with an otherwise mounted shell; settle the owned fixture's onboarding rather than substituting another editor or treating a failed input attempt as lost draft state.
+
 ## Isolate acquired resources
 
 - For ordinary network fixtures, bind loopback with `listen(0)` and read the port after the listening event; do not find a free port and claim it later. When a particular port or binding collision is the test subject, retain that input and explicitly own the competing listeners rather than using a user's running service. Literal addresses used only as parser inputs are not listeners.

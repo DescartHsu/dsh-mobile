@@ -1,5 +1,6 @@
 package io.github.sayach.dshmobile
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -24,6 +25,84 @@ class WebViewDocumentStateTest {
 
         assertFalse(document.finished("https://dsh.example.com/", "https://dsh.example.com/"))
         assertFalse(document.usable)
+    }
+
+    @Test
+    fun aVisibleRootCanBeInspectedBeforePageFinishedButDoesNotBecomeUsableOnCommitAlone() {
+        val document = WebViewDocumentState(origin)
+        assertFalse(document.canInspectContent("https://dsh.example.com/", "https://dsh.example.com/"))
+        assertFalse(document.confirmContentReady(document.generation))
+        document.started()
+
+        assertTrue(document.canInspectContent("https://dsh.example.com", "https://dsh.example.com/"))
+        assertFalse(document.usable)
+        assertTrue(document.shouldTimeout(document.generation))
+        assertTrue(document.confirmContentReady(document.generation))
+        assertTrue(document.usable)
+        assertFalse(document.shouldTimeout(document.generation))
+    }
+
+    @Test
+    fun failedMainFramesCannotStartOrAcceptDomReadinessChecks() {
+        val document = WebViewDocumentState(origin)
+        document.started()
+        val generation = document.generation
+        document.failed()
+
+        assertFalse(document.canInspectContent("https://dsh.example.com/", "https://dsh.example.com/"))
+        assertFalse(document.confirmContentReady(generation))
+        assertFalse(document.shouldTimeout(generation))
+        assertFalse(document.usable)
+    }
+
+    @Test
+    fun visibleLoginBlankAndUnrelatedRootCallbacksCannotStartTheReadyProbe() {
+        val document = WebViewDocumentState(origin)
+        document.started()
+        for (url in listOf(
+            "about:blank",
+            "https://dsh.example.com/mobile-access/login",
+            "https://dsh.example.com/mobile-access/pair",
+            "https://other.example.com/",
+            "https://dsh.example.com:3443/",
+        )) {
+            assertFalse(document.canInspectContent(url, url))
+            assertFalse(document.canInspectContent(url, "https://dsh.example.com/"))
+            assertFalse(document.canInspectContent("https://dsh.example.com/", url))
+        }
+        assertFalse(document.canInspectContent("https://dsh.example.com/?a=1", "https://dsh.example.com/?a=2"))
+        assertTrue(document.canInspectContent("https://dsh.example.com/?a=1#old", "https://dsh.example.com/?a=1#new"))
+    }
+
+    @Test
+    fun aLateReadyResultAndTimerCannotActOnANewerNavigationEvenAtTheSameUrl() {
+        val document = WebViewDocumentState(origin)
+        document.started()
+        val previous = document.generation
+        document.started()
+        val current = document.generation
+
+        assertEquals(previous + 1, current)
+        assertFalse(document.confirmContentReady(previous))
+        assertFalse(document.shouldTimeout(previous))
+        assertFalse(document.usable)
+        assertTrue(document.shouldTimeout(current))
+        assertTrue(document.confirmContentReady(current))
+        assertTrue(document.usable)
+        assertFalse(document.shouldTimeout(current))
+    }
+
+    @Test
+    fun anotherNavigationRestoresTheDeadlineAfterConfirmedUsableContent() {
+        val document = WebViewDocumentState(origin)
+        document.started()
+        assertTrue(document.confirmContentReady(document.generation))
+        document.started()
+
+        assertFalse(document.usable)
+        assertTrue(document.shouldTimeout(document.generation))
+        document.failed()
+        assertFalse(document.confirmContentReady(document.generation))
     }
 
     @Test

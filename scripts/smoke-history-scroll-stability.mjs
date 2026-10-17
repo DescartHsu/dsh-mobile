@@ -74,10 +74,9 @@ try {
     scroller.prepend(content)
     const row = document.createElement('div')
     row.className = 'dshm_history_smoke_older'
-    // The scroller is a column flex container; an unpinned raw row would be
-    // shrink-crushed to 0px by the overflowing fixture content, so pin it like
-    // the inert content below and let the plugin's fixed box own the height.
-    row.style.cssText = 'flex:none'
+    // No local sizing: the scroller is a column flex container, so an unpinned
+    // row is only held open by the plugin's fixed-box rule once sync() tags it.
+    // Rule 3 therefore measures the production CSS under real column pressure.
     const button = document.createElement('button')
     button.type = 'button'
     button.textContent = 'Load earlier'

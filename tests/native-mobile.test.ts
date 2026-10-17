@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, BROWSER_COMPOSER_EDITOR_QUERY, bindBrowserComposerSoftEnter, bindComposerSoftEnter, bindHistoryAutoLoadGate, composerIsLandingHero, createDocumentCompositionGuard, createHeaderStripPanController, createHistoryAutoLoadGate, createSwitchComputerHold, dispatchComposerImageDrop, drawerScrimVisible, HISTORY_INTENT_LISTENER_OPTIONS, HISTORY_SCROLL_QUIET_MS, installNativeMobileSurface, installStockMobileBack, isBrowserTouchEnterLineBreak, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, nativeAppOwnsComposerEnter, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, NATIVE_MOBILE_TOGGLE_QUERY, preflightComposerImageDrop, resolveBrowserComposerEditor, resolveComposerSessionOrigin, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier, stockMainPanelOpen, SWITCH_COMPUTER_CLICK_SUPPRESSION_MS, SWITCH_COMPUTER_LONG_PRESS_MS, SWITCH_COMPUTER_MOVE_TOLERANCE_PX, SWITCH_COMPUTER_NATIVE_ACTION } from '../src/native-mobile.js'
+import { activeSessionForSoftEnter, applyNativeMobileLanguageMarker, BROWSER_COMPOSER_EDITOR_QUERY, bindBrowserComposerSoftEnter, bindComposerSoftEnter, bindHistoryAutoLoadGate, composerIsLandingHero, createDocumentCompositionGuard, createHeaderStripPanController, createHistoryAutoLoadGate, createSwitchComputerHold, dispatchComposerImageDrop, drawerScrimVisible, HISTORY_INTENT_LISTENER_OPTIONS, HISTORY_SCROLL_QUIET_MS, installNativeMobileSurface, installStockMobileBack, isBrowserTouchEnterLineBreak, isComposerMediaOriginCurrent, isSoftKeyboardEnterLineBreak, markNativeMobileSettings, measureHeaderStripOverflow, nativeAppOwnsComposerEnter, NATIVE_MOBILE_OVERLAY_QUERY, NATIVE_MOBILE_STYLES, NATIVE_MOBILE_TOGGLE_QUERY, preflightComposerImageDrop, resolveBrowserComposerEditor, resolveComposerSessionOrigin, resolveHistoryGateIdentity, resolveNativeMobileFrame, resolveNativeMobileLanguage, shouldAutoLoadEarlier, stockMainPanelOpen, SWITCH_COMPUTER_CLICK_SUPPRESSION_MS, SWITCH_COMPUTER_LONG_PRESS_MS, SWITCH_COMPUTER_MOVE_TOLERANCE_PX, SWITCH_COMPUTER_NATIVE_ACTION } from '../src/native-mobile.js'
 
 interface FakeElementOptions {
   readonly children?: readonly HTMLElement[]
@@ -250,7 +250,9 @@ describe('native mobile presentation', () => {
   })
 
   it('pins a fixed loader row box independent of button state', () => {
-    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] { position:relative !important; height:28px !important; }')
+    // The row sits in the conversation's flex column: a plain height can still
+    // shrink under space pressure, so the box is a non-shrinking fixed basis.
+    expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] { position:relative !important; flex:0 0 28px !important; height:28px !important; }')
     expect(NATIVE_MOBILE_STYLES).not.toContain('min-height:1px !important')
     expect(NATIVE_MOBILE_STYLES).toContain('[data-dsh-mobile-history-loader] button:disabled { position:absolute !important; left:50% !important; top:0 !important; transform:translateX(-50%) !important; height:28px !important; max-height:28px !important; overflow:hidden !important; padding:4px 12px !important; }')
   })
@@ -1326,6 +1328,12 @@ function historyGateHarness(options: HistoryGateHarnessOptions = {}) {
     bind: () => bindHistoryAutoLoadGate(scroller, gate),
     /** Fresh user input on the scroller. */
     input: (type: string) => { scroller.dispatchEvent(new Event(type)) },
+    /** A touch event carrying its remaining contact list, as real TouchEvents do. */
+    touch: (type: string, touches: number) => {
+      const event = new Event(type)
+      Object.defineProperty(event, 'touches', { value: { length: touches } })
+      scroller.dispatchEvent(event)
+    },
     /** A scroll event after the top moved, whether a finger or a script moved it. */
     scroll: (value: number) => { top = value; scroller.dispatchEvent(new Event('scroll')) },
     clicks: () => clicks,
@@ -1396,6 +1404,50 @@ describe('history auto-load gate', () => {
     expect(harness.clicks()).toBe(1)
   })
 
+  it('keeps the arm fresh through momentum scroll after the finger lifts', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    harness.input('touchstart')
+    harness.input('touchend')
+    vi.advanceTimersByTime(1000)
+    harness.scroll(350) // momentum keeps scrolling after the lift; still outside the zone
+    vi.advanceTimersByTime(1000) // past the quiet window the lift started, inside the one the scroll restarted
+    expect(harness.gate.state().armed).toBe(true)
+    expect(harness.pending()).toBe(1)
+    harness.scroll(50) // the slow fling reaches the zone only after the lift
+    expect(harness.clicks()).toBe(1)
+    expect(harness.gate.state().armed).toBe(false)
+    harness.scroll(40) // a disarmed scroll must not re-arm the gate or park a timer
+    expect(harness.pending()).toBe(0)
+    expect(harness.clicks()).toBe(1)
+    // Without the momentum scroll the arm still expires on the input clock alone.
+    const quiet = historyGateHarness({ top: 400 })
+    quiet.bind()
+    quiet.input('touchstart')
+    quiet.input('touchend')
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS * 2)
+    expect(quiet.gate.state().armed).toBe(false)
+    quiet.scroll(60)
+    expect(quiet.clicks()).toBe(0)
+  })
+
+  it('keeps the arm while another finger remains after one touchend', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    harness.touch('touchstart', 1)
+    harness.touch('touchstart', 2)
+    harness.touch('touchend', 1) // one finger lifted, one still on the glass
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS + 1)
+    expect(harness.gate.state().armed).toBe(true)
+    harness.touch('touchend', 0) // the last finger lifted
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS + 1)
+    expect(harness.gate.state().armed).toBe(false)
+    harness.scroll(60)
+    expect(harness.clicks()).toBe(0)
+  })
+
   it('disarms on scrollend and re-arms on the next gesture or wheel', () => {
     vi.useFakeTimers()
     const harness = historyGateHarness({ top: 400 })
@@ -1455,6 +1507,40 @@ describe('history auto-load gate', () => {
     expect(harness.clicks()).toBe(1)
   })
 
+  it('resolves the history gate session from the current pass composer, not the previous binding', () => {
+    vi.useFakeTimers()
+    const sessionRoot = (id: string) => ({
+      getAttribute: (name: string) => name === 'data-conversation-session' ? id : null,
+    }) as unknown as Element
+    const composerFor = (root: Element) => ({
+      closest: (selector: string) => selector === '[data-conversation-session]' ? root : null,
+    }) as unknown as Element
+    const composerA = composerFor(sessionRoot('session-a'))
+    const composerB = composerFor(sessionRoot('session-b'))
+    const tokenForRow = vi.fn(() => 'unused')
+    // Pass 1 records session A through the composer that pass resolved.
+    const first = resolveHistoryGateIdentity({ previousSessionId: null, composer: composerA, selectedRow: null, selectedRowToken: tokenForRow })
+    expect(first).toEqual({ sessionId: 'session-a', sessionChanged: true })
+    expect(tokenForRow).not.toHaveBeenCalled()
+    // A session switch reuses the scroller node and replaces the composer. The
+    // stale ordering — the composer the previous pass bound — still reports A
+    // and would skip the reset; the current pass's composer must win.
+    const stale = resolveHistoryGateIdentity({ previousSessionId: first.sessionId, composer: composerA, selectedRow: null, selectedRowToken: tokenForRow })
+    expect(stale.sessionChanged).toBe(false)
+    const fresh = resolveHistoryGateIdentity({ previousSessionId: first.sessionId, composer: composerB, selectedRow: null, selectedRowToken: tokenForRow })
+    expect(fresh).toEqual({ sessionId: 'session-b', sessionChanged: true })
+    // Driving the binder decision on the fresh identity clears the old arm.
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    harness.input('touchstart')
+    expect(harness.gate.state()).toEqual({ armed: true, previousTop: 400 })
+    if (fresh.sessionChanged) harness.gate.reset(120)
+    expect(harness.gate.state()).toEqual({ armed: false, previousTop: 120 })
+    harness.scroll(60)
+    expect(harness.clicks()).toBe(0)
+    expect(tokenForRow).not.toHaveBeenCalled()
+  })
+
   it('clears its quiet timer on dispose and ignores later events', () => {
     vi.useFakeTimers()
     const harness = historyGateHarness({ top: 400 })
@@ -1499,10 +1585,21 @@ describe('history auto-load gate', () => {
     // Rebinding and disposal both remove every listener the binder added.
     expect(source).toContain('disposeHistoryGate?.()')
     expect(source).toContain('historyAutoLoadGate.dispose()')
-    // A session switch drops the previous session's arm on a reused scroller node.
-    expect(source).toContain('const sessionId = currentSessionOrigin().sessionId')
-    expect(source).toContain('if (sessionId === historySessionId) return')
+    // A session switch drops the previous session's arm on a reused scroller
+    // node. The identity comes from the CURRENT pass's composer — resolved
+    // before the binder call — never the media binding's previous-pass capture,
+    // which syncMediaBinding updates only later in the same sync.
+    expect(source).toContain('resolveHistoryGateIdentity({')
+    expect(source).toContain('previousSessionId: historySessionId')
+    expect(source).toContain('historySessionId = identity.sessionId')
+    expect(source).toContain('if (!identity.sessionChanged) return')
     expect(source).toContain('historyAutoLoadGate.reset(historyScroller?.scrollTop ?? 0)')
+    expect(source).toContain('bindHistoryScroller(conversation ?? undefined, composerCard ?? null)')
+    expect(source).toContain('bindHistoryScroller(undefined, null)')
+    const composerQuery = source.indexOf("const composerCard = center.querySelector<HTMLElement>('[data-composer-card]')")
+    expect(composerQuery).toBeGreaterThan(-1)
+    expect(composerQuery).toBeLessThan(source.indexOf('bindHistoryScroller(conversation ?? undefined'))
+    expect(source).not.toContain('const sessionId = currentSessionOrigin().sessionId')
     // The ungated scroll listener that fired on DSH's own scrollTop writes is gone.
     expect(source).not.toContain('onHistoryScroll')
     expect(source).not.toContain('historyPreviousTop')

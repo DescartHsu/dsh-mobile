@@ -160,7 +160,7 @@ export const NATIVE_MOBILE_STYLES = `
   [data-dsh-mobile-center] pre { max-width:100%; overflow-x:auto; }
   [data-dsh-mobile-center] :is(img,video,canvas,svg) { max-width:100%; }
   [data-dsh-mobile-message-scroll] { box-sizing:border-box !important; width:100% !important; padding:8px 10px 20px !important; }
-  [data-dsh-mobile-history-loader] { position:relative !important; height:28px !important; }
+  [data-dsh-mobile-history-loader] { position:relative !important; flex:0 0 28px !important; height:28px !important; }
   [data-dsh-mobile-history-loader] button:not(:disabled) { position:absolute !important; width:1px !important; height:1px !important; margin:-1px !important; padding:0 !important; clip-path:inset(50%) !important; opacity:0 !important; overflow:hidden !important; pointer-events:none !important; }
   [data-dsh-mobile-history-loader] button:disabled { position:absolute !important; left:50% !important; top:0 !important; transform:translateX(-50%) !important; height:28px !important; max-height:28px !important; overflow:hidden !important; padding:4px 12px !important; }
   /* DSH's sibling margins exclude hidden and empty Chat Node Seats. Keep that
@@ -561,14 +561,48 @@ export interface HistoryAutoLoadHooks {
   readonly cancel: (id: unknown) => void
 }
 
+/** A touch event carries its remaining contacts; other events carry none. */
+export interface HistoryIntentEvent {
+  readonly type: string
+  readonly touches?: { readonly length: number }
+}
+
 export interface HistoryAutoLoadGate {
   /** One listener for every `HISTORY_INTENT_EVENTS` type. */
-  readonly handleEvent: (event: { type: string }) => void
+  readonly handleEvent: (event: HistoryIntentEvent) => void
   /** Session switch or rebind: disarm and clear the quiet timer. */
   readonly reset: (top: number) => void
   /** Clear the quiet timer only; the binder owns listener add/remove. */
   readonly dispose: () => void
   readonly state: () => { armed: boolean; previousTop: number }
+}
+
+export interface HistoryGateIdentityInput {
+  /** The history gate's session id from the previous sync pass. */
+  readonly previousSessionId: string | null
+  /** The composer the CURRENT sync pass resolved from the live center. */
+  readonly composer: Element | null
+  readonly selectedRow: Element | null
+  readonly selectedRowToken: (row: Element) => string
+}
+
+export interface HistoryGateIdentity {
+  readonly sessionId: string | null
+  /** Whether the gate must drop the previous session's arm. */
+  readonly sessionChanged: boolean
+}
+
+/**
+ * The history gate's session identity for one sync pass. `composer` must be the
+ * composer this pass resolved itself: the media binding captures the composer
+ * only later in the same sync, so resolving through that capture lags one pass
+ * behind, and a session switch that reuses the scroller node while replacing
+ * the composer would still report the previous session's id, skip the reset,
+ * and leave the old arm live inside the new session.
+ */
+export function resolveHistoryGateIdentity(input: HistoryGateIdentityInput): HistoryGateIdentity {
+  const { sessionId } = resolveComposerSessionOrigin(input.composer, input.selectedRow, input.selectedRowToken)
+  return { sessionId, sessionChanged: sessionId !== input.previousSessionId }
 }
 
 /**
@@ -615,12 +649,17 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
     // Track the top while disarmed too: a script-driven write is a fact about the
     // viewport, and hiding it would let the next drag look like a longer upward move.
     previousTop = top
-    if (!eligible) return
     // A refused click leaves the arm unspent, so the loader can still be reached
     // inside the same gesture once DSH enables the button.
-    if (!hooks.tryLoad()) return
-    armed = false
-    cancelQuiet()
+    if (eligible && hooks.tryLoad()) {
+      armed = false
+      cancelQuiet()
+      return
+    }
+    // Momentum keeps the scroller emitting `scroll` after the fingers lift. Every
+    // one is the gesture still unfolding, so it restarts the quiet window while
+    // the arm is live; a disarmed scroll must never re-arm it.
+    if (armed) restartQuiet()
   }
 
   return {
@@ -628,7 +667,8 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
       if (disposed) return
       switch (event.type) {
         case 'touchstart':
-          touchActive = true
+          // A real event carries its contact list; synthetic taps may not.
+          touchActive = event.touches === undefined ? true : event.touches.length > 0
           arm()
           break
         case 'touchmove':
@@ -637,7 +677,8 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
           break
         case 'touchend':
         case 'touchcancel':
-          touchActive = false
+          // One lifted finger leaves the gesture unfinished while others remain.
+          touchActive = event.touches === undefined ? false : event.touches.length > 0
           restartQuiet()
           break
         case 'scrollend':
@@ -1227,13 +1268,14 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   const sessionTokens = new WeakMap<Element, string>()
   let nextSessionToken = 0
   type MediaRequestContext = ComposerMediaOrigin & { readonly composer: Element | null; readonly sessionRoot: Element | null }
+  const sessionRowToken = (row: Element): string => {
+    let token = sessionTokens.get(row)
+    if (token === undefined) { token = `stock-${String(++nextSessionToken)}`; sessionTokens.set(row, token) }
+    return token
+  }
   const currentSessionOrigin = (): { readonly sessionRoot: Element | null; readonly sessionId: string | null } => {
     const selectedRow = document.querySelector<Element>('[role="treeitem"][aria-selected="true"]')
-    return resolveComposerSessionOrigin(boundComposer, selectedRow, row => {
-      let token = sessionTokens.get(row)
-      if (token === undefined) { token = `stock-${String(++nextSessionToken)}`; sessionTokens.set(row, token) }
-      return token
-    })
+    return resolveComposerSessionOrigin(boundComposer, selectedRow, sessionRowToken)
   }
   // The origin-scoped App channel exists before its onLoaded adapter. Neither
   // presence proves a soft keyboard; native keyboard state remains authoritative.
@@ -1503,9 +1545,10 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
   /**
    * Rebind the gate to the conversation scroller, and drop an arm that belongs to a
    * session the reader has already left: DSH can reuse the same scroller node, so the
-   * session identity has to be checked even when the node did not change.
+   * session identity has to be checked even when the node did not change. The
+   * composer is this pass's own resolution, never the media binding's capture.
    */
-  const bindHistoryScroller = (next: HTMLElement | undefined): void => {
+  const bindHistoryScroller = (next: HTMLElement | undefined, composer: Element | null): void => {
     if (historyScroller !== next) {
       disposeHistoryGate?.()
       disposeHistoryGate = undefined
@@ -1513,9 +1556,14 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
       historyAutoLoadGate.reset(next?.scrollTop ?? 0)
       if (next !== undefined) disposeHistoryGate = bindHistoryAutoLoadGate(next, historyAutoLoadGate)
     }
-    const sessionId = currentSessionOrigin().sessionId
-    if (sessionId === historySessionId) return
-    historySessionId = sessionId
+    const identity = resolveHistoryGateIdentity({
+      previousSessionId: historySessionId,
+      composer,
+      selectedRow: document.querySelector<Element>('[role="treeitem"][aria-selected="true"]'),
+      selectedRowToken: sessionRowToken,
+    })
+    historySessionId = identity.sessionId
+    if (!identity.sessionChanged) return
     historyAutoLoadGate.reset(historyScroller?.scrollTop ?? 0)
   }
   const animateNavigation = (event: MouseEvent): void => {
@@ -1595,7 +1643,7 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
     if (center === undefined) {
       syncPanHeader(undefined)
       syncComposerEnterNewline(null)
-      bindHistoryScroller(undefined)
+      bindHistoryScroller(undefined, null)
       syncMediaBinding(null)
       setCameraActionDisabled(true, label('Apri prima una sessione', 'Open a session first', '请先打开会话'))
       cameraButton.remove()
@@ -1609,7 +1657,10 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
       viewArea = firstByClassSuffix(center, '_viewArea')
       if (viewArea !== undefined) viewArea.dataset.dshMobileView = 'true'
       const conversation = center.querySelector<HTMLElement>('[data-conversation-scroll]')
-      bindHistoryScroller(conversation ?? undefined)
+      // Resolved before the binder call: the history gate's session identity is
+      // read from this pass's composer, not the media binding's later capture.
+      const composerCard = center.querySelector<HTMLElement>('[data-composer-card]')
+      bindHistoryScroller(conversation ?? undefined, composerCard ?? null)
       const historyLoader = conversation === null ? undefined : firstByClassSuffix(conversation, '_older')
       if (historyLoader !== undefined) {
         historyLoader.dataset.dshMobileHistoryLoader = 'true'
@@ -1635,7 +1686,6 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
         table.before(wrapper)
         wrapper.append(table)
       }
-      const composerCard = center.querySelector<HTMLElement>('[data-composer-card]')
       const composerRow = composerCard?.querySelector<HTMLElement>(':scope > [data-input-scroll]')?.nextElementSibling
       if (!(composerRow instanceof HTMLElement)) {
         syncComposerEnterNewline(null)

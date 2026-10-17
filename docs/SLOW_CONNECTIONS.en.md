@@ -14,6 +14,10 @@ First record the DSH, DSH Mobile plugin and Android app versions. On the compute
 
 Both [#126](https://github.com/saya-ch/dsh-mobile/issues/126) and [#146](https://github.com/saya-ch/dsh-mobile/issues/146) report healthy HTTP access with a reconnecting live connection. The same interface message does not establish the same cause.
 
+### HTTP rejection diagnostics in candidate 0.6.11
+
+The unpublished plugin 0.6.11 candidate writes limited `auth failure` HTTP diagnostics to the plugin log (`$DSH_HOME/mobile-access/logs/dsh-mobile.log`): authorization versus CSRF rejection, status, method, a safe route or route category, related Cookie/header presence and counts, normalized Origin and recognized fetch-site values. It omits tokens, Cookie values, query strings and arbitrary original paths. Each Gateway rate-limits its two categories separately: the first event is immediate and same-category rejections aggregate within a 30-second window; `suppressed` counts previously suppressed records of that category, not all requests or only the current path. This helps investigate missing credentials and CSRF failures; it does not automatically repair a 401/403. The absence of a record does not establish successful authentication: earlier Host/Origin rejections, WebSocket upgrades and native pairing/renewal are outside these two recording points. Review logs before sharing them. Stable plugin 0.6.10 does not include these records.
+
 ## Slow transfers can exceed the default deadlines
 
 DSH 0.2.0-rc.2's API gateway sends a WebSocket Ping every **2 seconds** by default and ends the connection after two missed Pongs, allowing roughly **4–6 seconds** in practice. The client separately allows **15 seconds** for live-connection initialization. Large Session data, a slow uplink, or congestion can delay a Pong or the first synchronization and trigger disconnection and another synchronization.

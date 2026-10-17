@@ -1,8 +1,14 @@
 # 贡献者 / Contributors
 
-GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-16 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
+GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-17 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-16. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-17. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+
+## 0.6.11 候选代码贡献 / Code contributions in the 0.6.11 candidate
+
+[@ayiejosh](https://github.com/ayiejosh) 的 [#226](https://github.com/saya-ch/dsh-mobile/pull/226) 为 HTTP 认证和 CSRF 拒绝添加诊断记录。整合保留原作者提交 [`115b174`](https://github.com/saya-ch/dsh-mobile/commit/115b174d65c5bcb33f96f671e83dcb15db461e3f)，并追加隐私、限频、统计和错误隔离修正；候选尚未发布。
+
+[@ayiejosh](https://github.com/ayiejosh)'s [#226](https://github.com/saya-ch/dsh-mobile/pull/226) adds diagnostic records for HTTP authentication and CSRF rejections. Integration retains author commit [`115b174`](https://github.com/saya-ch/dsh-mobile/commit/115b174d65c5bcb33f96f671e83dcb15db461e3f) alongside privacy, rate-limit, counting and failure-containment corrections. The candidate is not yet published.
 
 ## 0.6.7 代码贡献 / Code contributions in 0.6.7
 
@@ -28,7 +34,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | --- | --- |
 | [@1624318455](https://github.com/1624318455) | [#93](https://github.com/saya-ch/dsh-mobile/pull/93) |
 | [@abworks-dev](https://github.com/abworks-dev) | [#91](https://github.com/saya-ch/dsh-mobile/pull/91), [#98](https://github.com/saya-ch/dsh-mobile/pull/98), [#99](https://github.com/saya-ch/dsh-mobile/pull/99), [#152](https://github.com/saya-ch/dsh-mobile/pull/152), [#184](https://github.com/saya-ch/dsh-mobile/pull/184), [#185](https://github.com/saya-ch/dsh-mobile/pull/185), [#200](https://github.com/saya-ch/dsh-mobile/pull/200) |
-| [@ayiejosh](https://github.com/ayiejosh) | [#109](https://github.com/saya-ch/dsh-mobile/pull/109), [#110](https://github.com/saya-ch/dsh-mobile/pull/110), [#116](https://github.com/saya-ch/dsh-mobile/pull/116), [#117](https://github.com/saya-ch/dsh-mobile/pull/117), [#119](https://github.com/saya-ch/dsh-mobile/pull/119), [#124](https://github.com/saya-ch/dsh-mobile/pull/124), [#125](https://github.com/saya-ch/dsh-mobile/pull/125), [#133](https://github.com/saya-ch/dsh-mobile/pull/133), [#136](https://github.com/saya-ch/dsh-mobile/pull/136) |
+| [@ayiejosh](https://github.com/ayiejosh) | [#109](https://github.com/saya-ch/dsh-mobile/pull/109), [#110](https://github.com/saya-ch/dsh-mobile/pull/110), [#116](https://github.com/saya-ch/dsh-mobile/pull/116), [#117](https://github.com/saya-ch/dsh-mobile/pull/117), [#119](https://github.com/saya-ch/dsh-mobile/pull/119), [#124](https://github.com/saya-ch/dsh-mobile/pull/124), [#125](https://github.com/saya-ch/dsh-mobile/pull/125), [#133](https://github.com/saya-ch/dsh-mobile/pull/133), [#136](https://github.com/saya-ch/dsh-mobile/pull/136), [#226](https://github.com/saya-ch/dsh-mobile/pull/226) |
 | [@chintoleung](https://github.com/chintoleung) | [#104](https://github.com/saya-ch/dsh-mobile/pull/104), [#147](https://github.com/saya-ch/dsh-mobile/pull/147), [#148](https://github.com/saya-ch/dsh-mobile/pull/148), [#158](https://github.com/saya-ch/dsh-mobile/pull/158), [#161](https://github.com/saya-ch/dsh-mobile/pull/161), [#162](https://github.com/saya-ch/dsh-mobile/pull/162), [#167](https://github.com/saya-ch/dsh-mobile/pull/167) |
 | [@cjxh21](https://github.com/cjxh21) | [#154](https://github.com/saya-ch/dsh-mobile/pull/154), [#155](https://github.com/saya-ch/dsh-mobile/pull/155) |
 | [@fengfanfan-max](https://github.com/fengfanfan-max) | [#143](https://github.com/saya-ch/dsh-mobile/pull/143) |
@@ -63,6 +69,8 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 [@BlueandwhiteXD](https://github.com/BlueandwhiteXD)'s [#15](https://github.com/saya-ch/dsh-mobile/pull/15) supplied the Android keyboard-overlap fix. It was adapted into [`09ef315`](https://github.com/saya-ch/dsh-mobile/commit/09ef31590219f2a436bd801214703338c215b00d) alongside overlapping status-bar work and credited with `Co-authored-by` in [`04e6a0d`](https://github.com/saya-ch/dsh-mobile/commit/04e6a0da030353d4f0897419d0f692dc538a752d). Its Closed PR status does not mean the code contribution was rejected. @qzyqmzn's [#32](https://github.com/saya-ch/dsh-mobile/pull/32) and [#37](https://github.com/saya-ch/dsh-mobile/pull/37) were superseded by merged [#38](https://github.com/saya-ch/dsh-mobile/pull/38).
 
 ## 问题反馈与建议 / Issue reports and ideas
+
+感谢 [@Void-LifeStream](https://github.com/Void-LifeStream) 在 [#225](https://github.com/saya-ch/dsh-mobile/issues/225) 提供不可达局域网连接长期停留在等待界面的详细计时与复现，促成 Android 取消连接和超时收尾改进。 / Thanks [@Void-LifeStream](https://github.com/Void-LifeStream) for the timed reproduction of an unreachable LAN connection remaining on its waiting screen in [#225](https://github.com/saya-ch/dsh-mobile/issues/225), informing Android cancellation and timeout handling.
 
 感谢 [@Anyways366](https://github.com/Anyways366) 在 [#223](https://github.com/saya-ch/dsh-mobile/issues/223) 提供 Funnel 错误覆盖和诊断信息缺失的详细复现与修正建议。 / Thanks [@Anyways366](https://github.com/Anyways366) for the detailed Funnel error-overwrite and missing-diagnostic reproduction and proposed corrections in [#223](https://github.com/saya-ch/dsh-mobile/issues/223).
 
@@ -118,7 +126,7 @@ Thanks [@xhwxt](https://github.com/xhwxt) for the document-picker proposal in [#
 | [@sortjiajun](https://github.com/sortjiajun) | [#90](https://github.com/saya-ch/dsh-mobile/issues/90) |
 | [@StrawberryAO](https://github.com/StrawberryAO) | [#39](https://github.com/saya-ch/dsh-mobile/issues/39) |
 | [@Surpass567](https://github.com/Surpass567) | [#80](https://github.com/saya-ch/dsh-mobile/issues/80), [#81](https://github.com/saya-ch/dsh-mobile/issues/81) |
-| [@Void-LifeStream](https://github.com/Void-LifeStream) | [#205](https://github.com/saya-ch/dsh-mobile/issues/205), [#219](https://github.com/saya-ch/dsh-mobile/issues/219) |
+| [@Void-LifeStream](https://github.com/Void-LifeStream) | [#205](https://github.com/saya-ch/dsh-mobile/issues/205), [#219](https://github.com/saya-ch/dsh-mobile/issues/219), [#225](https://github.com/saya-ch/dsh-mobile/issues/225) |
 | [@WalkerJay666](https://github.com/WalkerJay666) | [#201](https://github.com/saya-ch/dsh-mobile/issues/201) |
 | [@up-and-down-0618](https://github.com/up-and-down-0618) | [#115](https://github.com/saya-ch/dsh-mobile/issues/115) |
 | [@taki-ohh](https://github.com/taki-ohh) | [#19](https://github.com/saya-ch/dsh-mobile/issues/19) |

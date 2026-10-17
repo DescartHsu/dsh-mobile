@@ -33,6 +33,8 @@
 >
 > **Current stable release: 0.6.10**. Preserve Tailscale Funnel's specific failure and authorization entry when its process exits, restore error codes and actionable guidance in all three diagnostic languages, and clarify extension file delivery. Existing remote channels and pairings are retained; no Android app update is required. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.10) · [Full changelog](CHANGELOG.md).
 >
+> **Release preparation**: plugin **0.6.11** improves HTTP authentication-rejection diagnostics; Android app **0.6.5** improves connection cancellation, timeouts and loading presentation. Neither candidate is published. [Candidate changes](CHANGELOG.md#0611---unreleased).
+>
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
 <p align="center">

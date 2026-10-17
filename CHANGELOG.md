@@ -2,13 +2,20 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
-## Android - Unreleased
+## 0.6.11 - Unreleased
+
+- Add bounded HTTP authentication and CSRF rejection diagnostics to the plugin log: rejection type/status, request method, a safe route or route category, credential presence/counts, normalized Origin and recognized fetch-site metadata. Credential values, query strings and arbitrary request paths are not logged.
+- Rate-limit each Gateway's authorization and CSRF diagnostic categories separately, recording the first rejection immediately and aggregating suppressed repeats within a 30-second window. Keep the diagnostic callback from changing the HTTP rejection response if logging fails. This improves evidence collection; it does not repair an underlying 401/403 or cover every WebSocket/native-pairing failure.
+- Retain @ayiejosh's original [#226](https://github.com/saya-ch/dsh-mobile/pull/226) contribution alongside maintainer privacy, rate-limit, cookie-counting and failure-containment corrections. Existing authorization, CSRF enforcement and remote-provider behavior remain unchanged; this plugin change does not require a new Android APK.
+- This plugin candidate is not published. The current stable plugin remains 0.6.10; Android App 0.6.5 is prepared independently below, and the published App download remains 0.6.4 (build 80).
+
+## Android 0.6.5 - Unreleased
 
 - Keep an immediate Cancel connection action available during LAN/remote startup, saved-computer connection and pairing. Stop reconnecting keeps a usable DSH page; a blank or failed document returns to the device list. Preserve existing local pairings and prevent cancelled attempts or their queued retries from navigating later.
 - End transient connection failures visibly instead of leaving a saved-computer row indefinitely at Connecting. Apply an overall 30-second LAN or 60-second remote budget through initial page loading; retries do not reset it. A cached unreachable status still permits a manual retry, and failure does not silently select a different computer.
 - Retain the whale-girl connection background with a centered loading indicator and a cancellation button instead of a separate modal dialog. Reveal the trusted DSH page at its first visible commit while components continue loading; retain only a small cancellation button until usable controls appear. Keep the overall deadline during boot, discard stale readiness results and stop the completed document's loading timer instead of later reconnecting an already usable page.
 - Request native HTTP cancellation and keep physical work accounted for until it exits. Computer-side pairing already accepted is not rolled back; a consumed one-time code must be replaced explicitly. Add Chinese, English and Italian cancellation and timeout copy. Thanks @Void-LifeStream for [#225](https://github.com/saya-ch/dsh-mobile/issues/225).
-- These native changes are not yet published. The current signed Android App remains 0.6.4 (build 80); plugin 0.6.10 and the stable App download descriptor are unchanged.
+- Prepare build 81 with the existing package identity, permission list and pairing protocol. These native changes are not yet published. The current signed Android App remains 0.6.4 (build 80); the stable App download descriptor is unchanged.
 
 ## 0.6.10 - 2026-10-16
 

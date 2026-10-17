@@ -33,6 +33,8 @@
 >
 > **当前正式版本：0.6.10**。修复 Tailscale Funnel 的具体错误与授权入口被退出通知覆盖，补齐三语诊断中的错误码和操作说明，并完善扩展文件投递指南。已有远程通道和配对保留，无需更新 Android App。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.10) · [完整更新记录](CHANGELOG.md)。
 >
+> **发布准备中**：插件 **0.6.11** 改善 HTTP 认证拒绝诊断，Android App **0.6.5** 改善取消连接、超时与加载等待；两者均未发布。[候选内容](CHANGELOG.md#0611---unreleased)。
+>
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
 <p align="center">

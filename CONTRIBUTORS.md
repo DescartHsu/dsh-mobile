@@ -10,6 +10,10 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 
 [@ayiejosh](https://github.com/ayiejosh)'s [#226](https://github.com/saya-ch/dsh-mobile/pull/226) adds diagnostic records for HTTP authentication and CSRF rejections. Integration retains author commit [`115b174`](https://github.com/saya-ch/dsh-mobile/commit/115b174d65c5bcb33f96f671e83dcb15db461e3f) alongside privacy, rate-limit, counting and failure-containment corrections. The candidate is not yet published.
 
+[@chintoleung](https://github.com/chintoleung) 在 [#228](https://github.com/saya-ch/dsh-mobile/issues/228) 定位历史加载时的滚动抖动，并在 [#229](https://github.com/saya-ch/dsh-mobile/pull/229) 提供加载行尺寸、自动加载输入判定及浏览器回归测试。整合保留原作者的五个提交，包括最终修正 [`675154d`](https://github.com/saya-ch/dsh-mobile/commit/675154d5739c3a2de663e7c35da6ba8657017a5e)，并追加维护者修正；0.6.11 候选尚未发布。
+
+[@chintoleung](https://github.com/chintoleung) traced history-loading scroll oscillation in [#228](https://github.com/saya-ch/dsh-mobile/issues/228) and contributed loader sizing, input-aware auto-loading and browser regression checks in [#229](https://github.com/saya-ch/dsh-mobile/pull/229). Integration retains the author's five commits, including final correction [`675154d`](https://github.com/saya-ch/dsh-mobile/commit/675154d5739c3a2de663e7c35da6ba8657017a5e), alongside maintainer corrections. The 0.6.11 candidate is not yet published.
+
 ## 0.6.7 代码贡献 / Code contributions in 0.6.7
 
 [@GavinQiEr](https://github.com/GavinQiEr) 在 [#207](https://github.com/saya-ch/dsh-mobile/issues/207) 提出 cpolar 固定子域名支持，并在 [#208](https://github.com/saya-ch/dsh-mobile/pull/208) 提供配置、启动参数和文档实现。[#211](https://github.com/saya-ch/dsh-mobile/pull/211) 的整合保留原作者提交 [`8dd7574`](https://github.com/saya-ch/dsh-mobile/commit/8dd75749d3823aecafdb6f5d9faccf674577e7b1)，并追加维护者修正，纳入 0.6.7。
@@ -35,7 +39,7 @@ GitHub's Contributors graph counts commits on the default branch; issue reports 
 | [@1624318455](https://github.com/1624318455) | [#93](https://github.com/saya-ch/dsh-mobile/pull/93) |
 | [@abworks-dev](https://github.com/abworks-dev) | [#91](https://github.com/saya-ch/dsh-mobile/pull/91), [#98](https://github.com/saya-ch/dsh-mobile/pull/98), [#99](https://github.com/saya-ch/dsh-mobile/pull/99), [#152](https://github.com/saya-ch/dsh-mobile/pull/152), [#184](https://github.com/saya-ch/dsh-mobile/pull/184), [#185](https://github.com/saya-ch/dsh-mobile/pull/185), [#200](https://github.com/saya-ch/dsh-mobile/pull/200) |
 | [@ayiejosh](https://github.com/ayiejosh) | [#109](https://github.com/saya-ch/dsh-mobile/pull/109), [#110](https://github.com/saya-ch/dsh-mobile/pull/110), [#116](https://github.com/saya-ch/dsh-mobile/pull/116), [#117](https://github.com/saya-ch/dsh-mobile/pull/117), [#119](https://github.com/saya-ch/dsh-mobile/pull/119), [#124](https://github.com/saya-ch/dsh-mobile/pull/124), [#125](https://github.com/saya-ch/dsh-mobile/pull/125), [#133](https://github.com/saya-ch/dsh-mobile/pull/133), [#136](https://github.com/saya-ch/dsh-mobile/pull/136), [#226](https://github.com/saya-ch/dsh-mobile/pull/226) |
-| [@chintoleung](https://github.com/chintoleung) | [#104](https://github.com/saya-ch/dsh-mobile/pull/104), [#147](https://github.com/saya-ch/dsh-mobile/pull/147), [#148](https://github.com/saya-ch/dsh-mobile/pull/148), [#158](https://github.com/saya-ch/dsh-mobile/pull/158), [#161](https://github.com/saya-ch/dsh-mobile/pull/161), [#162](https://github.com/saya-ch/dsh-mobile/pull/162), [#167](https://github.com/saya-ch/dsh-mobile/pull/167) |
+| [@chintoleung](https://github.com/chintoleung) | [#104](https://github.com/saya-ch/dsh-mobile/pull/104), [#147](https://github.com/saya-ch/dsh-mobile/pull/147), [#148](https://github.com/saya-ch/dsh-mobile/pull/148), [#158](https://github.com/saya-ch/dsh-mobile/pull/158), [#161](https://github.com/saya-ch/dsh-mobile/pull/161), [#162](https://github.com/saya-ch/dsh-mobile/pull/162), [#167](https://github.com/saya-ch/dsh-mobile/pull/167), [#229](https://github.com/saya-ch/dsh-mobile/pull/229) |
 | [@cjxh21](https://github.com/cjxh21) | [#154](https://github.com/saya-ch/dsh-mobile/pull/154), [#155](https://github.com/saya-ch/dsh-mobile/pull/155) |
 | [@fengfanfan-max](https://github.com/fengfanfan-max) | [#143](https://github.com/saya-ch/dsh-mobile/pull/143) |
 | [@fqf060420](https://github.com/fqf060420) | [#170](https://github.com/saya-ch/dsh-mobile/pull/170) |
@@ -95,7 +99,7 @@ Thanks [@xhwxt](https://github.com/xhwxt) for the document-picker proposal in [#
 | [@BrainZombie](https://github.com/BrainZombie) | [#128](https://github.com/saya-ch/dsh-mobile/issues/128) |
 | [@CESAEREE](https://github.com/CESAEREE) | [#1](https://github.com/saya-ch/dsh-mobile/issues/1) |
 | [@CharlesLueng](https://github.com/CharlesLueng) | [#68](https://github.com/saya-ch/dsh-mobile/issues/68) |
-| [@chintoleung](https://github.com/chintoleung) | [#103](https://github.com/saya-ch/dsh-mobile/issues/103), [#166](https://github.com/saya-ch/dsh-mobile/issues/166), [#189](https://github.com/saya-ch/dsh-mobile/issues/189) |
+| [@chintoleung](https://github.com/chintoleung) | [#103](https://github.com/saya-ch/dsh-mobile/issues/103), [#166](https://github.com/saya-ch/dsh-mobile/issues/166), [#189](https://github.com/saya-ch/dsh-mobile/issues/189), [#228](https://github.com/saya-ch/dsh-mobile/issues/228) |
 | [@chmzs](https://github.com/chmzs) | [#73](https://github.com/saya-ch/dsh-mobile/issues/73) |
 | [@gjzbbs](https://github.com/gjzbbs) | [#123](https://github.com/saya-ch/dsh-mobile/issues/123) |
 | [@fishdivinity](https://github.com/fishdivinity) | [#202](https://github.com/saya-ch/dsh-mobile/issues/202) |

@@ -28,6 +28,13 @@ The maintainer will acknowledge a complete report within seven days. Publication
 - Keep pairing closed except during a short local onboarding action.
 - Revoke a lost device immediately and rotate the device registry if credential theft is suspected.
 
+### Authentication admission and proxy peers
+
+- Invalid pairing guesses, malformed renewal/probe requests and invalid device credentials are limited by the direct TCP peer. `X-Forwarded-For`, `X-Real-IP` and `Forwarded` do not identify an authenticated client. A reverse proxy can therefore give anonymous requests a shared failure budget; this is not a reason to trust forwarded headers without an explicit proxy policy.
+- From plugin 0.6.12, a current valid one-time pairing secret does not consume that anonymous budget. At most one valid pairing candidate can wait for a durable mutation; it is rechecked inside the serialized operation. Renewal and native reachability probes use separate per-device budgets after credential verification, with at most one in-flight operation of each kind per device. Device capacity is independent of the anonymous peer-table capacity. Expiry and revocation are rechecked before mutation; a disconnected caller does not release work that is still pending.
+- These limits protect bounded application work and prevent anonymous failures from exhausting valid credentials' budgets. They do not make an exposed listener immune to connection, bandwidth or CPU exhaustion. Keep pairing windows short, protect proxy ingress, and retain the existing Host/Origin, device-token and CSRF checks.
+- The Gateway's internal upstream cookie exchange requires the configured loopback DSH Origin, its expected redirect status and a valid authentication Cookie. Explicit non-navigation Fetch Metadata avoids community authentication plugins' navigation HTML response; no arbitrary successful HTML page is accepted and no redirect is followed. The upstream Cookie remains server-side.
+
 ### Installation identity and device-state upgrades
 
 - Automatically identified entries without a pairing CA use the random `installation-id` file in the active Mobile state directory for new pairings, not a hash of the state-file path. Explicit operator IDs and CA-bound LAN/self-signed FRP identities remain unchanged. The identifier is public, not an authentication secret. Copying the entire state directory also copies its identity and credentials; this fix does not distinguish cloned installations. Do not delete the identity file to troubleshoot a connection.

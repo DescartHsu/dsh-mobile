@@ -81,6 +81,10 @@ For installation changes, run `npm run smoke:plugin-installation` against the sa
 
 Compatibility changes also run `npm run smoke:dsh-boot -- --legacy-webview`. The `--negative-control-compat` variation must fail with its expected missing-API marker after the compatibility script is blocked; an installation or fixture failure is not a successful negative control.
 
+`npm run smoke:upstream-auth` pins the reported community authentication package on DSH 0.2.0-rc.2 and checks its real navigation bounce versus non-navigation cookie exchange, followed by packed Mobile pairing, static resources and Workspace WebSocket reads. Provide the exact isolated runtime and tarball through the same environment variables. This is not arbitrary authentication-plugin compatibility. Old-API simulations in modern Chromium do not exercise old JavaScript parsers; inspect the actual upstream bundle for unsupported syntax and keep physical-device acceptance separate from startup-feedback tests.
+
+`npm run smoke:boot-feedback` checks the built compatibility script under nonce-restricted CSP, three supported languages, portrait/landscape and enlarged text. It runs the current App readiness expression against genuine recovery actions, verifies no notice over mounted DSH or its loader, and retains the document when DSH appears late. Explicit reload and wait actions are exercised without real credentials. This modern Chromium check does not execute Android Activity callbacks or establish old-parser support.
+
 The conversation scroll check uses the same isolated runtime and packed plugin. Its `--negative-control-viewport` variation removes the height fallback and must fail with `Viewport negative control detected`; it cannot substitute for testing the reporter's actual WebView.
 
 The compatibility, viewport and missing-companion negative lanes emit a final `DSH_MOBILE_EXPECTED_FAILURE` receipt only after observing the deliberate fault and completing cleanup. CI validates that exact receipt with `scripts/negative-control.mjs`; a matching error message inside an AggregateError is insufficient. Cleanup failures remain test failures.

@@ -20,6 +20,12 @@ Both [#126](https://github.com/saya-ch/dsh-mobile/issues/126) and [#146](https:/
 
 Plugin 0.6.11 and later write limited `auth failure` HTTP diagnostics to the plugin log (`$DSH_HOME/mobile-access/logs/dsh-mobile.log`): authorization versus CSRF rejection, status, method, a safe route or route category, related Cookie/header presence and counts, normalized Origin and recognized fetch-site values. It omits tokens, Cookie values, query strings and arbitrary original paths. Each Gateway rate-limits its two categories separately: the first event is immediate and same-category rejections aggregate within a 30-second window; `suppressed` counts previously suppressed records of that category, not all requests or only the current path. This helps investigate missing credentials and CSRF failures; it does not automatically repair a 401/403. The absence of a record does not establish successful authentication: earlier Host/Origin rejections, WebSocket upgrades and native pairing/renewal are outside these two recording points. Review logs before sharing them.
 
+## Keep event streams distinct
+
+In DSH 0.2.0-rc.2, `/plugins/events` is the SSE stream for plugin-module graph and build updates, not conversation-message delivery. Its `200` response, small body or repeated reconnects alone cannot establish successful delivery, failure or a missing processing animation. Inspect the `/api/remote.mux` WebSocket and the actual HTTP request for that operation as well.
+
+An ordinary message bubble and cleared draft can precede `POST /api/session/prompt`: they are an optimistic local echo, not Host acceptance. If no corresponding request appears, retain redacted request timing, status codes and DSH logs to distinguish a request never started by the browser, proxy rejection and Host acceptance. The plugin does not automatically replay messages, approvals or other writes; check the Session before retrying an operation with an unknown outcome.
+
 ## Slow transfers can exceed the default deadlines
 
 DSH 0.2.0-rc.2's API gateway sends a WebSocket Ping every **2 seconds** by default and ends the connection after two missed Pongs, allowing roughly **4–6 seconds** in practice. The client separately allows **15 seconds** for live-connection initialization. Large Session data, a slow uplink, or congestion can delay a Pong or the first synchronization and trigger disconnection and another synchronization.

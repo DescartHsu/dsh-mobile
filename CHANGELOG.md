@@ -2,6 +2,14 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## 0.6.12 - 2026-10-18
+
+- Send explicit non-navigation Fetch Metadata during the Gateway's internal DSH cookie exchange. This avoids the HTML navigation bounce produced by community authentication plugins without accepting arbitrary HTTP 200 pages, following redirects, or forwarding the upstream Cookie to the phone. Thanks @jamorzzz for [#230](https://github.com/saya-ch/dsh-mobile/issues/230).
+- Separate invalid pairing/renewal/probe attempts from valid credentials behind a shared proxy. Invalid requests retain direct-peer limits; valid pairing secrets receive bounded admission, while renewal and probe budgets belong to the authenticated device. Keep operations accounted for until they settle even when the caller disconnects, and recheck credentials inside serialized writes. Forwarded IP headers remain untrusted. Thanks @Akiyuki1130 for [#231](https://github.com/saya-ch/dsh-mobile/issues/231).
+- Extend the pre-boot compatibility script with identified missing array, string, object and structured-clone APIs. Add Chinese, English and Italian startup-failure feedback with explicit reload/wait actions when DSH has not rendered; mounted DSH and its own loader are not replaced, and no automatic reload is added.
+- Identify unsupported class static-block syntax in DSH 0.2.1-rc.2's published frontend: Chromium 92 cannot parse that bundle. API shims and the existing old-engine advisory do not establish support for that engine. The feedback script itself targets Chromium 92; it does not transpile DSH. Thanks @yunyunlyk for the detailed engine and entry-mode comparison in [#232](https://github.com/saya-ch/dsh-mobile/issues/232).
+- Add DSH 0.2.1-rc.2 to the packed-browser CI matrix and distinguish plugin-update SSE from conversation transport in troubleshooting. Android App 0.6.5 (build 81) remains independently published; no native change or new APK is part of this release.
+
 ## 0.6.11 - 2026-10-17
 
 - Stabilize earlier-history loading by requiring fresh touch or wheel input before an automatic load near the top. DSH's own scroll-position compensation cannot re-arm loading; switching sessions or scroll containers withdraws the previous input. Track only touch contacts started on the owned scroller so another finger elsewhere cannot keep an old loading intent active.

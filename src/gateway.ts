@@ -1176,8 +1176,12 @@ export class MobileAccessGateway {
   private closeTask: Promise<void> | undefined
   private readonly removeSessionListener: () => void
   private readonly removeExtensionContentListener: () => void
-  private readonly renewLimiter: BoundedRateLimiter
-  private readonly probeLimiter: BoundedRateLimiter
+  private readonly renewFailureLimiter: BoundedRateLimiter
+  private readonly renewDeviceLimiter: BoundedRateLimiter
+  private readonly renewInFlight = new Set<string>()
+  private readonly probeFailureLimiter: BoundedRateLimiter
+  private readonly probeDeviceLimiter: BoundedRateLimiter
+  private readonly probeInFlight = new Set<string>()
   private readonly clientModulePreferences: ClientModulePreferenceStore
   private readonly clientModuleOperations = new Set<AbortController>()
   private readonly clientModuleTasks = new Set<Promise<ClientModulePreferenceView>>()
@@ -1213,18 +1217,12 @@ export class MobileAccessGateway {
       maxPairingAttempts: config.maxPairingAttempts,
       maxRateLimitKeys: config.maxRateLimitKeys,
     })
-    this.renewLimiter = new BoundedRateLimiter(
-      Math.min(100, config.maxPairingAttempts * 4),
-      config.rateLimitWindowMs,
-      config.maxRateLimitKeys,
-    )
-    // Reachability checks do not create Sessions; allow one short poll for
-    // each configured device without weakening the Session-creating limit.
-    this.probeLimiter = new BoundedRateLimiter(
-      Math.min(1_000, config.maxDevices * 4),
-      config.rateLimitWindowMs,
-      config.maxRateLimitKeys,
-    )
+    const renewLimit = Math.min(100, config.maxPairingAttempts * 4)
+    const probeLimit = Math.min(1_000, config.maxDevices * 4)
+    this.renewFailureLimiter = new BoundedRateLimiter(renewLimit, config.rateLimitWindowMs, config.maxRateLimitKeys)
+    this.renewDeviceLimiter = new BoundedRateLimiter(renewLimit, config.rateLimitWindowMs, config.maxDevices)
+    this.probeFailureLimiter = new BoundedRateLimiter(probeLimit, config.rateLimitWindowMs, config.maxRateLimitKeys)
+    this.probeDeviceLimiter = new BoundedRateLimiter(probeLimit, config.rateLimitWindowMs, config.maxDevices)
     this.removeSessionListener = this.access.onSessionEnded((authorization, reason) => {
       if (reason === 'revoked') {
         const cleanup = this.clientModulePreferences.removeDevice(authorization.deviceId)
@@ -1582,6 +1580,40 @@ export class MobileAccessGateway {
     })])
   }
 
+  /** Separate malformed or invalid requests from device-authenticated work without trusting forwarded addresses. */
+  private async withDeviceRequest<T extends { readonly deviceId: string }, R>(
+    request: IncomingMessage,
+    failureLimiter: BoundedRateLimiter,
+    deviceLimiter: BoundedRateLimiter,
+    inFlight: Set<string>,
+    validate: () => Promise<T>,
+    operation: (device: T) => Promise<R>,
+  ): Promise<R> {
+    let device: T
+    try {
+      device = await validate()
+    } catch (error) {
+      if ((error instanceof HttpError || error instanceof AccessError) && error.status >= 400 && error.status < 500
+        && !failureLimiter.take(request.socket.remoteAddress ?? 'unknown', Date.now())) {
+        throw new HttpError(429, 'rate_limited')
+      }
+      throw error
+    }
+    if (inFlight.has(device.deviceId)) throw new HttpError(429, 'rate_limited')
+    const now = Date.now()
+    const activeIds = new Set(this.access.listDevices()
+      .filter(candidate => candidate.revokedAt === undefined && candidate.expiresAt > now)
+      .map(candidate => candidate.id))
+    deviceLimiter.retainKeys(activeIds)
+    if (!deviceLimiter.take(device.deviceId, now)) throw new HttpError(429, 'rate_limited')
+    inFlight.add(device.deviceId)
+    try {
+      return await operation(device)
+    } finally {
+      inFlight.delete(device.deviceId)
+    }
+  }
+
   private async handlePair(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const body = await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
     if (typeof body.token !== 'string' || (body.label !== undefined && typeof body.label !== 'string')) {
@@ -1610,27 +1642,32 @@ export class MobileAccessGateway {
   }
 
   private async handleRenew(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (!this.renewLimiter.take(request.socket.remoteAddress ?? 'unknown', Date.now())) {
-      throw new HttpError(429, 'rate_limited')
-    }
-    await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
-    const cookies = browserAuthCookies(request.headers.cookie)
-    const bindings = this.tlsEnabled ? cookies.get(HOST_DEVICE_COOKIE) : undefined
-    if (bindings !== undefined && bindings.length !== 1) throw new HttpError(401, 'authentication_failed')
-    const device = authenticatedCookie(
-      cookies.get(DEVICE_COOKIE) ?? [],
-      token => this.access.authorizeDevice(token),
-      candidate => bindings === undefined || candidate.deviceId === bindings[0],
+    await this.withDeviceRequest(
+      request, this.renewFailureLimiter, this.renewDeviceLimiter, this.renewInFlight,
+      async () => {
+        await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
+        const cookies = browserAuthCookies(request.headers.cookie)
+        const bindings = this.tlsEnabled ? cookies.get(HOST_DEVICE_COOKIE) : undefined
+        if (bindings !== undefined && bindings.length !== 1) throw new HttpError(401, 'authentication_failed')
+        const device = authenticatedCookie(
+          cookies.get(DEVICE_COOKIE) ?? [],
+          token => this.access.authorizeDevice(token),
+          candidate => bindings === undefined || candidate.deviceId === bindings[0],
+        )
+        return { deviceId: device.result.deviceId, token: device.value, credential: device.result }
+      },
+      async selected => {
+        const result = await this.access.renew(selected.token)
+        this.setSessionCookies(response, result, Date.now())
+        this.setBrowserDeviceBinding(response, result.deviceId, selected.credential.deviceExpiresAt)
+        sendJson(response, 200, {
+          renewed: true,
+          deviceId: result.deviceId,
+          csrfToken: result.csrfToken,
+          sessionExpiresAt: result.sessionExpiresAt,
+        }, this.tlsEnabled)
+      },
     )
-    const result = await this.access.renew(device.value)
-    this.setSessionCookies(response, result, Date.now())
-    this.setBrowserDeviceBinding(response, result.deviceId, device.result.deviceExpiresAt)
-    sendJson(response, 200, {
-      renewed: true,
-      deviceId: result.deviceId,
-      csrfToken: result.csrfToken,
-      sessionExpiresAt: result.sessionExpiresAt,
-    }, this.tlsEnabled)
   }
 
   /** CA-backed entries retain their pin; public entries project the authenticated credential's identity. */
@@ -1662,33 +1699,43 @@ export class MobileAccessGateway {
   }
 
   private async handleNativeRenew(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (!this.renewLimiter.take(request.socket.remoteAddress ?? 'unknown', Date.now())) {
-      throw new HttpError(429, 'rate_limited')
-    }
-    const body = await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
-    if (typeof body.deviceToken !== 'string') throw new HttpError(400, 'bad_request')
-    const result = await this.access.renew(body.deviceToken)
-    sendJson(response, 200, {
-      instanceId: this.nativeResponseInstanceId(result),
-      deviceId: result.deviceId,
-      sessionToken: result.sessionToken,
-      csrfToken: result.csrfToken,
-      sessionExpiresAt: result.sessionExpiresAt,
-    }, this.tlsEnabled)
+    await this.withDeviceRequest(
+      request, this.renewFailureLimiter, this.renewDeviceLimiter, this.renewInFlight,
+      async () => {
+        const body = await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
+        if (typeof body.deviceToken !== 'string') throw new HttpError(400, 'bad_request')
+        return { deviceId: this.access.authorizeDevice(body.deviceToken).deviceId, token: body.deviceToken }
+      },
+      async selected => {
+        const result = await this.access.renew(selected.token)
+        sendJson(response, 200, {
+          instanceId: this.nativeResponseInstanceId(result),
+          deviceId: result.deviceId,
+          sessionToken: result.sessionToken,
+          csrfToken: result.csrfToken,
+          sessionExpiresAt: result.sessionExpiresAt,
+        }, this.tlsEnabled)
+      },
+    )
   }
 
   private async handleNativeProbe(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (!this.probeLimiter.take(request.socket.remoteAddress ?? 'unknown', Date.now())) {
-      throw new HttpError(429, 'rate_limited')
-    }
-    const body = await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
-    if (typeof body.deviceToken !== 'string') throw new HttpError(400, 'bad_request')
-    const result = await this.access.probe(body.deviceToken)
-    sendJson(response, 200, {
-      instanceId: this.nativeResponseInstanceId(result),
-      deviceId: result.deviceId,
-      deviceExpiresAt: result.deviceExpiresAt,
-    }, this.tlsEnabled)
+    await this.withDeviceRequest(
+      request, this.probeFailureLimiter, this.probeDeviceLimiter, this.probeInFlight,
+      async () => {
+        const body = await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
+        if (typeof body.deviceToken !== 'string') throw new HttpError(400, 'bad_request')
+        return { deviceId: this.access.authorizeDevice(body.deviceToken).deviceId, token: body.deviceToken }
+      },
+      async selected => {
+        const result = await this.access.probe(selected.token)
+        sendJson(response, 200, {
+          instanceId: this.nativeResponseInstanceId(result),
+          deviceId: result.deviceId,
+          deviceExpiresAt: result.deviceExpiresAt,
+        }, this.tlsEnabled)
+      },
+    )
   }
 
   private async handleLogout(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -2220,6 +2267,7 @@ export class MobileAccessGateway {
             host: this.config.upstreamOrigin.host,
             accept: 'text/html',
             'accept-encoding': 'identity',
+            'sec-fetch-mode': 'same-origin',
           },
           agent: false,
         })

@@ -137,6 +137,27 @@ const MOBILE_BOOT_CHUNK_BYTES = 16 * 1024 * 1024
 const MOBILE_BOOT_SEPARATOR_BYTES = 3
 /** Freshness window for cached upstream bundle byte sizes. */
 const MOBILE_BOOT_SIZE_CACHE_TTL_MS = 30_000
+/**
+ * Serve-time rewrites applied to one upstream client bundle, so DSH core stays at
+ * its released design.
+ *
+ * The session controller decides how much history an open or a resumed stream
+ * asks for, and that constant ships inside its client bundle. Its default page
+ * spans two turns, which measured ~0.9 MB per session open on a long
+ * conversation and re-sends the same page after every reconnect. Halving it
+ * halves both the host snapshot and the client's transcript rebuild, with no
+ * core file touched and nothing to re-apply after a DSH update.
+ *
+ * The anchor is a loose regex, not an exact string: an upstream change either
+ * keeps matching or makes the rewrite a no-op. A miss serves the original bytes.
+ */
+const MOBILE_BUNDLE_REWRITES: readonly { module: string; match: RegExp; replace: string }[] = Object.freeze([
+  {
+    module: '@deepseek-ai/dsh-api-session-controller/client.js',
+    match: /maxMessages: \d+,(\s*)turnWindow: \{\s*minMessages: \d+,\s*minTurns: \d+/u,
+    replace: 'maxMessages: 240,$1turnWindow: { minMessages: 24, minTurns: 1',
+  },
+])
 /** Marker header distinguishing size probes from ordinary proxied bundle fetches. */
 const MOBILE_BOOT_SIZE_PROBE_HEADER = 'x-dsh-mobile-size-probe'
 const MAX_MOBILE_BOOT_BATCHES = 8
@@ -1156,6 +1177,22 @@ function extensionContentType(path: string): string {
     '.webp': 'image/webp',
   }[extname(path).toLowerCase()]
   return type ?? 'application/octet-stream'
+}
+
+/**
+ * Apply {@link MOBILE_BUNDLE_REWRITES} to one upstream bundle.
+ *
+ * Returns the original Buffer when nothing matches, so the common path costs one
+ * `includes` per rewrite and allocates nothing.
+ */
+export function rewriteClientBundleBody(source: string, body: Buffer): Buffer {
+  const rewrites = MOBILE_BUNDLE_REWRITES.filter((rewrite) => source.includes(rewrite.module))
+  if (rewrites.length === 0) return body
+  const original = body.toString('utf8')
+  let text = original
+  for (const rewrite of rewrites) text = text.replace(rewrite.match, rewrite.replace)
+  if (text === original) return body
+  return Buffer.from(text, 'utf8')
 }
 
 /** Authenticated TLS edge in front of the ordinary loopback-only DSH Web server. */
@@ -2789,7 +2826,11 @@ export class MobileAccessGateway {
       const headers: OutgoingHttpHeaders = {
         'Content-Type': 'text/javascript; charset=utf-8',
         'Content-Length': body.byteLength,
-        'Cache-Control': 'private, no-cache',
+        // The URL carries the plan hash and the ETag is sha256(body), so this
+        // body is immutable for its address. `no-cache` forced a revalidation
+        // round trip on every cold app open, and re-downloaded the whole batch
+        // whenever the plugin had restarted with a different etag.
+        'Cache-Control': 'private, max-age=31536000, immutable',
         ETag: etag,
       }
       if (compressed) headers['Content-Encoding'] = 'gzip'
@@ -2921,7 +2962,7 @@ export class MobileAccessGateway {
         if (bytes > MAX_MOBILE_BOOT_ENTRY_BYTES) throw new HttpError(502, 'upstream_unavailable')
         chunks.push(buffer)
       }
-      return Buffer.concat(chunks)
+      return rewriteClientBundleBody(source, Buffer.concat(chunks))
     } catch (error) {
       if (error instanceof HttpError) throw error
       if (signal.aborted || isTransientUpstreamError(error)) throw error

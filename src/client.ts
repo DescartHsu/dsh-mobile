@@ -52,8 +52,17 @@ interface ClientContext {
   }
 }
 
+/** Connection state the client publishes: see dsh-client-connection's handle. */
+export type MobileConnectionState = 'connected' | 'connecting' | 'disconnected' | undefined
+
 interface MobileConnectionHandle {
   isLoopback: boolean
+  /** Present on a live client connection; absent in the headless test harness. */
+  readonly state?: {
+    getSnapshot: () => MobileConnectionState
+    subscribe: (listener: () => void) => () => void
+  }
+  reconnect?: () => void
 }
 
 interface MobileExtensionContext {
@@ -4432,12 +4441,47 @@ export const CONTROL_STYLES = `
 .dsh-mobile-control__origin-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:12px}.dsh-mobile-control__origin-fields>.dsh-mobile-control__field{min-width:0;grid-column:auto;font-size:12px}.dsh-mobile-control__origin-fields>.dsh-mobile-control__field--full{grid-column:1/-1}.dsh-mobile-control__origin-fields select{box-sizing:border-box;width:100%;min-height:44px;padding:9px 10px;border:1px solid var(--dsw-alias-border-l3,#cfd5dd);border-radius:10px;background:var(--dsw-alias-bg-layer-2,#fff);color:var(--dsw-alias-label-primary,#16181d);font:16px/1.4 system-ui}.dsh-mobile-control__origin-fields select:disabled{cursor:not-allowed;opacity:.55}.dsh-mobile-control__caddy-form{display:grid;gap:12px}.dsh-mobile-control__caddy-form>.dsh-mobile-control__component-note,.dsh-mobile-control__caddy-form>.dsh-mobile-control__component-status,.dsh-mobile-control__caddy-form>.dsh-mobile-control__origin-feedback{margin:0;overflow-wrap:anywhere}.dsh-mobile-control__origin-setup .dsh-mobile-control__actions.dsh-mobile-control__caddy-actions{grid-template-columns:minmax(0,1fr);margin:0}.dsh-mobile-control__caddy-actions button{box-sizing:border-box;min-width:0;min-height:44px;padding:10px 12px;border-radius:10px;font:600 12px/1.4 system-ui;cursor:pointer}.dsh-mobile-control__origin-warning{margin:12px 0;padding:10px 12px;border-left:3px solid var(--dsw-alias-state-warn-primary,#a56810);border-radius:4px;background:var(--dsw-alias-bg-layer-1,#f3f5f8);color:var(--dsw-alias-label-primary,#384152);font-size:12px;line-height:1.6}.dsh-mobile-control__origin-feedback{font-size:12px;line-height:1.6;overflow-wrap:anywhere}.dsh-mobile-control__origin-feedback.is-error{color:var(--dsw-alias-state-error-primary,#bc3030)}.dsh-mobile-control__origin-fields input[aria-invalid=true]{border-color:var(--dsw-alias-state-error-primary,#bc3030)}.dsh-mobile-control__origin-backend{display:flex;min-width:0;flex-direction:column;align-items:stretch;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#dbe1e8)}.dsh-mobile-control__origin-backend button{align-self:flex-start;min-height:44px}.dsh-mobile-control__self-hosted-body .is-origin{margin-top:8px}
 ` + EXTENSION_RECOVERY_STYLES
 
+/**
+ * Whether a resume should force an immediate reconnect attempt.
+ *
+ * Only when the page is visible and the connection is not already healthy:
+ * nudging a connected stream would tear down working traffic.
+ */
+export function shouldNudgeReconnect(visibility: string, connection: MobileConnectionState): boolean {
+  return visibility === 'visible' && connection !== 'connected'
+}
+
 /** Mount the desktop control or mobile feature enhancements. */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     if (window.__DSH_MOBILE_FRONTEND__ !== 'dedicated') return
     return trustAuthenticatedGatewayConnection(ctx.get('connection'))
   }, 'dsh-mobile: authenticated gateway client trust')
+
+  /**
+   * Reconnect the instant the page becomes visible again.
+   *
+   * Android freezes a backgrounded page and drops its socket without ever firing
+   * `offline`/`online`, so the client's network watch sees no change and the
+   * reconnect waits out its own backoff (500 ms, 1 s, 2 s, 4 s, 8 s, 10 s).
+   * `reconnect()` resets the attempt counter and aborts the pending backoff wait.
+   */
+  ctx.effect(() => {
+    const connection = ctx.get('connection')
+    const state = connection.state
+    if (state === undefined || typeof connection.reconnect !== 'function') return
+    let current = state.getSnapshot()
+    const stopState = state.subscribe(() => { current = state.getSnapshot() })
+    const onVisibilityChange = (): void => {
+      if (!shouldNudgeReconnect(document.visibilityState, current)) return
+      connection.reconnect?.()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      stopState()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, 'dsh-mobile: reconnect on resume')
 
   ctx.effect(() => {
     const desktopAdmin = isDesktopAdminSurface(location.hostname, location.search, window.__DSH_MOBILE_FRONTEND__, location.protocol)

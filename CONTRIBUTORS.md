@@ -1,8 +1,8 @@
 # 贡献者 / Contributors
 
-GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-18 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
+GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-21 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-18. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-21. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
 ## 0.6.12 问题定位 / Issue findings for 0.6.12
 
@@ -107,7 +107,9 @@ Thanks [@xhwxt](https://github.com/xhwxt) for the document-picker proposal in [#
 | [@CharlesLueng](https://github.com/CharlesLueng) | [#68](https://github.com/saya-ch/dsh-mobile/issues/68) |
 | [@chintoleung](https://github.com/chintoleung) | [#103](https://github.com/saya-ch/dsh-mobile/issues/103), [#166](https://github.com/saya-ch/dsh-mobile/issues/166), [#189](https://github.com/saya-ch/dsh-mobile/issues/189), [#228](https://github.com/saya-ch/dsh-mobile/issues/228) |
 | [@chmzs](https://github.com/chmzs) | [#73](https://github.com/saya-ch/dsh-mobile/issues/73) |
+| [@faruzanCN](https://github.com/faruzanCN) | [#238](https://github.com/saya-ch/dsh-mobile/issues/238) |
 | [@gjzbbs](https://github.com/gjzbbs) | [#123](https://github.com/saya-ch/dsh-mobile/issues/123) |
+| [@gugubb5](https://github.com/gugubb5) | [#237](https://github.com/saya-ch/dsh-mobile/issues/237) |
 | [@fishdivinity](https://github.com/fishdivinity) | [#202](https://github.com/saya-ch/dsh-mobile/issues/202) |
 | [@hairyf](https://github.com/hairyf) | [#114](https://github.com/saya-ch/dsh-mobile/issues/114) |
 | [@helan-1997](https://github.com/helan-1997) | [#168](https://github.com/saya-ch/dsh-mobile/issues/168) |

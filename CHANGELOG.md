@@ -2,6 +2,12 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## Unreleased
+
+- Keep Mobile Access usable beside other sidebar-footer actions: use a compact icon button when the row is shared, retain its accessible name, and restore the full label when it is alone. Thanks @gugubb5 for [#237](https://github.com/saya-ch/dsh-mobile/issues/237).
+- Support explicit IPv6 loopback and ULA listeners and same-family private proxy-source CIDRs for an existing HTTPS reverse proxy. Display bracketed IPv6 backend URLs and clarify the difference between the phone-to-proxy and proxy-to-backend connections. Public frontend IPv6 does not require an IPv6 backend; exposing the plain HTTP backend publicly remains unsupported. Thanks @faruzanCN for [#238](https://github.com/saya-ch/dsh-mobile/issues/238).
+- Add separate bug-report and feature-request forms with environment, reproduction, expected/actual behavior and third-party plugin comparison prompts.
+
 ## 0.6.13 - 2026-10-19
 
 - Distinguish inbound HTTP receive timeouts (408 `request_timeout`) and oversized request headers (431 `headers_too_large`) from other malformed HTTP requests (400 `bad_request`). Preserve the existing receive limits and single-attempt POST forwarding; do not automatically retry messages.

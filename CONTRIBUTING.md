@@ -4,6 +4,10 @@ Keep pull requests focused on observable behavior. Explain the change, cover new
 
 Agent-assisted maintainers should start with [AGENTS.md](AGENTS.md) and the [DSH Mobile maintenance skill](.agent/skills/dsh-mobile-maintenance/SKILL.md). Its references cover compatibility/packaging, runtime/ADB, test-fixture reliability and collaboration/releases; load only the route needed for the task. Update demonstrated reusable guidance alongside the owning change, without turning transient release state into permanent instructions.
 
+## Report a problem
+
+Use the GitHub problem-report form for a specific failure, or the feature-request form for a proposed behavior. Include DSH and plugin versions, App/browser versions where applicable, the affected entry and connection type, reproduction steps, expected behavior and the actual result. Mark the affected area in screenshots. For third-party plugin or skin combinations, name the packages and versions and compare with the optional module disabled; do not uninstall plugins or clear pairing data for this check. A compatibility request is not a guarantee that every plugin combination will be supported. Redact pairing codes, Tokens, Cookies, API keys and private conversations before posting.
+
 ## Local setup and baseline
 
 Use the Node engine range in [package.json](package.json). From this repository:

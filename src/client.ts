@@ -4451,6 +4451,21 @@ export function shouldNudgeReconnect(visibility: string, connection: MobileConne
   return visibility === 'visible' && connection !== 'connected'
 }
 
+/** How long a non-connected page waits before asking the app for a session. */
+const RENEW_AFTER_MS = 5000
+
+/**
+ * Whether the page should ask the app for a fresh session.
+ *
+ * The WebView only ever holds a session cookie, and a session dies with the
+ * host. The device credential that can mint another one lives in the app, so a
+ * page that cannot connect has to ask for it. A brief blip is not worth asking
+ * about; only a connection that has stayed down for a moment is.
+ */
+export function shouldRenewSession(connection: MobileConnectionState, downForMs: number): boolean {
+  return connection !== 'connected' && downForMs >= RENEW_AFTER_MS
+}
+
 /** Mount the desktop control or mobile feature enhancements. */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
@@ -4482,6 +4497,43 @@ export function apply(ctx: ClientContext): void {
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, 'dsh-mobile: reconnect on resume')
+
+  /**
+   * Ask the app for a fresh session while the page cannot connect.
+   *
+   * Core's client retries the conversation mux forever, but a restarted harness
+   * invalidates the session cookie and the browser holds no device credential,
+   * so those retries cannot succeed on their own. The app does hold one:
+   * `auth.renew` makes it renew natively and install the resulting cookies,
+   * after which the client's next attempt connects. Without the bridge this
+   * effect does nothing, so a browser-paired page is unaffected.
+   */
+  ctx.effect(() => {
+    const connection = ctx.get('connection')
+    const state = connection.state
+    if (state === undefined || typeof connection.reconnect !== 'function') return
+    let downSince: number | undefined
+    const timer = setInterval(() => {
+      const current = state.getSnapshot()
+      if (current === 'connected') {
+        downSince = undefined
+        return
+      }
+      downSince ??= Date.now()
+      if (!shouldRenewSession(current, Date.now() - downSince)) return
+      const native = (globalThis as unknown as {
+        __DSH_MOBILE_NATIVE__?: { invoke?: (action: string, input?: object) => Promise<unknown> }
+      }).__DSH_MOBILE_NATIVE__
+      if (typeof native?.invoke !== 'function') return
+      // One attempt per window: a failed renew waits again instead of spinning.
+      downSince = undefined
+      void native.invoke('auth.renew', {}).then(
+        () => { connection.reconnect?.() },
+        () => undefined,
+      )
+    }, 2000)
+    return () => { clearInterval(timer) }
+  }, 'dsh-mobile: renew the session when the host restarts')
 
   ctx.effect(() => {
     const desktopAdmin = isDesktopAdminSurface(location.hostname, location.search, window.__DSH_MOBILE_FRONTEND__, location.protocol)

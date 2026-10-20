@@ -145,6 +145,16 @@ internal class NativeBridge(
     /** Apply a validated page scale to the current paired WebView without navigation. */
     var onSetDisplayScale: ((percent: Int) -> Unit)? = null
 
+    /**
+     * Mint a fresh session from the stored device credential.
+     *
+     * The device credential lives here, in the app - not in the WebView, whose
+     * session dies whenever the host restarts. The page asks for a new session
+     * through `auth.renew`; the activity renews natively and installs the
+     * resulting cookies, so a running page recovers without a reload.
+     */
+    var onRenewSession: ((callback: (Boolean, String?) -> Unit) -> Unit)? = null
+
     /** Install the origin-scoped WebMessage channel and page-side Promise adapter. */
     fun install(): Boolean {
         if (installed) return true
@@ -428,6 +438,22 @@ internal class NativeBridge(
         val input = parsed.optJSONObject("input") ?: JSONObject()
         try {
             when (action) {
+                "auth.renew" -> {
+                    val renew = onRenewSession
+                    if (renew == null) {
+                        finishPending(requestId, errorJson("unavailable", "renew is unavailable", requestId))
+                    } else {
+                        renew { renewed, reason ->
+                            activity.runOnUiThread {
+                                finishPending(
+                                    requestId,
+                                    if (renewed) successJson(requestId, JSONObject().put("renewed", true))
+                                    else errorJson("failed", reason ?: "renew failed", requestId),
+                                )
+                            }
+                        }
+                    }
+                }
                 "files.pick" -> startActivityPending(requestId, action) { startFilePicker(input) }
                 "camera.capture" -> startActivityPending(requestId, action) { startCamera() }
                 "share" -> activity.runOnUiThread {
@@ -1119,7 +1145,7 @@ internal class NativeBridge(
           bridge.onmessage = handleReply;
           window.__DSH_MOBILE_NATIVE_STATE__ = { pending };
           window.__DSH_MOBILE_NATIVE__ = {
-            capabilities: () => Promise.resolve(['files.pick','camera.capture','share','clipboard.read','clipboard.write','notification.notify','notification.settings','mobile.switch-computer','mobile.display-scale.get','mobile.display-scale.set']),
+            capabilities: () => Promise.resolve(['files.pick','camera.capture','share','clipboard.read','clipboard.write','auth.renew','notification.notify','notification.settings','mobile.switch-computer','mobile.display-scale.get','mobile.display-scale.set']),
             invoke: (action, input = {}) => new Promise((resolve, reject) => {
               const requestId = crypto.randomUUID();
               let raw;

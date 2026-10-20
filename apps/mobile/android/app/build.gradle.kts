@@ -38,6 +38,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Installable beside the release app: a distinct applicationId makes
+            // Android treat this as a separate app with its own data and pairing.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             isMinifyEnabled = true
             if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")

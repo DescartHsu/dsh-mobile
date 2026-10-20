@@ -924,15 +924,18 @@ export function apply(ctx: MobileClientContext): void {
       if (state.detailsOpen) {
         event.preventDefault()
         requestDetailsClose()
-      } else if (!viewportIsWide() && state.sidebarOpen) {
-        event.preventDefault()
-        controller.closeSidebar()
       } else if (state.panelInfo.activePanelId !== null) {
         event.preventDefault()
         controller.selectPanel(null)
+      } else if (!viewportIsWide() && !state.sidebarOpen) {
+        // Nothing left to close: the first back opens the session list instead of
+        // leaving the app, so a stray press cannot end the session.
+        event.preventDefault()
+        controller.toggleSidebar()
       }
     }
     window.addEventListener('dsh-mobile:native-back', onNativeBack)
+
     const retainMainPanels = (): void => {
       controller.retainMainPanels(ctx.slots.entries('main').flatMap(entry =>
         entry.options.key === undefined ? [] : [entry.options.key]))

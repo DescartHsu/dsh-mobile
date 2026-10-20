@@ -211,6 +211,8 @@ class MainActivity : Activity() {
     private var deviceListVisible = false
     private var rendererCrashTimes: List<Long> = emptyList()
     private var backRequestGeneration = 0
+    private var lastExitBackAt = 0L
+    private val exitBackWindowMs = 2000L
     private var backRequestPending = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -405,7 +407,16 @@ class MainActivity : Activity() {
         } else if (setupBackAction != null) {
             setupBackAction?.invoke()
         } else {
-            finish()
+            // A single stray press must not end the session; require two
+            // presses within 2 s.
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastExitBackAt <= 2000L) {
+                lastExitBackAt = 0L
+                finish()
+            } else {
+                lastExitBackAt = now
+                toast(R.string.back_press_again_to_exit)
+            }
         }
     }
 
@@ -2873,6 +2884,41 @@ class MainActivity : Activity() {
                 preferences.edit().putInt(PREFERENCE_WEB_CHROME_COLOR, color).apply()
             }
             bridge.onDeviceRevoked = ::handleDeviceRevoked
+            bridge.onRenewSession = { done ->
+                // Runs on the bridge's message thread, where any throw kills the
+                // app. Nothing below may escape: report the failure to the page.
+                val replied = java.util.concurrent.atomic.AtomicBoolean(false)
+                val reply: (Boolean, String?) -> Unit = { ok, reason ->
+                    if (replied.compareAndSet(false, true)) runOnUiThread { done(ok, reason) }
+                }
+                try {
+                    val candidates = withCredentialStorage { pairedDeviceStore.load() } ?: emptyList()
+                    val record = candidates.firstOrNull { it.origin.serialized == origin.serialized }
+                        ?: candidates.maxByOrNull { it.lastConnectedAt ?: 0L }
+                    if (record == null) {
+                        reply(false, "no paired device record (" + candidates.size + " known)")
+                    } else if (record.status == PairedDeviceStatus.REVOKED) {
+                        reply(false, "device record is revoked")
+                    } else {
+                        restoreExecutor.execute {
+                            try {
+                                val session = NativeAuthClient.renew(
+                                    record.origin,
+                                    record.deviceToken,
+                                    record.caCertificate,
+                                    record.instanceId,
+                                )
+                                // CookieManager.setCookie needs a Looper thread.
+                                runOnUiThread { installNativeSession(origin, session) { reply(true, null) } }
+                            } catch (failure: Throwable) {
+                                reply(false, record.mode.name + " / " + failure::class.simpleName + ": " + failure.message)
+                            }
+                        }
+                    }
+                } catch (failure: Throwable) {
+                    reply(false, "handler failed: " + failure::class.simpleName + ": " + failure.message)
+                }
+            }
             bridge.onSwitchComputer = ::showDeviceList
             bridge.onOpenTaskNotificationSettings = ::openTaskNotificationSettings
             bridge.onGetDisplayScale = { displayScale.percent }

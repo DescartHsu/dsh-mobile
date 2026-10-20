@@ -198,4 +198,5 @@
     <string name="webview_update_action">View update options</string>
     <string name="webview_continue">Continue</string>
     <string name="device_storage_unavailable">Paired-device storage is unavailable. Unlock this device and reopen the app or retry. This operation could not be completed.</string>
+    <string name="back_press_again_to_exit">Press back again to close</string>
 </resources>

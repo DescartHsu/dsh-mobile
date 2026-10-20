@@ -626,12 +626,14 @@ export function resolveHistoryGateIdentity(input: HistoryGateIdentityInput): His
  * the view in a chain. Only fresh input arms the gate, one arm buys at most one
  * successful load, and an arm with no further input expires quietly.
  *
- * A touch-driven eligible scroll never clicks mid-gesture: DSH retains a paging
- * anchor while a page loads, and its preservation writes fight a drag still in
- * progress. The gate records a pending intent instead and spends it only once the
- * gesture settles — after every owned contact ends with a `scrollend`, or after the
- * quiet lease expires with no fresh input — and only while the reader still holds
- * the top zone. Wheel input keeps the immediate click: a wheel flick has no held
+ * A touch-driven eligible scroll never clicks while the gesture is live: DSH retains
+ * a paging anchor while a page loads, and its preservation writes fight a drag still
+ * in progress. The gate records a pending intent instead and spends it only once the
+ * gesture settles — a `scrollend` after every owned contact ends, or the quiet lease
+ * expiring with no contact listed — and only while the reader still holds the top
+ * zone. The intent dies with its arm: it is never spendable after the arm ends, and
+ * the lease re-anchors ownership instead of clicking under a listed finger. Wheel
+ * input outside a touch gesture keeps the immediate click: a wheel flick has no held
  * gesture to fight.
  */
 export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryAutoLoadGate {
@@ -671,8 +673,18 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
   const onQuiet = (): void => {
     quietPending = false
     quietId = undefined
+    if (touchIds.size > 0) {
+      // A listed contact keeps the gesture open: never click under a finger. An
+      // intent held by the lease dies here, and its ownership is re-anchored, so
+      // an undelivered touch end cannot poison later settles.
+      if (pendingIntent) touchIds.clear()
+      pendingIntent = false
+      armed = false
+      return
+    }
     settle(true)
     armed = false
+    pendingIntent = false
   }
   const restartQuiet = (): void => {
     cancelQuiet()
@@ -697,6 +709,7 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
         // A refused click leaves the arm unspent for the loader's next enablement.
         if (hooks.tryLoad()) {
           armed = false
+          pendingIntent = false
           cancelQuiet()
           return
         }
@@ -723,7 +736,10 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
           if (Array.from(event.changedTouches ?? []).some(touch => touchIds.has(touch.identifier))) arm(false)
           break
         case 'wheel':
-          arm(true)
+          // Wheel input during a live touch-owned arm must not switch an
+          // in-progress drag onto the immediate-click path. A fresh wheel arm
+          // keeps the immediate click: wheel is a reading intent DSH observes.
+          arm(!(armed && !armedByWheel && touchIds.size > 0))
           break
         case 'touchend':
         case 'touchcancel': {
@@ -735,13 +751,14 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
           break
         }
         case 'scrollend': {
-          if (settle(false)) {
+          if (pendingIntent && touchIds.size === 0 && settle(false)) {
             armed = false
             cancelQuiet()
             break
           }
-          if (pendingIntent && touchIds.size === 0) {
-            // The loader refused the settle click; the intent waits for the next settle.
+          if (pendingIntent) {
+            // A live contact still owns the gesture, or the loader refused the
+            // click: the intent waits for the next settle. The lease bounds the wait.
             restartQuiet()
             break
           }

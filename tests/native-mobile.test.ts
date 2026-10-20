@@ -1621,6 +1621,32 @@ describe('history auto-load gate', () => {
     expect(harness.clicks()).toBe(1)
   })
 
+  it('keeps wheel input deferred while a held contact outlives an unused arm', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    harness.touch('touchstart', [1])
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS + 1)
+    expect(harness.gate.state()).toMatchObject({ armed: false, pendingIntent: false })
+
+    harness.input('wheel')
+    harness.scroll(50)
+    expect(harness.clicks()).toBe(0)
+    expect(harness.gate.state()).toMatchObject({ armed: true, pendingIntent: true })
+    harness.input('scrollend')
+    expect(harness.clicks()).toBe(0)
+
+    harness.touch('touchend', [1], [])
+    harness.input('scrollend')
+    expect(harness.clicks()).toBe(1)
+    expect(harness.pending()).toBe(0)
+
+    harness.input('wheel')
+    harness.scroll(30)
+    expect(harness.clicks()).toBe(2)
+    expect(harness.pending()).toBe(0)
+  })
+
   it('cancels the pending intent when the reader leaves the zone before settle', () => {
     vi.useFakeTimers()
     const harness = historyGateHarness({ top: 400 })
@@ -1883,7 +1909,7 @@ describe('history auto-load gate', () => {
     expect(harness.clicks()).toBe(0)
   })
 
-  it('disarms on scrollend and re-arms on the next gesture or wheel', () => {
+  it('disarms on scrollend and re-arms on contact-free wheel input', () => {
     vi.useFakeTimers()
     const harness = historyGateHarness({ top: 400 })
     harness.bind()
@@ -1893,6 +1919,7 @@ describe('history auto-load gate', () => {
     expect(harness.pending()).toBe(0)
     harness.scroll(60)
     expect(harness.clicks()).toBe(0)
+    harness.input('touchend')
     harness.input('wheel')
     harness.scroll(30)
     expect(harness.clicks()).toBe(1)

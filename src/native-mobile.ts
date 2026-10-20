@@ -738,11 +738,10 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
           if (Array.from(event.changedTouches ?? []).some(touch => touchIds.has(touch.identifier))) arm(false)
           break
         case 'wheel':
-          // Wheel input during a live touch-owned arm must not switch an
-          // in-progress drag onto the immediate-click path. A fresh wheel arm
-          // keeps the immediate click: wheel is a reading intent DSH observes.
+          // A listed contact keeps wheel input on the deferred path even after
+          // an unused arm expires. Contact-free wheel input still loads immediately.
           if (touchIds.size === 0) pendingIntent = false
-          arm(!(armed && !armedByWheel && touchIds.size > 0))
+          arm(touchIds.size === 0)
           break
         case 'touchend':
         case 'touchcancel': {

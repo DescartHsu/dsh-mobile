@@ -128,6 +128,8 @@ dsh plugin --profile web add dshmarket
 3. 在 Android App 中进入 **局域网访问**，扫描发现电脑并点击设备，再扫描二维码或粘贴配对密钥。
 4. 配对完成后会建立持久设备信任。以后打开 App 会自动发现并连接，切换 Wi-Fi、热点或 DHCP 地址通常不需要重新配对。
 
+侧栏底部有其他插件入口时，**移动访问**会收起为手机图标；悬停可查看名称，点击仍打开原面板。独占该区域时恢复文字显示。
+
 端口说明：`dsh web --port` 修改 DSH Web 上游端口（默认 3080），插件会自动跟随；`dsh-mobile setup --port` 修改 Mobile HTTPS 监听端口（默认 3443），配对二维码会包含实际端口。
 
 <details>

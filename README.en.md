@@ -128,6 +128,8 @@ Use this when the phone and computer share Wi-Fi, Ethernet, or a phone hotspot. 
 3. In the Android app, open **Local network**, scan for computers, select the device, then scan the QR code or paste the pairing key.
 4. Pairing creates persistent device trust. Later app launches discover and connect automatically; Wi-Fi, hotspot, and DHCP address changes normally do not require pairing again.
 
+When other plugin entries share the sidebar footer, **Mobile access** becomes a phone-icon button. Hover to read its name; clicking opens the same panel. Its text label returns when the entry is alone.
+
 Port note: `dsh web --port` changes the DSH Web upstream port (3080 by default), which the plugin follows automatically. `dsh-mobile setup --port` changes the Mobile HTTPS listener (3443 by default), and the pairing QR code includes the selected port.
 
 <details>

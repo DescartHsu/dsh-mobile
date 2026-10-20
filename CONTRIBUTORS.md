@@ -4,6 +4,12 @@ GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/co
 
 GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-21. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
+## 待发布代码贡献 / Unreleased code contributions
+
+[@chintoleung](https://github.com/chintoleung) 的 [#239](https://github.com/saya-ch/dsh-mobile/pull/239) 将触摸历史自动加载延后至手势落定，并增加真实分页回归。本地整合保留原作者的三个提交，另加维护者对滚动事件归属和新手势意图的修正；尚未发布。
+
+[@chintoleung](https://github.com/chintoleung)'s [#239](https://github.com/saya-ch/dsh-mobile/pull/239) defers touch-driven history loading until the gesture settles and adds real pagination regressions. The local integration retains the author's three commits alongside maintainer fixes for scroll-event ownership and new-gesture intent; it is not yet released.
+
 ## 0.6.12 问题定位 / Issue findings for 0.6.12
 
 感谢 [@jamorzzz](https://github.com/jamorzzz) 在 [#230](https://github.com/saya-ch/dsh-mobile/issues/230) 提供社区认证插件的导航响应与网关握手分析，[@Akiyuki1130](https://github.com/Akiyuki1130) 在 [#231](https://github.com/saya-ch/dsh-mobile/issues/231) 复现共享代理下的匿名限流耗尽，以及 [@yunyunlyk](https://github.com/yunyunlyk) 在 [#232](https://github.com/saya-ch/dsh-mobile/issues/232) 提供具体华为内核版本与 App／浏览器对照。这些报告分别促成认证握手、凭据限流和旧内核启动反馈改进；未将报告者真机写成已完成修复验收。

@@ -1527,6 +1527,72 @@ describe('history auto-load gate', () => {
     expect(harness.clicks()).toBe(0)
   })
 
+  it.each(['touch', 'wheel'])('withdraws a refused intent when new %s input starts before its lease expires', input => {
+    vi.useFakeTimers()
+    let loadable = false
+    const harness = historyGateHarness({ top: 400, loadable: () => loadable })
+    harness.bind()
+    harness.touch('touchstart', [1])
+    harness.scroll(60)
+    harness.touch('touchend', [1], [])
+    harness.input('scrollend')
+    expect(harness.gate.state().pendingIntent).toBe(true)
+
+    if (input === 'touch') harness.touch('touchstart', [2])
+    else harness.input('wheel')
+    harness.scroll(63)
+    if (input === 'touch') harness.touch('touchend', [2], [])
+    loadable = true
+    harness.input('scrollend')
+    vi.advanceTimersByTime(HISTORY_SCROLL_QUIET_MS + 1)
+    expect(harness.clicks()).toBe(0)
+
+    harness.touch('touchstart', [3])
+    harness.scroll(50)
+    harness.touch('touchend', [3], [])
+    harness.input('scrollend')
+    expect(harness.clicks()).toBe(1)
+  })
+
+  it('retains a pending intent when another contact joins the same touch gesture', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    harness.bind()
+    harness.touch('touchstart', [1])
+    harness.scroll(60)
+    harness.touch('touchstart', [2], [1, 2])
+    harness.touch('touchend', [1], [2])
+    harness.input('scrollend')
+    expect(harness.clicks()).toBe(0)
+    expect(harness.gate.state().pendingIntent).toBe(true)
+    harness.touch('touchend', [2], [])
+    harness.input('scrollend')
+    expect(harness.clicks()).toBe(1)
+  })
+
+  it('ignores a descendant scrollend while the conversation still has a pending intent', () => {
+    vi.useFakeTimers()
+    const harness = historyGateHarness({ top: 400 })
+    const added = vi.spyOn(harness.scroller, 'addEventListener')
+    harness.bind()
+    harness.input('touchstart')
+    harness.scroll(60)
+    harness.input('touchend')
+    expect(harness.gate.state().pendingIntent).toBe(true)
+
+    // EventTarget has no DOM ancestry, so deliver the event to the captured listener.
+    const listener = added.mock.calls.find(call => call[0] === 'scrollend')?.[1]
+    if (typeof listener !== 'function') throw new Error('History scrollend listener was not bound')
+    const childEnd = new Event('scrollend')
+    Object.defineProperty(childEnd, 'target', { value: new EventTarget() })
+    listener(childEnd)
+    expect(harness.clicks()).toBe(0)
+    expect(harness.gate.state().pendingIntent).toBe(true)
+
+    harness.input('scrollend')
+    expect(harness.clicks()).toBe(1)
+  })
+
   it('keeps the arm and intent through a scrollend delivered mid-gesture', () => {
     vi.useFakeTimers()
     const harness = historyGateHarness({ top: 400 })
@@ -1939,12 +2005,14 @@ describe('history auto-load gate', () => {
     const added = vi.spyOn(harness.scroller, 'addEventListener')
     const removed = vi.spyOn(harness.scroller, 'removeEventListener')
     const unbind = harness.bind()
+    const listener = added.mock.calls[0]?.[1]
     expect(added.mock.calls.map(call => call[0])).toEqual(HISTORY_INTENT_EVENTS)
-    expect(added.mock.calls.every(call => call[1] === harness.gate.handleEvent)).toBe(true)
+    expect(typeof listener).toBe('function')
+    expect(added.mock.calls.every(call => call[1] === listener)).toBe(true)
     expect(added.mock.calls.every(call => call[2] === HISTORY_INTENT_LISTENER_OPTIONS)).toBe(true)
     unbind()
     expect(removed.mock.calls.map(call => call[0])).toEqual(HISTORY_INTENT_EVENTS)
-    expect(removed.mock.calls.every(call => call[1] === harness.gate.handleEvent)).toBe(true)
+    expect(removed.mock.calls.every(call => call[1] === listener)).toBe(true)
     expect(removed.mock.calls.every(call => call[2] === HISTORY_INTENT_LISTENER_OPTIONS)).toBe(true)
     expect(HISTORY_INTENT_LISTENER_OPTIONS).toEqual({ passive: true, capture: true })
     // A released scroller stops feeding the gate.

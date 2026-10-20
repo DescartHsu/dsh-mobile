@@ -546,7 +546,7 @@ export function syncHistoryLoaderLabel(
 
 /**
  * Maximum gap between input or scrolling events before an unused loading intent expires.
- * A held finger may re-arm on its next owned move; an undelivered touch end cannot keep the lease alive.
+ * A held pending intent expires without loading; a fresh gesture can create another intent.
  */
 export const HISTORY_SCROLL_QUIET_MS = 1600
 
@@ -582,7 +582,7 @@ export interface HistoryIntentEvent {
 }
 
 export interface HistoryAutoLoadGate {
-  /** One listener for every `HISTORY_INTENT_EVENTS` type. */
+  /** Process input and scrolling events belonging to the bound conversation scroller. */
   readonly handleEvent: (event: HistoryIntentEvent) => void
   /** Session switch or rebind: disarm and clear the quiet timer. */
   readonly reset: (top: number) => void
@@ -653,14 +653,11 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
     quietId = undefined
   }
   /**
-   * Try to spend a pending loading intent at a settle point. The quiet lease is the
-   * settle authority for contacts whose end was never observed, so it alone may
-   * consume while a contact is still listed.
+   * Spend a pending loading intent only after every owned contact ends in the top zone.
    * @returns whether a load was issued.
    */
-  const settle = (lease: boolean): boolean => {
-    if (!pendingIntent) return false
-    if (!lease && touchIds.size > 0) return false
+  const settle = (): boolean => {
+    if (!pendingIntent || touchIds.size > 0) return false
     if (hooks.getTop() > AUTO_HISTORY_THRESHOLD_PX) {
       // The reader left the zone before settling; the intent is stale.
       pendingIntent = false
@@ -682,7 +679,7 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
       armed = false
       return
     }
-    settle(true)
+    settle()
     armed = false
     pendingIntent = false
   }
@@ -728,10 +725,15 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
     handleEvent: event => {
       if (disposed) return
       switch (event.type) {
-        case 'touchstart':
-          for (const touch of Array.from(event.changedTouches ?? [])) touchIds.add(touch.identifier)
-          if ((event.changedTouches?.length ?? 0) > 0) arm(false)
+        case 'touchstart': {
+          const changed = Array.from(event.changedTouches ?? [])
+          if (changed.length === 0) break
+          // A new gesture cannot spend an intent left by a previously refused load.
+          if (touchIds.size === 0) pendingIntent = false
+          for (const touch of changed) touchIds.add(touch.identifier)
+          arm(false)
           break
+        }
         case 'touchmove':
           if (Array.from(event.changedTouches ?? []).some(touch => touchIds.has(touch.identifier))) arm(false)
           break
@@ -739,6 +741,7 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
           // Wheel input during a live touch-owned arm must not switch an
           // in-progress drag onto the immediate-click path. A fresh wheel arm
           // keeps the immediate click: wheel is a reading intent DSH observes.
+          if (touchIds.size === 0) pendingIntent = false
           arm(!(armed && !armedByWheel && touchIds.size > 0))
           break
         case 'touchend':
@@ -751,7 +754,7 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
           break
         }
         case 'scrollend': {
-          if (pendingIntent && touchIds.size === 0 && settle(false)) {
+          if (pendingIntent && settle()) {
             armed = false
             cancelQuiet()
             break
@@ -794,11 +797,15 @@ export function createHistoryAutoLoadGate(hooks: HistoryAutoLoadHooks): HistoryA
   }
 }
 
-/** Attach a gate to one scroller; the disposer removes exactly the listeners it added. */
+/** Observe descendant input but only this scroller's movement; return its listener disposer. */
 export function bindHistoryAutoLoadGate(scroller: EventTarget, gate: Pick<HistoryAutoLoadGate, 'handleEvent'>): () => void {
-  for (const type of HISTORY_INTENT_EVENTS) scroller.addEventListener(type, gate.handleEvent, HISTORY_INTENT_LISTENER_OPTIONS)
+  const onEvent = (event: Event): void => {
+    if ((event.type === 'scroll' || event.type === 'scrollend') && event.target !== scroller) return
+    gate.handleEvent(event)
+  }
+  for (const type of HISTORY_INTENT_EVENTS) scroller.addEventListener(type, onEvent, HISTORY_INTENT_LISTENER_OPTIONS)
   return () => {
-    for (const type of HISTORY_INTENT_EVENTS) scroller.removeEventListener(type, gate.handleEvent, HISTORY_INTENT_LISTENER_OPTIONS)
+    for (const type of HISTORY_INTENT_EVENTS) scroller.removeEventListener(type, onEvent, HISTORY_INTENT_LISTENER_OPTIONS)
   }
 }
 

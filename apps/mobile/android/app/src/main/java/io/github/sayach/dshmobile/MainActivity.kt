@@ -391,7 +391,16 @@ class MainActivity : Activity() {
                 )) {
                     MobileBackAction.NATIVE_BACK -> handleNativeBack(browser)
                     MobileBackAction.RETRY -> toast(R.string.back_page_unresponsive)
-                    MobileBackAction.PAGE_HANDLED, MobileBackAction.IGNORE -> Unit
+                    MobileBackAction.PAGE_HANDLED -> {
+                        // The page closed the drawer this press; arm the exit
+                        // confirmation so the next unclaimed press closes the app.
+                        if (backExitStage == 1) {
+                            toast(R.string.back_press_again_to_exit)
+                            backExitStage = 2
+                            backUiHandler.postDelayed({ backExitStage = 0 }, exitConfirmWindowMs)
+                        }
+                    }
+                    MobileBackAction.IGNORE -> Unit
                 }
             }
         }

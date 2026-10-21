@@ -924,13 +924,16 @@ export function apply(ctx: MobileClientContext): void {
       if (state.detailsOpen) {
         event.preventDefault()
         requestDetailsClose()
+      } else if (!viewportIsWide() && state.sidebarOpen) {
+        event.preventDefault()
+        controller.closeSidebar()
       } else if (state.panelInfo.activePanelId !== null) {
         event.preventDefault()
         controller.selectPanel(null)
       }
-      // Nothing else to close: leave the press to the app. The platform contract
-      // is that Back is never consumed at the root conversation; the app decides
-      // whether to reveal the session list or confirm an exit.
+      // The root conversation is deliberately left unclaimed: the platform
+      // contract is that the host decides what an unconsumed Back means, and the
+      // app reveals the session list or confirms an exit from there.
     }
     window.addEventListener('dsh-mobile:native-back', onNativeBack)
     // The app asks for the session list on an unconsumed Back. Separate from the

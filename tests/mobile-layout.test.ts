@@ -983,28 +983,30 @@ describe('dedicated mobile layout boot', () => {
         detailsOpen: false, sidebarOpen: true, panelInfo: { activePanelId: 'alpha' },
       })
 
-      // 2. then the selected panel clears (which also dismisses the drawer it
-      //    was rendered over)
+      // 2. then the open drawer
       expect(back().defaultPrevented).toBe(true)
-      expect(controller?.getSnapshot()).toMatchObject({ panelInfo: { activePanelId: null } })
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
 
-      // 3. the root conversation never claims Back: that is the platform contract,
-      //    and the app decides whether to reveal the list or confirm an exit
-      expect(controller?.getSnapshot().sidebarOpen).toBe(false)
+      // 3. then the selected panel
+      expect(back().defaultPrevented).toBe(true)
+      expect(controller?.getSnapshot().panelInfo.activePanelId).toBeNull()
+
+      // 4. the root conversation is left to the host: nothing is consumed
       expect(back().defaultPrevented).toBe(false)
 
-      // 4. a wide viewport has no overlay drawer, so the request is ignored
+      // 5. a wide viewport has no overlay drawer
+      controller?.toggleSidebar()
       viewport.wide = true
-      window.dispatchEvent(new Event('dsh-mobile:open-sidebar'))
-      expect(controller?.getSnapshot().sidebarOpen).toBe(false)
       expect(back().defaultPrevented).toBe(false)
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
       viewport.wide = false
+      expect(back().defaultPrevented).toBe(true)
+      expect(controller?.getSnapshot().sidebarOpen).toBe(false)
 
-      // 5. narrow: the app's separate request reveals the session list while Back
-      //    itself stays unclaimed
+      // 6. the app reveals the list through its own request, not through Back
       window.dispatchEvent(new Event('dsh-mobile:open-sidebar'))
       expect(controller?.getSnapshot().sidebarOpen).toBe(true)
-      expect(back().defaultPrevented).toBe(false)
+      expect(back().defaultPrevented).toBe(true)
 
       controller?.selectPanel('alpha')
       dispose()

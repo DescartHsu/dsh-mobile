@@ -2,6 +2,22 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## 0.6.15 - 2026-10-21
+
+- Keep the dedicated Mobile page's plugin-update notifications connected during idle periods, without gzip buffering. Live module updates retain the mobile layout and the page's selected modules instead of replacing them with the desktop layout. Upgrade and reload the dedicated page to use the corrected stream; stock and older pages keep their existing behavior.
+- Retain authentication, expiry, revocation and cancellation checks for module notifications. A page view does not migrate to a new authentication Session: after native renewal, an old view can return `409 mobile_document_view_invalid` until the page is loaded again. This does not clear pairings or automatically refresh the current conversation. See [connection troubleshooting](docs/SLOW_CONNECTIONS.en.md#keep-event-streams-distinct).
+- Allow same-origin audio/video fetched into Blob URLs on the proxied DSH page. External media remains blocked, Gateway-owned pages retain their policy, and Android's media user-gesture requirement stays enabled.
+- Fix computer-side JSON management actions when Firefox privacy settings omit Origin. Keep local connection and Host checks, cross-origin rejection and official Desktop authentication. Thanks @axlrose for [#246](https://github.com/saya-ch/dsh-mobile/issues/246).
+- Add limited, credential-free diagnostics for the Gateway's authentication exchange with local DSH, separate from phone-side authorization failures.
+- Update development bundler dependencies to address Windows editor-launch security advisories; runtime authentication and model routing are unchanged.
+- Thanks @Void-LifeStream for the startup and reload report in [#243](https://github.com/saya-ch/dsh-mobile/issues/243). This release improves module updates and diagnostics; the complete reported symptom sequence remains unconfirmed.
+
+## Android 0.6.6 - 2026-10-21
+
+- Prevent repeated automatic recovery while renewal or Cookie installation is already pending, and serialize background restore work for the same credential until the previous worker exits.
+- Keep cancellation and the overall connection deadline effective for queued work and late results, without clearing existing pairing data.
+- Publish independently as App 0.6.6 (build 82). The pairing protocol and package identity remain unchanged; these native fixes require an App update and are not installed by updating the npm plugin.
+
 ## 0.6.14 - 2026-10-21
 
 - Defer touch-triggered history loading until the gesture settles, cancel pending loading when the reader leaves the top zone, and scope movement/settle events to the conversation scrollport. Withdraw an older refused loading intent when a new gesture begins. Retain @chintoleung's three original commits from [#239](https://github.com/saya-ch/dsh-mobile/pull/239) alongside maintainer regression fixes.

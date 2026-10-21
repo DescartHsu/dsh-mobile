@@ -1,4 +1,4 @@
-import { createHash, X509Certificate } from 'node:crypto'
+import { createHash, randomBytes, X509Certificate } from 'node:crypto'
 import { createSocket, type Socket as DatagramSocket } from 'node:dgram'
 import { lstat, readFile, stat } from 'node:fs/promises'
 import { hostname } from 'node:os'
@@ -36,11 +36,14 @@ import { AuthFailureRecorder, type AuthFailureEntry } from './auth-failure-log.j
 export type { AuthFailureEntry } from './auth-failure-log.js'
 import { HttpFailureRecorder, type HttpFailureEntry } from './http-failure-log.js'
 export type { HttpFailureEntry } from './http-failure-log.js'
+import { UpstreamAuthRecorder, type UpstreamAuthEntry, type UpstreamAuthOutcome } from './upstream-auth-log.js'
+export type { UpstreamAuthEntry } from './upstream-auth-log.js'
 import { ClientModulePreferenceStore, parseExcludedClientModules, type ClientModuleEntry, type ClientModulePreferenceView } from './client-module-preferences.js'
 import { renderClientModuleRecoveryPage } from './client-module-recovery.js'
 import { ensureMobileCompatibility, ensureMobileGatewayMarker, MOBILE_COMPAT_PATH } from './mobile-compat-bootstrap.js'
 import { LEGACY_CUSTOM_ASSET_LIMIT } from './extension-limits.js'
 import { matchesIfNoneMatch, weakenEntityTag } from './http-cache.js'
+import { createMobileGraphEventTransform } from './mobile-graph-events.js'
 import {
   AUTH_PREFIX,
   assertExternalTrust,
@@ -120,6 +123,7 @@ const MDNS_SERVICE_TYPE = 'dsh-mobile'
 const MOBILE_LAYOUT_MODULE = '@deepseek-ai/dsh-client-ui-layout'
 const MOBILE_LAYOUT_PATH = `${AUTH_PREFIX}/mobile-layout.js`
 const MOBILE_BOOT_BATCH_PREFIX = `${AUTH_PREFIX}/mobile-boot/`
+const MOBILE_DOCUMENT_VIEW_HEADER = 'x-dsh-mobile-view'
 const MAX_MOBILE_BOOT_BATCH_BYTES = 32 * 1024 * 1024
 const MAX_MOBILE_BOOT_ENTRY_BYTES = 8 * 1024 * 1024
 /**
@@ -202,7 +206,11 @@ function mobileCsrfFetchBootstrap(cookieName: string): string {
 // Paired pages use the gateway's authenticated HTTP carrier; streams retain DSH's WebSocket transport.
 // DSH's default file-upload Worker bypasses this gateway's CSRF fetch wrapper. Resolve
 // window.fetch when called because the wrapper is installed after the transport hook.
-const MOBILE_AUTHENTICATED_TRANSPORT_BOOTSTRAP = `(()=>{if(window.__DSH_TRANSPORT__!==undefined)throw new Error('DSH Mobile cannot replace an existing transport override');window.__DSH_TRANSPORT__={fetch:(input,init)=>window.fetch(input,init),ownsHost:true},window.__DSH_FILE_UPLOAD__={fetch:(input,init)=>window.fetch(input,init)}})();`
+function mobileAuthenticatedTransportBootstrap(viewId?: string): string {
+  const fetch = viewId === undefined ? '(input,init)=>window.fetch(input,init)'
+    : `(input,init)=>{const source=input instanceof Request?input:undefined;const method=String(init?.method??source?.method??'GET').toUpperCase();const raw=typeof input==='string'?input:input instanceof URL?input.href:source?.url;if(raw!==undefined&&method==='GET'){const target=new URL(raw,location.href);if(target.origin===location.origin&&target.pathname==='/plugins/events'){const headers=new Headers(init?.headers??source?.headers);headers.set(${JSON.stringify(MOBILE_DOCUMENT_VIEW_HEADER)},${JSON.stringify(viewId)});return window.fetch(input,{...init,headers})}}return window.fetch(input,init)}`
+  return `(()=>{if(window.__DSH_TRANSPORT__!==undefined)throw new Error('DSH Mobile cannot replace an existing transport override');window.__DSH_TRANSPORT__={fetch:${fetch},ownsHost:true},window.__DSH_FILE_UPLOAD__={fetch:(input,init)=>window.fetch(input,init)}})();`
+}
 /** Use this page's gateway health, rather than OS internet validation, for DSH reconnects. */
 const MOBILE_GATEWAY_REACHABILITY_BOOTSTRAP = `(()=>{
   const view=globalThis;
@@ -304,21 +312,31 @@ interface RewrittenMobileIndex {
   readonly html: string
   /** Merged batches the gateway assembles and serves; pass-through rows are not plans. */
   readonly batches: readonly MobileBootBatchPlan[]
+  readonly graphTransport: boolean
 }
 
-/** Parsed boot manifest with the layout entry rewired to the gateway-owned layout module. */
-interface MobileBootPlanRef {
+interface MobileBootGraphPlan {
   readonly parsed: { rev: string; entries: BootGraphEntry[]; batches?: BootGraphBatch[] }
   readonly entries: BootGraphEntry[]
   readonly batches?: BootGraphBatch[]
   readonly slotProvider: string
-  readonly assignment: string
-  readonly replaceStart: number
-  readonly replaceEnd: number
   readonly layoutBatch?: BootGraphBatch
   readonly planEntries?: readonly MobileBootBatchEntry[]
   readonly originalApplicationBatches?: readonly BootGraphBatch[]
   readonly rewrittenBatchEntries?: readonly { readonly batch: BootGraphBatch; readonly entries: readonly MobileBootBatchEntry[] }[]
+}
+
+/** Parsed boot manifest with the layout entry rewired to the gateway-owned layout module. */
+interface MobileBootPlanRef extends MobileBootGraphPlan {
+  readonly assignment: string
+  readonly replaceStart: number
+  readonly replaceEnd: number
+}
+
+interface MobileDocumentView extends SessionAuthorization {
+  readonly id: string
+  readonly excludedClientModules: readonly string[]
+  readonly abortStreams: Set<() => void>
 }
 
 interface SplitMobileBootBatch {
@@ -502,6 +520,11 @@ export function parseMobileBootPlan(html: string, excludedClientModules: readonl
   const scriptEnd = html.indexOf('</script>', valueStart)
   if (scriptEnd < 0) throw new Error('upstream DSH boot manifest script is incomplete')
   const source = html.slice(valueStart, scriptEnd).trim().replace(/;$/u, '')
+  return Object.freeze({ ...parseMobileBootGraph(source, excludedClientModules),
+    assignment: assignment[0], replaceStart, replaceEnd: scriptEnd })
+}
+
+function parseMobileBootGraph(source: string, excludedClientModules: readonly string[]): MobileBootGraphPlan {
   const parsed = JSON.parse(source) as { rev?: unknown; entries?: unknown; batches?: unknown }
   if (typeof parsed.rev !== 'string' || !Array.isArray(parsed.entries)) {
     throw new Error('upstream DSH boot manifest is malformed')
@@ -529,9 +552,6 @@ export function parseMobileBootPlan(html: string, excludedClientModules: readonl
       parsed: parsed as { rev: string; entries: BootGraphEntry[] },
       entries,
       slotProvider: dependencyProfile.slots,
-      assignment: assignment[0],
-      replaceStart,
-      replaceEnd: scriptEnd,
     })
   }
   if (!Array.isArray(parsedBatches)) throw new Error('upstream DSH boot manifest batches are malformed')
@@ -589,9 +609,6 @@ export function parseMobileBootPlan(html: string, excludedClientModules: readonl
     entries,
     batches,
     slotProvider: dependencyProfile.slots,
-    assignment: assignment[0],
-    replaceStart,
-    replaceEnd: scriptEnd,
     layoutBatch,
     planEntries,
     originalApplicationBatches,
@@ -669,9 +686,24 @@ function rewriteMobileApplicationPreloads(html: string, replacements: ReadonlyMa
 
 function rewriteMobileIndexWithBatch(
   html: string,
-  options: { readonly sizes?: ReadonlyMap<string, number>; readonly passThrough?: ReadonlySet<string>; readonly excludedClientModules?: readonly string[]; readonly csrfCookie?: string } = {},
+  options: { readonly sizes?: ReadonlyMap<string, number>; readonly passThrough?: ReadonlySet<string>; readonly excludedClientModules?: readonly string[]; readonly csrfCookie?: string; readonly viewId?: string } = {},
 ): RewrittenMobileIndex {
   const plan = parseMobileBootPlan(html, options.excludedClientModules)
+  const projected = projectMobileBootGraph(plan, options)
+  const transportBootstrap = projected.graphTransport ? mobileAuthenticatedTransportBootstrap(options.viewId) : ''
+  const replacement = `${MOBILE_GATEWAY_REACHABILITY_BOOTSTRAP}${transportBootstrap}${mobileCsrfFetchBootstrap(options.csrfCookie ?? CSRF_COOKIE)}window.__DSH_MOBILE_FRONTEND__="dedicated";${plan.assignment}${JSON.stringify(plan.parsed)};`
+  const rewritten = `${html.slice(0, plan.replaceStart)}${replacement}${html.slice(plan.replaceEnd)}`
+  return Object.freeze({
+    html: ensureMobileGatewayMarker(ensureMobileViewport(ensureMobileCompatibility(rewriteMobileApplicationPreloads(rewritten, projected.preloadReplacements)))),
+    batches: projected.batches,
+    graphTransport: projected.graphTransport,
+  })
+}
+
+function projectMobileBootGraph(
+  plan: MobileBootGraphPlan,
+  options: { readonly sizes?: ReadonlyMap<string, number>; readonly passThrough?: ReadonlySet<string> },
+): { readonly batches: readonly MobileBootBatchPlan[]; readonly preloadReplacements: ReadonlyMap<string, string>; readonly graphTransport: boolean } {
   const remoteSettings = orderAuthenticatedSettings(plan.entries, plan.slotProvider)
   let batches: readonly MobileBootBatchPlan[] = []
   let preloadReplacements = new Map<string, string>()
@@ -701,13 +733,7 @@ function rewriteMobileIndexWithBatch(
     batches = Object.freeze(batches)
     plan.parsed.rev = createHash('sha256').update(JSON.stringify({ entries: plan.entries, batches: plan.batches })).digest('hex').slice(0, 16)
   }
-  const transportBootstrap = remoteSettings ? MOBILE_AUTHENTICATED_TRANSPORT_BOOTSTRAP : ''
-  const replacement = `${MOBILE_GATEWAY_REACHABILITY_BOOTSTRAP}${transportBootstrap}${mobileCsrfFetchBootstrap(options.csrfCookie ?? CSRF_COOKIE)}window.__DSH_MOBILE_FRONTEND__="dedicated";${plan.assignment}${JSON.stringify(plan.parsed)};`
-  const rewritten = `${html.slice(0, plan.replaceStart)}${replacement}${html.slice(plan.replaceEnd)}`
-  return Object.freeze({
-    html: ensureMobileGatewayMarker(ensureMobileViewport(ensureMobileCompatibility(rewriteMobileApplicationPreloads(rewritten, preloadReplacements)))),
-    batches,
-  })
+  return Object.freeze({ batches, preloadReplacements, graphTransport: remoteSettings })
 }
 
 /** Rewrite the dedicated mobile graph; exclusions are opt-in and leave stock DSH unchanged. */
@@ -1159,6 +1185,8 @@ export class MobileAccessGateway {
   private readonly activeRequests = new Map<number, ActiveRequest>()
   private readonly activeWebSockets = new Map<number, ActiveWebSocket>()
   private readonly mobileBootBatches = new Map<string, StoredMobileBootBatch>()
+  private readonly mobileDocumentViews = new Map<string, MobileDocumentView>()
+  private readonly mobileGraphTasks = new Set<Promise<unknown>>()
   /** Cached upstream bundle byte sizes (HEAD probes), keyed by resource URL. */
   private readonly bootEntrySizeCache = new Map<string, { size: number; at: number }>()
   private readonly extensionEventListeners = new Set<(revision: number) => void>()
@@ -1191,6 +1219,7 @@ export class MobileAccessGateway {
   private readonly clientModuleRevocations = new Set<Promise<void>>()
   private readonly authFailures: AuthFailureRecorder
   private readonly httpFailures: HttpFailureRecorder
+  private readonly upstreamAuthDiagnostics: UpstreamAuthRecorder
 
   constructor(
     readonly config: ResolvedGatewayConfig,
@@ -1203,9 +1232,11 @@ export class MobileAccessGateway {
     clientModulePreferences?: ClientModulePreferenceStore,
     authFailureLog?: (entry: AuthFailureEntry) => void,
     httpFailureLog?: (entry: HttpFailureEntry) => void,
+    upstreamAuthLog?: (entry: UpstreamAuthEntry) => void,
   ) {
     this.authFailures = new AuthFailureRecorder(authFailureLog)
     this.httpFailures = new HttpFailureRecorder(httpFailureLog)
+    this.upstreamAuthDiagnostics = new UpstreamAuthRecorder(upstreamAuthLog)
     this.clientModulePreferences = clientModulePreferences ?? new ClientModulePreferenceStore(
       join(dirname(config.stateFile), `${basename(config.stateFile)}.client-modules.json`), config.excludedClientModules,
     )
@@ -1230,6 +1261,9 @@ export class MobileAccessGateway {
     this.probeFailureLimiter = new BoundedRateLimiter(probeLimit, config.rateLimitWindowMs, config.maxRateLimitKeys)
     this.probeDeviceLimiter = new BoundedRateLimiter(probeLimit, config.rateLimitWindowMs, config.maxDevices)
     this.removeSessionListener = this.access.onSessionEnded((authorization, reason) => {
+      for (const view of this.mobileDocumentViews.values()) {
+        if (view.sessionKey === authorization.sessionKey) this.removeMobileDocumentView(view)
+      }
       if (reason === 'revoked') {
         const cleanup = this.clientModulePreferences.removeDevice(authorization.deviceId)
           .catch(() => { process.emitWarning('Unable to remove revoked device client preferences', { code: 'DSH_MOBILE_PREFERENCE_CLEANUP_FAILED' }) })
@@ -1935,6 +1969,8 @@ export class MobileAccessGateway {
       }
       throw error
     }
+    const viewId = headerValue(request.headers, MOBILE_DOCUMENT_VIEW_HEADER)
+    const documentView = viewId === undefined ? undefined : this.requireMobileDocumentView(viewId, authorization, request)
     if (isMutation) {
       try {
         this.requireCsrf(request, authorization)
@@ -2059,7 +2095,7 @@ export class MobileAccessGateway {
       return
     }
     if (stockFrontend && target.decodedPathname === '/') request.url = '/'
-    await this.proxyHttp(request, response, authorization)
+    await this.proxyHttp(request, response, authorization, documentView)
   }
 
   private async handleExtensionRequest(
@@ -2259,19 +2295,26 @@ export class MobileAccessGateway {
   }
 
   private async exchangeUpstreamCookie(): Promise<string> {
-    const authenticatedUrl = this.upstreamAuthenticatedUrl
-    if (authenticatedUrl === undefined) throw new HttpError(502, 'upstream_unavailable')
-    let target: URL
+    const attempt = this.upstreamAuthDiagnostics.begin()
+    let stage: UpstreamAuthEntry['stage'] = 'target'
+    let outcome: UpstreamAuthOutcome = 'invalid-target'
+    let status: number | undefined
+    let timedOut = false
     try {
-      target = new URL(authenticatedUrl)
-    } catch {
-      throw new HttpError(502, 'upstream_unavailable')
-    }
-    if (target.origin !== this.config.upstreamOrigin.origin || target.pathname !== '/'
-      || target.hash !== '' || target.search === '') {
-      throw new HttpError(502, 'upstream_unavailable')
-    }
-    try {
+      const authenticatedUrl = this.upstreamAuthenticatedUrl
+      if (authenticatedUrl === undefined) throw new HttpError(502, 'upstream_unavailable')
+      let target: URL
+      try {
+        target = new URL(authenticatedUrl)
+      } catch {
+        throw new HttpError(502, 'upstream_unavailable')
+      }
+      if (target.origin !== this.config.upstreamOrigin.origin || target.pathname !== '/'
+        || target.hash !== '' || target.search === '') {
+        throw new HttpError(502, 'upstream_unavailable')
+      }
+      stage = 'request'
+      outcome = 'transport-error'
       const proxied = await new Promise<IncomingMessage>((resolve, reject) => {
         const upstreamRequest = requestHttp({
           protocol: 'http:',
@@ -2289,17 +2332,26 @@ export class MobileAccessGateway {
         })
         this.upstreamAuthRequest = upstreamRequest
         upstreamRequest.setTimeout(this.config.upstreamTimeoutMs, () => {
+          timedOut = true
           upstreamRequest.destroy(new HttpError(504, 'upstream_timeout'))
         })
         upstreamRequest.once('response', resolve)
         upstreamRequest.once('error', reject)
         upstreamRequest.end()
       })
+      stage = 'response'
+      status = proxied.statusCode
       await new Promise<void>((resolve, reject) => {
         proxied.once('end', resolve)
         proxied.once('error', reject)
         proxied.resume()
       })
+      if (status !== 303) {
+        outcome = 'unexpected-status'
+        throw new HttpError(502, 'upstream_unavailable')
+      }
+      stage = 'cookie'
+      outcome = 'invalid-cookie'
       const setCookie = proxied.headers['set-cookie']?.[0]
       const pair = setCookie?.split(';', 1)[0]
       const maxAgeText = setCookie === undefined
@@ -2307,15 +2359,21 @@ export class MobileAccessGateway {
         : /(?:^|;\s*)Max-Age=(\d+)(?:;|$)/iu.exec(setCookie)?.[1]
       const maxAgeSeconds = maxAgeText === undefined ? Number.NaN : Number(maxAgeText)
       const expiresAt = Date.now() + maxAgeSeconds * 1000
-      if (proxied.statusCode !== 303 || pair === undefined || pair.length > 4096
+      if (pair === undefined || pair.length > 4096
         || !UPSTREAM_COOKIE_PAIR.test(pair) || !Number.isSafeInteger(expiresAt)
         || maxAgeSeconds <= 0) {
         throw new HttpError(502, 'upstream_unavailable')
       }
       this.upstreamCookie = pair
       this.upstreamCookieExpiresAt = expiresAt
+      this.upstreamAuthDiagnostics.record(attempt, { outcome: 'accepted', stage, status })
       return pair
     } catch (error) {
+      this.upstreamAuthDiagnostics.record(attempt, {
+        outcome: timedOut || error instanceof HttpError && error.status === 504 ? 'timeout' : outcome,
+        stage,
+        ...(status === undefined ? {} : { status }),
+      })
       if (error instanceof HttpError) throw error
       throw new HttpError(502, 'upstream_unavailable')
     } finally {
@@ -2475,8 +2533,11 @@ export class MobileAccessGateway {
             : { ...await this.resolveMobileBootSizes(plan.rewrittenBatchEntries.flatMap(batch => batch.entries), operation.signal), excludedClientModules }
           const cookies = browserAuthCookies(request.headers.cookie)
           const csrfCookie = this.tlsEnabled && cookies.has(HOST_SESSION_COOKIE) ? HOST_CSRF_COOKIE : CSRF_COOKIE
-          const rewritten = rewriteMobileIndexWithBatch(html, { ...options, csrfCookie })
+          const viewId = randomBytes(16).toString('hex')
+          const rewritten = rewriteMobileIndexWithBatch(html, { ...options, csrfCookie, viewId })
+          operation.signal.throwIfAborted()
           for (const batch of rewritten.batches) this.rememberMobileBootBatch(batch)
+          if (rewritten.graphTransport) this.rememberMobileDocumentView(viewId, authorization, excludedClientModules)
           body = Buffer.from(rewritten.html)
         } catch (error) {
           if (error instanceof ExcludedClientModulesError) {
@@ -2525,6 +2586,61 @@ export class MobileAccessGateway {
     }
   }
 
+  private removeMobileDocumentView(view: MobileDocumentView): void {
+    if (this.mobileDocumentViews.get(view.id) !== view) return
+    this.mobileDocumentViews.delete(view.id)
+    for (const abort of view.abortStreams) abort()
+    view.abortStreams.clear()
+  }
+
+  private rememberMobileDocumentView(id: string, authorization: SessionAuthorization, excluded: readonly string[]): void {
+    for (const view of this.mobileDocumentViews.values()) {
+      if (view.expiresAt <= Date.now()) this.removeMobileDocumentView(view)
+    }
+    const view = Object.freeze({ ...authorization, id, excludedClientModules: Object.freeze([...excluded]), abortStreams: new Set<() => void>() })
+    this.mobileDocumentViews.set(id, view)
+    while (this.mobileDocumentViews.size > this.config.maxSessions) {
+      const oldest = this.mobileDocumentViews.values().next().value as MobileDocumentView | undefined
+      if (oldest === undefined) break
+      this.removeMobileDocumentView(oldest)
+    }
+  }
+
+  private requireMobileDocumentView(id: string, authorization: SessionAuthorization, request: IncomingMessage): MobileDocumentView {
+    const view = /^[a-f0-9]{32}$/u.test(id) ? this.mobileDocumentViews.get(id) : undefined
+    if (view === undefined || view.expiresAt <= Date.now() || view.sessionKey !== authorization.sessionKey
+      || view.deviceId !== authorization.deviceId || request.method !== 'GET'
+      || parseRequestTarget(request.url).decodedPathname !== '/plugins/events'
+      || request.headers['transfer-encoding'] !== undefined
+      || (request.headers['content-length'] !== undefined && Number(request.headers['content-length']) !== 0)) {
+      throw new HttpError(409, 'mobile_document_view_invalid')
+    }
+    return view
+  }
+
+  private async projectMobileDocumentEvent(view: MobileDocumentView, value: unknown, signal: AbortSignal): Promise<unknown | undefined> {
+    signal.throwIfAborted()
+    if (this.mobileDocumentViews.get(view.id) !== view) throw new HttpError(409, 'mobile_document_view_invalid')
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(502, 'upstream_unavailable')
+    const frame = value as Record<string, unknown>
+    if (frame.type === 'rebuilt') {
+      if (typeof frame.id !== 'string' || typeof frame.rev !== 'string') throw new HttpError(502, 'upstream_unavailable')
+      return frame.id === MOBILE_LAYOUT_MODULE ? undefined : frame
+    }
+    if (frame.type !== 'graph' || frame.graph === null || typeof frame.graph !== 'object' || Array.isArray(frame.graph)) {
+      throw new HttpError(502, 'upstream_unavailable')
+    }
+    const plan = parseMobileBootGraph(JSON.stringify(frame.graph), view.excludedClientModules)
+    const options = plan.rewrittenBatchEntries === undefined ? {}
+      : await this.resolveMobileBootSizes(plan.rewrittenBatchEntries.flatMap(batch => batch.entries), signal)
+    const projected = projectMobileBootGraph(plan, options)
+    if (!projected.graphTransport) throw new HttpError(502, 'upstream_unavailable')
+    signal.throwIfAborted()
+    if (this.mobileDocumentViews.get(view.id) !== view) throw new HttpError(409, 'mobile_document_view_invalid')
+    for (const batch of projected.batches) this.rememberMobileBootBatch(batch)
+    return { ...frame, graph: plan.parsed }
+  }
+
   private rememberMobileBootBatch(plan: MobileBootBatchPlan): void {
     const existing = this.mobileBootBatches.get(plan.key)
     this.mobileBootBatches.delete(plan.key)
@@ -2562,7 +2678,9 @@ export class MobileAccessGateway {
         else sizes.set(source, size)
       }
     }
-    await Promise.all(Array.from({ length: Math.min(8, candidates.length) }, worker))
+    const settled = await Promise.allSettled(Array.from({ length: Math.min(8, candidates.length) }, worker))
+    const failed = settled.find(result => result.status === 'rejected')
+    if (failed?.status === 'rejected') throw failed.reason
     return { sizes, passThrough }
   }
 
@@ -2579,6 +2697,7 @@ export class MobileAccessGateway {
     const cached = this.bootEntrySizeCache.get(source)
     if (cached !== undefined && Date.now() - cached.at < MOBILE_BOOT_SIZE_CACHE_TTL_MS) return cached.size
     let upstreamRequest: ClientRequest | undefined
+    let upstreamClosed: Promise<void> | undefined
     const abort = (): void => { upstreamRequest?.destroy(requestAbortedError()) }
     signal?.addEventListener('abort', abort, { once: true })
     try {
@@ -2602,6 +2721,8 @@ export class MobileAccessGateway {
           },
           agent: false,
         })
+        const opened = upstreamRequest
+        upstreamClosed = new Promise<void>(closed => { opened.once('close', () => { closed() }) })
         upstreamRequest.setTimeout(this.config.upstreamTimeoutMs, () => {
           upstreamRequest?.destroy(upstreamTimeoutError())
         })
@@ -2634,6 +2755,7 @@ export class MobileAccessGateway {
     } finally {
       signal?.removeEventListener('abort', abort)
       upstreamRequest?.destroy()
+      await upstreamClosed
     }
   }
 
@@ -2849,6 +2971,7 @@ export class MobileAccessGateway {
     request: IncomingMessage,
     response: ServerResponse,
     authorization: SessionAuthorization,
+    documentView?: MobileDocumentView,
   ): Promise<void> {
     const declared = request.headers['content-length']
     if (declared !== undefined && (!/^\d+$/u.test(declared) || Number(declared) > this.config.maxBodyBytes)) {
@@ -2861,7 +2984,11 @@ export class MobileAccessGateway {
         || request.url?.split('?', 1)[0]?.startsWith('/assets/') === true)
     const holder: { request?: ClientRequest } = {}
     const operation = this.allocateRequest(authorization, response, holder)
-    const onClose = (): void => { operation.release(); operation.abort() }
+    documentView?.abortStreams.add(operation.abort)
+    const onClose = (): void => {
+      if (documentView === undefined) operation.release()
+      operation.abort()
+    }
     response.once('close', onClose)
     // The HTTP parser accepts no payload without Content-Length or Transfer-Encoding.
     // Draining a bodyless GET once keeps its IncomingMessage out of retry pipelines.
@@ -2871,7 +2998,7 @@ export class MobileAccessGateway {
       for (let attempt = 1; attempt <= attempts; attempt++) {
         operation.signal.throwIfAborted()
         try {
-          await this.proxyHttpOnce(request, response, holder, operation.signal, replayable)
+          await this.proxyHttpOnce(request, response, holder, operation.signal, replayable, documentView)
           return
         } catch (error) {
           if (operation.signal.aborted || response.destroyed) return
@@ -2890,6 +3017,7 @@ export class MobileAccessGateway {
       if (!operation.signal.aborted) throw error
     } finally {
       response.removeListener('close', onClose)
+      documentView?.abortStreams.delete(operation.abort)
       operation.release()
     }
   }
@@ -2900,10 +3028,15 @@ export class MobileAccessGateway {
     holder: { request?: ClientRequest },
     signal: AbortSignal,
     replayable: boolean,
+    documentView?: MobileDocumentView,
   ): Promise<void> {
     let bodyDone: Promise<void> | undefined
+    const projections = new Set<Promise<unknown>>()
     try {
+      const pathname = parseRequestTarget(request.url).decodedPathname
       const upstreamHeaders = sanitizeRequestHeaders(request, this.config.upstreamOrigin)
+      delete upstreamHeaders[MOBILE_DOCUMENT_VIEW_HEADER]
+      if (documentView !== undefined) upstreamHeaders['accept-encoding'] = 'identity'
       // IncomingMessage removes chunk framing; GET does not opt into Node's
       // default outgoing chunk framing, so rebuild it when forwarding its body.
       if (request.headers['transfer-encoding'] !== undefined) {
@@ -2926,7 +3059,6 @@ export class MobileAccessGateway {
         upstreamRequest.setTimeout(this.config.upstreamTimeoutMs, () => {
           upstreamRequest.destroy(new HttpError(504, 'upstream_timeout'))
         })
-        const pathname = parseRequestTarget(request.url).decodedPathname
         if (pathname === '/api' || pathname.startsWith('/api/')) {
           // Uploads keep the transport budget; authenticated API response waits
           // use their separate idle budget only once the body has been sent.
@@ -2941,16 +3073,39 @@ export class MobileAccessGateway {
         }
       })
       const proxied = await upstreamResponse
+      const graphEvents = documentView !== undefined && replayable && pathname === '/plugins/events' && proxied.statusCode === 200
+        && proxied.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() === 'text/event-stream'
+      if (documentView !== undefined && !graphEvents) {
+        proxied.destroy()
+        throw new HttpError(502, 'upstream_unavailable')
+      }
+      if (graphEvents) {
+        // DSH sends graph changes without heartbeats. Keep connection/header deadlines,
+        // then use the authenticated response budget only for its established event stream.
+        holder.request?.setTimeout(this.config.upstreamApiTimeoutMs)
+      }
       // Proxied upstream routes (static assets, the GUI's own /sidebar routes,
       // the API): the GUI frames some of its own routes (HTML/diff previews),
       // so they follow the proxied framing policy.
       setSecurityHeaders(response, this.tlsEnabled, 'proxied')
       const headers = sanitizeResponseHeaders(proxied.headers, this.config.upstreamOrigin)
+      if (graphEvents) {
+        if (proxied.headers['content-encoding'] !== undefined && proxied.headers['content-encoding'] !== 'identity') {
+          throw new HttpError(502, 'upstream_unavailable')
+        }
+        delete headers['content-length']
+        delete headers['content-encoding']
+        delete headers.etag
+        delete headers['last-modified']
+        delete headers['content-range']
+        delete headers['accept-ranges']
+      }
       const statusCode = proxied.statusCode ?? 502
       this.httpFailures.recordUpstream(request.method, request.url?.split('?', 1)[0] ?? '', statusCode)
-      const cacheControl = revisionedStaticCacheControl(request, statusCode)
+      const cacheControl = graphEvents ? undefined : revisionedStaticCacheControl(request, statusCode)
       if (cacheControl !== undefined) headers['cache-control'] = cacheControl
-      const compressible = canCompressResponse(request, proxied)
+      // Gateway gzip buffers sparse graph frames; the SSE owner must deliver them immediately.
+      const compressible = !graphEvents && canCompressResponse(request, proxied)
       const compressed = compressible && acceptsGzip(request.headers['accept-encoding'])
       if (compressible) addVaryAcceptEncoding(headers)
       if (compressed) {
@@ -2976,9 +3131,18 @@ export class MobileAccessGateway {
         addVaryAcceptEncoding(headers)
       }
       response.writeHead(statusCode, headers)
+      const eventTransform = !graphEvents || documentView === undefined ? undefined : createMobileGraphEventTransform(value => {
+        const task = this.projectMobileDocumentEvent(documentView, value, signal)
+        projections.add(task)
+        this.mobileGraphTasks.add(task)
+        const settled = (): void => { projections.delete(task); this.mobileGraphTasks.delete(task) }
+        void task.then(settled, settled)
+        return task
+      })
       await Promise.all([
         bodyDone,
-        compressed && request.method !== 'HEAD' ? pipeline(proxied, createGzip(), response) : pipeline(proxied, response),
+        eventTransform !== undefined ? pipeline(proxied, eventTransform, response)
+          : compressed && request.method !== 'HEAD' ? pipeline(proxied, createGzip(), response) : pipeline(proxied, response),
       ])
     } catch (error) {
       holder.request?.destroy()
@@ -2989,6 +3153,7 @@ export class MobileAccessGateway {
       // becomes the standard upstream-unavailable answer.
       throw error
     } finally {
+      await Promise.allSettled(projections)
       delete holder.request
     }
   }
@@ -3413,9 +3578,13 @@ export class MobileAccessGateway {
     this.upstreamAuthRequest = undefined
     this.removeSessionListener()
     this.pendingDeviceRevocations.clear()
+    for (const view of this.mobileDocumentViews.values()) this.removeMobileDocumentView(view)
     const accessClose = this.access.close()
     for (const stored of this.mobileBootBatches.values()) stored.assembly?.controller.abort()
-    for (const request of this.activeRequests.values()) request.abort()
+    for (const request of this.activeRequests.values()) {
+      clearTimeout(request.timer)
+      request.abort()
+    }
     for (const websocket of this.activeWebSockets.values()) {
       websocket.client.destroy()
       websocket.upstream.destroy()
@@ -3438,6 +3607,7 @@ export class MobileAccessGateway {
     await accessClose
     await Promise.allSettled(this.clientModuleTasks)
     await Promise.allSettled(this.clientModuleRevocations)
+    await Promise.allSettled(this.mobileGraphTasks)
     this.activeRequests.clear()
     this.activeWebSockets.clear()
     this.connectedSockets.clear()

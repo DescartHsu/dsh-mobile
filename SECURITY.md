@@ -18,7 +18,9 @@ The maintainer will acknowledge a complete report within seven days. Publication
 
 - Keep the ordinary DSH Web listener on loopback.
 - Expose only the plugin-owned HTTPS listener to the LAN.
-- The desktop admin API may accept an RFC1918 or IPv4 link-local Host only when the TCP peer is loopback, for a trusted local reverse proxy or headless host. Do not publicly forward `/api/mobile-access`; Host and loopback checks are not a replacement for proxy access control. Mutating admin requests require a same-origin `Origin` header, except official DSH Desktop requests: its forwarder strips `Origin` and `Sec-Fetch-Site` and supplies a signed Host browser-session Cookie, so the plugin client sends an exact non-simple marker that survives forwarding. The plugin requires both that marker and Connection's successful browser-session verification before accepting an Origin-less write.
+- The desktop admin API may accept an RFC1918 or IPv4 link-local Host only when the TCP peer is loopback, for a trusted local reverse proxy or headless host. Do not publicly forward `/api/mobile-access`; Host and loopback checks are not a replacement for proxy access control.
+- Mutating Web admin requests normally require a same-origin `Origin`. When a browser omits it, the plugin accepts only a JSON POST with its exact non-simple Web marker and absent or `same-origin` Fetch Metadata. Explicit foreign Origins/sites remain rejected. This marker is not a credential: its CSRF protection relies on browser CORS enforcement and the management prefix refusing OPTIONS without CORS permission. A trusted reverse proxy must not answer allowed CORS preflights or inject CORS authorization for `/api/mobile-access`.
+- Official DSH Desktop uses a separate path: its forwarder strips `Origin` and `Sec-Fetch-Site` and supplies a signed Host browser-session Cookie. The plugin requires both its separate Desktop marker and Connection's successful browser-session verification before accepting an Origin-less Desktop write. The Web marker cannot replace that authentication.
 ### Discovery, pairing and TLS
 
 - DNS-SD/mDNS, periodic UDP announcements, active UDP query replies, and HTTPS discovery return only the device name, public HTTPS origin, port, protocol version, and stable non-secret installation identifier. Discovery never returns the CA, a pairing key, a device token, Cookies, credentials, or private configuration.
@@ -70,6 +72,7 @@ The maintainer will acknowledge a complete report within seven days. Publication
 ### Framed content and browser policy
 
 - Proxied GUI responses allow HTTP iframe sources for compatibility with community surfaces. HTTP content is unauthenticated and unencrypted; Android still blocks mixed HTTP content inside HTTPS pages, and browsers may block it too. Prefer HTTPS and do not treat a gateway framing allowance as a transport-security guarantee.
+- Proxied GUI responses allow same-origin and Blob audio/video through `media-src 'self' blob:`; Gateway-owned login and pairing pages do not gain Blob media permission. External media and connections remain restricted. This permits a trusted page plugin to play a same-origin file fetched into an object URL; it does not bypass browser codec support or autoplay rules. Android retains its media user-gesture requirement. Media plugins should provide a visible poster and a user-initiated playback fallback rather than assume autoplay always succeeds.
 
 ## Known limitation
 

@@ -26,13 +26,13 @@
   <a href="#兼容性">兼容性</a> ·
   <a href="docs/README.md">文档</a> ·
   <a href="#贡献者">贡献者</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.14">更新记录</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.15">更新记录</a> ·
   <a href="README.en.md">English</a>
 </p>
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.14**。改善历史消息加载手势与侧栏入口共存，支持自有反向代理的 IPv6 回环／ULA 后端。Android App **0.6.5** 保持不变，无需同步升级。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.14) · [完整更新记录](CHANGELOG.md)。
+> **当前正式版本：0.6.15**。改善移动页面的插件更新通知，兼容同源 Blob 音视频与 Firefox 隐私设置下的管理操作，并补充连接诊断。当前 Android App **0.6.5** 独立提供下载。[插件更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.15) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 

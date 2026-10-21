@@ -4,6 +4,16 @@ GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/co
 
 GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-21. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
+## 0.6.15 反馈 / Reports for 0.6.15
+
+感谢 [@axlrose](https://github.com/axlrose) 在 [#246](https://github.com/saya-ch/dsh-mobile/issues/246) 提供 Firefox 管理请求被拒的复现线索，促成 0.6.15 对缺少来源头场景的兼容与跨站拒绝测试。
+
+Thanks [@axlrose](https://github.com/axlrose) for the Firefox management-request rejection report in [#246](https://github.com/saya-ch/dsh-mobile/issues/246), informing compatibility for omitted source headers and cross-origin rejection tests in 0.6.15.
+
+感谢 [@Void-LifeStream](https://github.com/Void-LifeStream) 在 [#243](https://github.com/saya-ch/dsh-mobile/issues/243) 反馈启动、重载和会话显示问题，推动本轮模块通知、Android 自动恢复与诊断检查。插件 0.6.15 和 App 0.6.6 分别包含相关改进，不代表该报告中的全部现象已复现或解决。
+
+Thanks [@Void-LifeStream](https://github.com/Void-LifeStream) for reporting startup, reload and session-display problems in [#243](https://github.com/saya-ch/dsh-mobile/issues/243), prompting the module-notification, Android recovery and diagnostic investigation. Related improvements belong to plugin 0.6.15 and App 0.6.6 independently; not every reported symptom has been reproduced or resolved.
+
 ## 0.6.14 代码贡献与反馈 / Code contributions and reports for 0.6.14
 
 [@chintoleung](https://github.com/chintoleung) 的 [#239](https://github.com/saya-ch/dsh-mobile/pull/239) 将触摸历史自动加载延后至手势落定，并增加真实分页回归。0.6.14 保留原作者的三个提交，并追加维护者对滚动事件归属、新手势意图和混合输入的修正。感谢 [@gugubb5](https://github.com/gugubb5) 在 [#237](https://github.com/saya-ch/dsh-mobile/issues/237) 反馈侧栏入口共存问题，以及 [@faruzanCN](https://github.com/faruzanCN) 在 [#238](https://github.com/saya-ch/dsh-mobile/issues/238) 提出 IPv6 反代需求。

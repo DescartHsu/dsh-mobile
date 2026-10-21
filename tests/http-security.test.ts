@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { describe, expect, it } from 'vitest'
 import { HttpError, assertLocalAdminTrust, setSecurityHeaders } from '../src/http-security.js'
-import { DESKTOP_ADMIN_HEADER, DESKTOP_ADMIN_MARKER } from '../src/local-admin-host.js'
+import { DESKTOP_ADMIN_HEADER, DESKTOP_ADMIN_MARKER, WEB_ADMIN_HEADER, WEB_ADMIN_MARKER } from '../src/local-admin-host.js'
 
 const GATEWAY_POLICY = 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
 const PROXIED_POLICY = 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()'
@@ -17,6 +17,31 @@ function fakeResponse(): { readonly headers: Record<string, string>; readonly re
 }
 
 describe('setSecurityHeaders', () => {
+  it('admits same-origin and Blob media on the proxied GUI without widening other sources', () => {
+    const gateway = fakeResponse()
+    const proxied = fakeResponse()
+    setSecurityHeaders(gateway.response, false)
+    setSecurityHeaders(proxied.response, false, 'proxied')
+    const directives = (headers: Record<string, string>) => new Map(
+      headers['Content-Security-Policy']!.split('; ').map(value => {
+        const [name, ...sources] = value.split(' ')
+        return [name, sources.join(' ')]
+      }),
+    )
+    const strict = directives(gateway.headers)
+    const gui = directives(proxied.headers)
+    expect(gui.get('media-src')).toBe("'self' blob:")
+    expect(strict.has('media-src')).toBe(false)
+    expect(strict.get('default-src')).toBe("'self'")
+    expect(gui.get('default-src')).toBe(strict.get('default-src'))
+    for (const name of ['script-src', 'connect-src', 'worker-src', 'img-src', 'font-src', 'object-src', 'base-uri', 'form-action']) {
+      expect(gui.get(name), name).toBe(strict.get(name))
+    }
+    expect(gui.get('script-src')).toBe("'self' 'unsafe-inline' 'unsafe-eval'")
+    expect(gui.get('connect-src')).toBe("'self'")
+    expect(gui.get('media-src')).not.toMatch(/https?:|\*/u)
+  })
+
   it('keeps the microphone on the proxied GUI document alone', () => {
     const gateway = fakeResponse()
     setSecurityHeaders(gateway.response, false)
@@ -36,13 +61,23 @@ function fakeRequest(init: {
   readonly origin?: string
   readonly site?: string
   readonly desktopMarker?: string | readonly string[]
+  readonly webMarker?: string | readonly string[]
+  readonly method?: string
+  readonly contentType?: string | readonly string[]
+  readonly mode?: string
+  readonly dest?: string
 }): IncomingMessage {
   const headers: Record<string, string | readonly string[]> = {}
   if (init.host !== undefined) headers.host = init.host
   if (init.origin !== undefined) headers.origin = init.origin
   if (init.site !== undefined) headers['sec-fetch-site'] = init.site
   if (init.desktopMarker !== undefined) headers[DESKTOP_ADMIN_HEADER] = init.desktopMarker
+  if (init.webMarker !== undefined) headers[WEB_ADMIN_HEADER] = init.webMarker
+  if (init.contentType !== undefined) headers['content-type'] = init.contentType
+  if (init.mode !== undefined) headers['sec-fetch-mode'] = init.mode
+  if (init.dest !== undefined) headers['sec-fetch-dest'] = init.dest
   return {
+    ...(init.method === undefined ? {} : { method: init.method }),
     socket: {
       remoteAddress: Object.hasOwn(init, 'remoteAddress') ? init.remoteAddress : '127.0.0.1',
     },
@@ -175,5 +210,49 @@ describe('assertLocalAdminTrust', () => {
       host: '192.168.50.23:8080',
       site: 'same-origin',
     }, true)
+  })
+
+  it.each([undefined, 'same-origin'])('accepts only marked JSON Web POSTs without Origin and site %s', site => {
+    expect(() => assertLocalAdminTrust(fakeRequest({ host: '192.168.50.23:3080', method: 'POST',
+      ...(site === undefined ? {} : { site }), webMarker: WEB_ADMIN_MARKER, contentType: 'application/json; charset=utf-8' }), true)).not.toThrow()
+  })
+
+  it.each([
+    { method: 'GET', contentType: 'application/json' },
+    { method: 'POST' },
+    { method: 'POST', contentType: 'text/plain' },
+    { method: 'POST', contentType: 'application/x-www-form-urlencoded' },
+    { method: 'POST', contentType: 'application/jsonx' },
+    { method: 'POST', contentType: ['application/json', 'text/plain'] },
+    { method: 'POST', contentType: 'application/json', site: 'cross-site' },
+    { method: 'POST', contentType: 'application/json', site: 'same-site' },
+    { method: 'POST', contentType: 'application/json', site: 'none' },
+    { method: 'POST', contentType: 'application/json', origin: 'null' },
+    { method: 'POST', contentType: 'application/json', origin: '' },
+    { method: 'POST', contentType: 'application/json', origin: 'http://evil.example' },
+    { method: 'POST', contentType: 'application/json', origin: 'http://192.168.50.23:9999' },
+    { method: 'POST', contentType: 'application/json', desktopMarker: DESKTOP_ADMIN_MARKER },
+  ])('rejects a Web marker outside its source/media/method scope: %j', init => {
+    reject({ host: '192.168.50.23:3080', webMarker: WEB_ADMIN_MARKER, ...init }, true)
+  })
+
+  it.each(['wrong', `${WEB_ADMIN_MARKER}, ${WEB_ADMIN_MARKER}`, [WEB_ADMIN_MARKER, WEB_ADMIN_MARKER]])('rejects a malformed or repeated Web marker %j', webMarker => {
+    reject({ host: '192.168.50.23:3080', method: 'POST', contentType: 'application/json', webMarker }, true)
+  })
+
+  it('does not accept Fetch mode/destination as an Origin substitute', () => {
+    reject({ host: '192.168.50.23:3080', method: 'POST', contentType: 'application/json', mode: 'cors', dest: 'empty' }, true)
+    reject({ host: '192.168.50.23:3080', method: 'POST', contentType: 'application/json', mode: 'cors', dest: 'empty', site: 'same-origin' }, true)
+  })
+
+  it('keeps the local peer and trusted Host checks ahead of the Web marker', () => {
+    reject({ host: '192.168.50.23:3080', remoteAddress: '192.168.50.8', method: 'POST', contentType: 'application/json', webMarker: WEB_ADMIN_MARKER }, true)
+    reject({ host: 'evil.example:3080', method: 'POST', contentType: 'application/json', webMarker: WEB_ADMIN_MARKER }, true)
+  })
+
+  it('refuses preflights even when source headers are absent or same-origin', () => {
+    for (const source of [{}, { origin: 'http://192.168.50.23:3080', site: 'same-origin' }]) {
+      reject({ host: '192.168.50.23:3080', method: 'OPTIONS', webMarker: WEB_ADMIN_MARKER, ...source })
+    }
   })
 })

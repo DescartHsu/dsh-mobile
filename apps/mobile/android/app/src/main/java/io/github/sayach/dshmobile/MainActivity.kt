@@ -122,6 +122,7 @@ class MainActivity : Activity() {
     private var legacyStorageUnavailable = false
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val restoreExecutor = Executors.newFixedThreadPool(3)
+    private val restoreWorkGate = NativeRestoreWorkGate<String>(restoreExecutor)
     private val connectionCancellationExecutor = Executors.newFixedThreadPool(2)
     private val recoveryHandler = Handler(Looper.getMainLooper())
     private val restoreUiHandler = Handler(Looper.getMainLooper())
@@ -699,6 +700,7 @@ class MainActivity : Activity() {
 
     private fun finishConnectionAttempt(attempt: ConnectionAttemptController.Attempt? = pendingConnection) {
         if (attempt != null && connectionAttempts.finish(attempt)) {
+            restoreAttemptGate.completeRestore(restoreGeneration)
             pendingConnection = null
             connectionCancellationAction = null
             dismissConnectionProgress()
@@ -2303,7 +2305,7 @@ class MainActivity : Activity() {
     }
 
     private fun scheduleAutomaticRecovery(): Boolean {
-        if (recoveryScheduled) return true
+        if (recoveryScheduled || restoreAttemptGate.restorePending) return true
         if (recoveryAttempt >= RECOVERY_DELAYS_MS.size || !canRecoverAutomatically()) return false
         if (pendingConnection == null) startConnectionAttempt(accessMode, preserveBrowser = webView)
         val delay = RECOVERY_DELAYS_MS[recoveryAttempt++]
@@ -2404,104 +2406,122 @@ class MainActivity : Activity() {
                 ?: getString(R.string.restoring_trust),
             preserveBrowser = preserveWebView,
         )
-        try {
-            restoreExecutor.execute {
-                if (!restoreAttemptGate.isCurrent(generation) || attempt.cancellation.isCancelled) return@execute
-                var selectedOrigin = preferredOrigin
-                var lastFailure: Throwable? = null
-                var instanceMismatch = false
-
-                fun renew(origin: GatewayOrigin): NativeSession? {
-                    lastFailure = null
-                    instanceMismatch = false
-                    return try {
-                        NativeAuthClient.renew(
-                            origin,
-                            credential.deviceToken,
-                            credential.caCertificate,
-                            credential.instanceId,
-                            cancellation = attempt.cancellation,
-                        ).also { session ->
-                            if (session.instanceId != credential.instanceId) instanceMismatch = true
-                        }.takeUnless { instanceMismatch }
-                    } catch (failure: Exception) {
-                        lastFailure = failure
-                        null
-                    }
-                }
-
-                var session = renew(selectedOrigin)
-                var disposition = ConnectionRestorePolicy.failureDisposition(lastFailure, instanceMismatch)
-                if (generation != restoreGeneration) return@execute
-                if (session == null && mode == AccessMode.LAN && disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
-                    val found = runCatching { LanDiscovery.scan(this, cancellation = attempt.cancellation) }.getOrDefault(emptyList())
-                        .singleOrNull { it.instanceId == credential.instanceId }
-                    if (generation != restoreGeneration) return@execute
-                    if (found != null) {
-                        selectedOrigin = found.origin
-                        session = renew(selectedOrigin)
-                        disposition = ConnectionRestorePolicy.failureDisposition(lastFailure, instanceMismatch)
-                    }
-                }
-
-                val renewed = session
-                val finalDisposition = disposition
-                val failureKind = (lastFailure as? NativeAuthFailure)?.kind
+        if (!restoreAttemptGate.claimRestore(generation)) return
+        // A credential keeps its physical slot across Origin rediscovery and local cancellation.
+        val workKey = "${credential.instanceId}:${credential.deviceToken}"
+        restoreWorkGate.submit(
+            key = workKey,
+            isCurrent = { restoreAttemptGate.isCurrent(generation) && !attempt.cancellation.isCancelled },
+            onRejected = {
                 runOnUiThread(restoreAttemptGate.callback(generation) {
-                    if (isFinishing || isDestroyed || !connectionAttempts.isCurrent(attempt)) return@callback
-                    if (deviceKey != null) {
-                        val current = pairedDeviceStore.load().firstOrNull { it.key == deviceKey }
-                        if (current == null || requestedDevice == null ||
-                            !PairedDeviceStatusPolicy.mayApplyResult(current, requestedDevice)
-                        ) return@callback
-                    }
-                    if (renewed == null) {
-                        if (deviceKey != null) {
-                            val status = when (failureKind) {
-                                NativeAuthFailureKind.DEVICE_REVOKED -> PairedDeviceStatus.REVOKED
-                                NativeAuthFailureKind.DEVICE_EXPIRED,
-                                NativeAuthFailureKind.PAIRING_EXPIRED,
-                                -> PairedDeviceStatus.EXPIRED
-                                else -> if (instanceMismatch) PairedDeviceStatus.ADDRESS_CHANGED else PairedDeviceStatus.UNREACHABLE
-                            }
-                            withCredentialStorage { pairedDeviceStore.update(deviceKey) { it.copy(status = status) } }
-                        } else if (failureKind == NativeAuthFailureKind.PAIRING_EXPIRED) {
-                            withCredentialStorage { credentialStore(mode).clear() }
-                        }
-                        onFailure(finalDisposition)
-                    } else {
-                        if (!claimSuccess()) return@callback
-                        accessMode = mode
-                        if (savePairedDevice(mode, selectedOrigin, renewed, credential) == null) {
-                            onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
-                            return@callback
-                        }
-                        warnIfTailscale(selectedOrigin)
-                        cancelAutomaticRecovery()
-                        installNativeSession(
-                            origin = selectedOrigin,
-                            session = renewed,
-                            isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) },
-                        ) {
-                            if (preserveWebView == null) {
-                                failureDialog?.dismiss()
-                                showBrowser(selectedOrigin, credential.caCertificate)
-                            }
-                            else preserveLiveDocumentOrReload(
-                                preserveWebView,
-                                selectedOrigin,
-                                credential.caCertificate,
-                                generation,
-                            )
-                        }
+                    restoreAttemptGate.completeRestore(generation)
+                    if (!isFinishing && !isDestroyed && connectionAttempts.isCurrent(attempt)) {
+                        onFailure(RestoreFailureDisposition.RETRY_TRANSIENT)
                     }
                 })
+            },
+        ) restore@ {
+            var selectedOrigin = preferredOrigin
+            var lastFailure: Throwable? = null
+            var instanceMismatch = false
+
+            fun renew(origin: GatewayOrigin): NativeSession? {
+                lastFailure = null
+                instanceMismatch = false
+                return try {
+                    NativeAuthClient.renew(
+                        origin,
+                        credential.deviceToken,
+                        credential.caCertificate,
+                        credential.instanceId,
+                        cancellation = attempt.cancellation,
+                    ).also { session ->
+                        if (session.instanceId != credential.instanceId) instanceMismatch = true
+                    }.takeUnless { instanceMismatch }
+                } catch (failure: Exception) {
+                    lastFailure = failure
+                    null
+                }
             }
-        } catch (_: RejectedExecutionException) {
-            // Activity teardown owns executor shutdown; no UI result is needed afterwards.
-            if (generation == restoreGeneration) {
-                onFailure(RestoreFailureDisposition.RETRY_TRANSIENT)
+
+            var session = renew(selectedOrigin)
+            var disposition = ConnectionRestorePolicy.failureDisposition(lastFailure, instanceMismatch)
+            if (generation != restoreGeneration) return@restore
+            if (session == null && mode == AccessMode.LAN && disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
+                val found = runCatching { LanDiscovery.scan(this, cancellation = attempt.cancellation) }.getOrDefault(emptyList())
+                    .singleOrNull { it.instanceId == credential.instanceId }
+                if (generation != restoreGeneration) return@restore
+                if (found != null) {
+                    selectedOrigin = found.origin
+                    session = renew(selectedOrigin)
+                    disposition = ConnectionRestorePolicy.failureDisposition(lastFailure, instanceMismatch)
+                }
             }
+
+            val renewed = session
+            val finalDisposition = disposition
+            val failureKind = (lastFailure as? NativeAuthFailure)?.kind
+            runOnUiThread(restoreAttemptGate.callback(generation) {
+                if (isFinishing || isDestroyed || !connectionAttempts.isCurrent(attempt)) {
+                    restoreAttemptGate.completeRestore(generation)
+                    return@callback
+                }
+                if (deviceKey != null) {
+                    val current = pairedDeviceStore.load().firstOrNull { it.key == deviceKey }
+                    if (current == null || requestedDevice == null ||
+                        !PairedDeviceStatusPolicy.mayApplyResult(current, requestedDevice)
+                    ) {
+                        restoreAttemptGate.completeRestore(generation)
+                        return@callback
+                    }
+                }
+                if (renewed == null) {
+                    if (deviceKey != null) {
+                        val status = when (failureKind) {
+                            NativeAuthFailureKind.DEVICE_REVOKED -> PairedDeviceStatus.REVOKED
+                            NativeAuthFailureKind.DEVICE_EXPIRED,
+                            NativeAuthFailureKind.PAIRING_EXPIRED,
+                            -> PairedDeviceStatus.EXPIRED
+                            else -> if (instanceMismatch) PairedDeviceStatus.ADDRESS_CHANGED else PairedDeviceStatus.UNREACHABLE
+                        }
+                        withCredentialStorage { pairedDeviceStore.update(deviceKey) { it.copy(status = status) } }
+                    } else if (failureKind == NativeAuthFailureKind.PAIRING_EXPIRED) {
+                        withCredentialStorage { credentialStore(mode).clear() }
+                    }
+                    restoreAttemptGate.completeRestore(generation)
+                    onFailure(finalDisposition)
+                } else {
+                    if (!claimSuccess()) {
+                        restoreAttemptGate.completeRestore(generation)
+                        return@callback
+                    }
+                    accessMode = mode
+                    if (savePairedDevice(mode, selectedOrigin, renewed, credential) == null) {
+                        restoreAttemptGate.completeRestore(generation)
+                        onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
+                        return@callback
+                    }
+                    warnIfTailscale(selectedOrigin)
+                    cancelAutomaticRecovery()
+                    installNativeSession(
+                        origin = selectedOrigin,
+                        session = renewed,
+                        isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) },
+                    ) {
+                        restoreAttemptGate.completeRestore(generation)
+                        if (preserveWebView == null) {
+                            failureDialog?.dismiss()
+                            showBrowser(selectedOrigin, credential.caCertificate)
+                        }
+                        else preserveLiveDocumentOrReload(
+                            preserveWebView,
+                            selectedOrigin,
+                            credential.caCertificate,
+                            generation,
+                        )
+                    }
+                }
+            })
         }
     }
 

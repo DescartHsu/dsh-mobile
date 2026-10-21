@@ -121,6 +121,7 @@
     "smoke:module-recovery": "node ./scripts/smoke-client-module-recovery.mjs",
     "smoke:module-settings": "node ./scripts/smoke-client-module-settings.mjs",
     "smoke:attachments": "node ./scripts/smoke-mobile-attachments.mjs",
+    "smoke:gallery": "node ./scripts/smoke-gallery.mjs",
     "smoke:browser-auth-cookies": "node ./scripts/smoke-browser-auth-cookies.mjs",
     "smoke:upstream-auth": "node ./scripts/smoke-upstream-auth.mjs",
     "smoke:history-scroll": "node ./scripts/smoke-history-scroll-stability.mjs",

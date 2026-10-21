@@ -10,7 +10,7 @@ try {
     const context = await browser.newContext({ viewport: { width: 393, height: 844 } })
     try {
       const page = await context.newPage()
-      await page.route('https://gallery.test/**', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><style>button{min-height:40px}svg{width:16px;height:16px}</style></head><body><main class="dshm-main"><section data-conversation-session="one"><div data-conversation-scroll></div><div data-composer-card><div data-input-scroll><div contenteditable="true" data-composer-input>draft</div></div><div><div><button id="add" aria-haspopup="listbox" aria-expanded="true">+</button><div data-trigger-menu><div role="listbox"><div role="presentation">${add}</div><button role="option" class="Menu_item"><span class="Menu_itemIcon">F</span><span class="Menu_itemName">File</span></button><div role="presentation">Other</div></div></div></div><div></div></div></div></section></main></body></html>` }))
+      await page.route('https://gallery.test/**', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><style>button{min-height:40px}svg{width:16px;height:16px}</style></head><body><main class="dshm-main"><section data-conversation-session="one"><div data-conversation-scroll></div><div data-composer-card><div data-input-scroll><div contenteditable="true" data-composer-input>draft</div></div><div><div><button id="add" aria-haspopup="listbox" aria-expanded="true">+</button><div data-trigger-menu><div role="listbox"><div role="presentation">${add}</div><button role="option" class="Menu_item"><span class="Menu_itemIcon">F</span><span class="Menu_itemName">File</span></button><button role="option">Goal</button><button role="option">Plan</button><button role="option">Feedback</button><div role="presentation">Other</div><button role="option">Compact</button><button role="option">Model</button></div></div></div><div></div></div></div></section></main></body></html>` }))
       await page.goto('https://gallery.test/')
       await page.evaluate(() => {
         window.drops = []
@@ -29,17 +29,18 @@ try {
       await button.waitFor({ timeout: 5000 }).catch(async error => { throw new Error(`${lang}: ${await page.locator('body').innerHTML()}`, { cause: error }) })
       assert.equal(await button.getAttribute('aria-label'), gallery)
       assert.equal(await page.locator('[data-dsh-mobile-media-action="camera"]').getAttribute('aria-label'), camera)
-      assert.deepEqual(await page.locator('[role="listbox"]').evaluate(list => [...list.children].map(child => child.textContent)), [add, 'FFile', camera, gallery, 'Other'])
+      assert.deepEqual(await page.locator('[role="listbox"]').evaluate(list => [...list.children].map(child => child.textContent)), [add, gallery, camera, 'FFile', 'Goal', 'Plan', 'Feedback', 'Other', 'Compact', 'Model'])
       assert.equal(await button.getAttribute('class'), 'Menu_item')
       assert.ok(await button.evaluate(element => { const rect = element.getBoundingClientRect(); return rect.height >= 40 && element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)) }))
       // Observer passes retain the same nodes and do not repeatedly mutate their placement/classes.
-      await page.evaluate(() => { window.galleryNode = document.querySelector('[data-dsh-mobile-media-action="gallery"]'); window.menuMutations = 0; window.menuObserver = new MutationObserver(records => { window.menuMutations += records.length }); window.menuObserver.observe(document.querySelector('[role="listbox"]'), { childList: true, subtree: true, attributes: true }); document.body.dataset.wake = '1' })
+      await page.evaluate(() => { window.galleryNode = document.querySelector('[data-dsh-mobile-media-action="gallery"]'); window.menuMutations = 0; window.menuObserver = new MutationObserver(records => { window.menuMutations += records.length }); window.menuObserver.observe(document.querySelector('[role="listbox"]'), { childList: true, subtree: true, attributes: true }); document.body.classList.add('gallery-observer-wake') })
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
       assert.equal(await page.evaluate(() => window.menuMutations), 0)
       await page.evaluate(() => { window.menuObserver.disconnect(); const menu = document.querySelector('[data-trigger-menu]'); menu.innerHTML = menu.innerHTML.replace(/<button[^>]*data-dsh-mobile-media-action[\s\S]*?<\/button>/g, ''); })
       await button.waitFor()
       assert.equal(await button.count(), 1)
       assert.equal(await button.evaluate(element => element === window.galleryNode), true)
+      assert.deepEqual(await page.locator('[role="listbox"]').evaluate(list => [...list.children].map(child => child.textContent)), [add, gallery, camera, 'FFile', 'Goal', 'Plan', 'Feedback', 'Other', 'Compact', 'Model'])
       // Keep a valid stock frame/composer mounted: absence of .dshm-main must
       // suppress Gallery without merely losing all composer/menu detection.
       await page.evaluate(() => {
@@ -58,7 +59,7 @@ try {
       assert.equal(await page.locator('.dshm-main').count(), 0)
       assert.equal(await page.locator('[data-dsh-mobile-media-action="camera"]').count(), 1)
       assert.equal(await page.locator('[data-composer-card] [data-trigger-menu] [role="listbox"]').count(), 1)
-      assert.deepEqual(await page.locator('[role="listbox"]').evaluate(list => [...list.children].map(child => child.textContent)), [add, 'FFile', camera, 'Other'])
+      assert.deepEqual(await page.locator('[role="listbox"]').evaluate(list => [...list.children].map(child => child.textContent)), [add, 'FFile', 'Goal', 'Plan', 'Feedback', camera, 'Other', 'Compact', 'Model'])
       await page.evaluate(() => {
         const frame = document.querySelector('#stock-frame')
         const main = document.querySelector('main')

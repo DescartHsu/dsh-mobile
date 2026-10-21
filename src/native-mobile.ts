@@ -1471,13 +1471,16 @@ export function installNativeMobileSurface(backServices: NativeMobileBackService
       if (sibling !== cameraButton && sibling !== galleryButton) lastItem = sibling
       sibling = sibling.nextElementSibling
     }
-    if (cameraButton.parentElement !== sectionTitle.parentElement || cameraButton.previousElementSibling !== lastItem) {
-      lastItem.after(cameraButton)
-    }
-    // Only the dedicated Mobile page gains Gallery; stock/desktop menus stay unchanged.
+    // Only the dedicated Mobile page promotes attachment actions. Keep every
+    // official item in its original relative order (File remains first among them).
     if (boundComposer?.closest('.dshm-main') !== null && boundComposer !== null) {
-      if (galleryButton.parentElement !== cameraButton.parentElement || galleryButton.previousElementSibling !== cameraButton) cameraButton.after(galleryButton)
-    } else galleryButton.remove()
+      if (galleryButton.parentElement !== sectionTitle.parentElement || galleryButton.previousElementSibling !== sectionTitle) sectionTitle.after(galleryButton)
+      if (cameraButton.parentElement !== galleryButton.parentElement || cameraButton.previousElementSibling !== galleryButton) galleryButton.after(cameraButton)
+    } else {
+      galleryButton.remove()
+      // Preserve the existing camera placement on stock/desktop pages.
+      if (cameraButton.parentElement !== sectionTitle.parentElement || cameraButton.previousElementSibling !== lastItem) lastItem.after(cameraButton)
+    }
     return true
   }
   const setCameraActionDisabled = (disabled: boolean, title: string): void => {

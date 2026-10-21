@@ -51,6 +51,9 @@ jobs:
           echo "DSH_BOOT_SMOKE_BIN=$RUNNER_TEMP/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js" >> "$GITHUB_ENV"
           echo "DSH_BOOT_SMOKE_MOBILE_TARBALL=$RUNNER_TEMP/plugin-package/dsh-mobile-$mobile_version.tgz" >> "$GITHUB_ENV"
       - run: npx playwright install --with-deps chromium --only-shell
+      - name: Verify same-origin Blob media without widening external CSP sources
+        if: matrix.dsh == '0.2.1-rc.2'
+        run: npm run smoke:blob-media
       - name: Verify live installation through the DSH plugin manager
         run: npm run smoke:plugin-installation
       - name: Verify registry installation with isolated pnpm

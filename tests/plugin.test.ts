@@ -20,7 +20,8 @@ import { parseOriginSettings } from '../src/origin-proxy-config.js'
 import { parseFrpSettings } from '../src/frp-config.js'
 import { ensureFrpIngressCertificate } from '../src/frp-ingress.js'
 import { DSH_MOBILE_VERSION, MINIMUM_ANDROID_APP_VERSION } from '../src/version.js'
-import { DESKTOP_ADMIN_HEADER, DESKTOP_ADMIN_MARKER } from '../src/local-admin-host.js'
+import { DESKTOP_ADMIN_HEADER, DESKTOP_ADMIN_MARKER, WEB_ADMIN_HEADER, WEB_ADMIN_MARKER } from '../src/local-admin-host.js'
+import { AccessController } from '../src/access.js'
 import { buildExtensionWorkerEntry } from './helpers/extension-worker-build.js'
 import { parseUnavailableExtensionHosts } from '../src/extension-recovery-ui.js'
 import { CaddyComponentManager, CADDY_VERSION, type CaddyArtifact } from '../src/caddy-component.js'
@@ -40,7 +41,7 @@ afterEach(async () => {
 
 async function invoke(
   route: WebRoute,
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'OPTIONS',
   path: string,
   body = '',
   hostHostname = '127.0.0.1',
@@ -770,6 +771,37 @@ describe('stock DSH lifecycle', () => {
     const allowed = await invoke(mounted.route, 'POST', path, invalidBody, '127.0.0.1', { ...marker, cookie: 'dsh-session=valid' })
     expect(allowed.status).toBe(400)
     expect(JSON.parse(allowed.body)).toEqual({ error: 'bad_request' })
+  })
+
+  it('accepts marked Origin-less Web JSON pairing without using Desktop authentication', async () => {
+    const openPairing = vi.spyOn(AccessController.prototype, 'openPairing')
+    const requestRejection = vi.fn(() => 401 as const)
+    const mounted = await mount(true, 3080, {}, requestRejection)
+    const path = '/api/mobile-access/lan/pairing/open'
+    const marker = { [WEB_ADMIN_HEADER]: WEB_ADMIN_MARKER }
+    for (const headers of [
+      {},
+      { ...marker, 'content-type': 'text/plain' },
+      { ...marker, origin: 'http://evil.example' },
+      { ...marker, 'sec-fetch-site': 'same-site' },
+      { ...marker, [WEB_ADMIN_HEADER]: `${WEB_ADMIN_MARKER}, ${WEB_ADMIN_MARKER}` },
+    ]) {
+      const rejected = await invoke(mounted.route, 'POST', path, '{}', '192.168.50.23', headers)
+      expect(rejected.status).toBe(403)
+      expect(JSON.parse(rejected.body)).toEqual({ error: 'forbidden' })
+    }
+    const preflight = await invoke(mounted.route, 'OPTIONS', path, '', '192.168.50.23', {
+      'access-control-request-method': 'POST', 'access-control-request-headers': WEB_ADMIN_HEADER,
+    })
+    expect(preflight.status).toBe(403)
+    expect(openPairing).not.toHaveBeenCalled()
+    for (const source of [{}, { 'sec-fetch-site': 'same-origin' }]) {
+      const allowed = await invoke(mounted.route, 'POST', path, '{}', '192.168.50.23', { ...marker, ...source })
+      expect(allowed.status).toBe(201)
+      expect(JSON.parse(allowed.body)).toMatchObject({ token: expect.any(String) })
+    }
+    expect(openPairing).toHaveBeenCalledTimes(2)
+    expect(requestRejection).not.toHaveBeenCalled()
   })
 
   it('rejects DNS-rebinding and public Host values on the desktop admin route', async () => {

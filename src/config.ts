@@ -104,7 +104,7 @@ export interface PluginConfig {
   maxBodyBytes?: number
   /** Transport, upload, static-response and WebSocket-handshake idle timeout. */
   upstreamTimeoutMs?: number
-  /** Authenticated /api response idle timeout after upload; zero disables it. */
+  /** Authenticated /api response and established DSH plugin-event stream idle timeout; zero disables it. */
   upstreamApiTimeoutMs?: number
   rateLimitWindowMs?: number
   maxPairingAttempts?: number

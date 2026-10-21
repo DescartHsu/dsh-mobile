@@ -26,13 +26,13 @@
   <a href="#compatibility">Compatibility</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="#contributors">Contributors</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.14">Release notes</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.15">Release notes</a> ·
   <a href="README.md">简体中文</a>
 </p>
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.14**. Improve history-loading gestures and shared sidebar-footer entries, and support IPv6 loopback/ULA backends for an existing HTTPS reverse proxy. Android App **0.6.5** is unchanged and needs no matching update. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.14) · [Full changelog](CHANGELOG.md).
+> **Current stable release: 0.6.15**. Improve mobile-page plugin-update notifications, support same-origin Blob media and management actions under Firefox privacy settings, and add connection diagnostics. Android App **0.6.5** is available separately. [Plugin release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.15) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 

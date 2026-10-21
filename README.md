@@ -32,14 +32,14 @@
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.15**。改善移动页面的插件更新通知，兼容同源 Blob 音视频与 Firefox 隐私设置下的管理操作，并补充连接诊断。当前 Android App **0.6.5** 独立提供下载。[插件更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.15) · [完整更新记录](CHANGELOG.md)。
+> **当前正式版本：0.6.15**。改善移动页面的插件更新通知，兼容同源 Blob 音视频与 Firefox 隐私设置下的管理操作，并补充连接诊断。Android App **0.6.6** 独立发布，改善自动重连与取消。[插件更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.15) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.5/dsh-mobile-android-v0.6.5.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.5/dsh-mobile-android-v0.6.5.apk"><strong>下载 Android App 0.6.5</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.6/dsh-mobile-android-v0.6.6.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.6/dsh-mobile-android-v0.6.6.apk"><strong>下载 Android App 0.6.6</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.6">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、cloudflared、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。电脑端分别启停局域网与远程访问、分别管理配对授权；Android App 统一显示已配对电脑。插件不修改 DeepSeek Harness 源码。

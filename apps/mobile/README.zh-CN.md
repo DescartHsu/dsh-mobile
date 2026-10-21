@@ -4,14 +4,14 @@
 
 DeepSeek Harness 是这个社区维护的 Android WebView App 的显示名称。它直接打开插件提供的已认证 HTTPS 页面，不打包另一套 DSH 前端；App 与手机浏览器获得相同的 DSH 功能，以及电脑端配置的移动页面定制。
 
-当前正式 App 为 **0.6.5**；构建号为 81。npm 插件与 Android App 独立编号、独立更新；插件升级不代表需要重新安装 APK。此次改进见 [0.6.5 更新](#065-更新)。
+当前正式 App 为 **0.6.6**；构建号为 82。npm 插件与 Android App 独立编号、独立更新；插件升级不代表需要重新安装 APK。此次改进见 [0.6.6 更新](#066-更新)。
 
 支持 Android 10 及以上系统。iOS 本地实验不属于已发布或受支持的客户端。
 
 ## 安装与配对
 
 1. 按[项目快速开始](../../README.md#快速开始)安装并启用插件。局域网配置可通过命令行或电脑端的 **移动访问** 面板完成。
-2. 从 [GitHub Releases](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5) 安装已签名 APK。正式版沿用相同发布签名，可原位升级并保留配对；不同签名的 Debug 包不能直接覆盖正式版，不要为绕过签名不匹配而卸载或清除数据。
+2. 从 [GitHub Releases](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.6) 安装已签名 APK。正式版沿用相同发布签名，可原位升级并保留配对；不同签名的 Debug 包不能直接覆盖正式版，不要为绕过签名不匹配而卸载或清除数据。
 3. 在电脑 **移动访问 → 局域网访问** 中生成密钥／配对链接，或配置远程通道并生成远程配对二维码。在 App 选择对应方式，扫码或粘贴链接。
 4. 为电脑命名。每条局域网或远程配对单独保存；手机无需安装 cpolar、Cloudflare 或 Tailscale App。
 
@@ -34,6 +34,12 @@ DeepSeek Harness 是这个社区维护的 Android WebView App 的显示名称。
 页面缩放影响整个网页，与按地址保存的文字偏好不同。App 专属操作只在原生 Bridge 支持时显示。原生页面跟随 Android 系统语言，支持简体中文、英文和意大利文；网页跟随 DSH 选择的语言，当前 DSH 尚未提供意大利语。
 
 删除本机记录会移除保存的设备令牌和固定 CA，不等于撤销电脑授权或清除所有 WebView 短期 Cookie。需要立即终止访问时，请在电脑的 **移动访问** 中撤销设备。Android“清除应用数据”会删除全部配对和网页数据，不是普通重连的处理步骤。
+
+## 0.6.6 更新
+
+Android 0.6.6／构建 82 避免续期或安装 Cookie 尚未完成时重复触发自动恢复。同一凭据的后台恢复会等待上一项任务真正退出，不再重叠执行。
+
+取消和连接总期限会撤销排队任务及迟到结果，避免旧恢复覆盖新的操作。已有配对、包名和配对协议保持不变，升级无需清除数据或重新配对；网络是否可达、未保存网页能否恢复，仍取决于连接与 WebView 状态。
 
 ## 0.6.5 更新
 
@@ -120,12 +126,12 @@ Set-Location apps/mobile/android
 
 Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。正式发布沿用只保存在仓库 Secrets 中的签名密钥，本地未签名 Release 构建或 Debug 安装不能替代正式签名核验。
 
-已核验的正式版本为 [Android 0.6.5](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5)，SHA-256：`41bd476c5ccf90020ecf624844a29886d55060a79533b599e9aa5bf0a1d71844`。旧版本历史集中在 [CHANGELOG](../../CHANGELOG.md)。
+已核验的正式版本为 [Android 0.6.6](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.6)，构建 82，SHA-256：`a63fb40da261d290d4435d713258b508be3e4f0592d223a325dca1a5b32f3c95`。下载的 APK 沿用正式发布签名及包名 `io.github.sayach.dshmobile`。旧版本历史集中在 [CHANGELOG](../../CHANGELOG.md)。
 
 ## 验收与已知限制
 
 - 连接控制的开发包使用 Debug 元数据 0.6.4／构建 80，在 PJW110、Android 16、Google WebView 153.0.8010.36 上，通过 USB 和固定 CA 的 HTTPS 连接隔离的 DSH 0.2.0-rc.2／插件 0.6.10。检查了配对／启动／已保存连接取消、系统返回、手动失败收尾，以及停止原生恢复后从失效页面返回；暂停模块响应时也验证了提前露出网页、非按钮区域触摸透传、取消和放行后完成。原配对保留，临时 QA 记录已清理。
 - App 0.6.4 的 Debug 构建在同一 WebView 中覆盖文档替换／刷新、拒绝旧选择、接收受控 PNG 字节并形成已解码草稿预览；还检查了暂停导航及 HTTP 204 后选择器的可用性。更早的检查覆盖模型菜单返回、旋转保留草稿／引用／图片、已知撤销、重新配对、图标选择与列表顺序，均未发送模型请求。
-- 这些观察不代表最终 0.6.5／构建 81 正式签名 APK 已完成真机验收，也不覆盖所有公网提供方、远程 60 秒期限、保留活动草稿的完整原生恢复、HyperOS／旧 WebView 或所有屏幕／手势组合。自签 FRP 尚无真实 VPS 加手机的端到端验收记录；权限授予不代表语音转写成功，进程终止后的状态恢复也不作保证。
+- 这些观察不代表最终正式签名 APK 已完成真机验收，也不覆盖所有公网提供方、远程 60 秒期限、保留活动草稿的完整原生恢复、HyperOS／旧 WebView 或所有屏幕／手势组合。自签 FRP 尚无真实 VPS 加手机的端到端验收记录；权限授予不代表语音转写成功，进程终止后的状态恢复也不作保证。
 
 Apache-2.0 licensed. See [LICENSE](../../LICENSE).

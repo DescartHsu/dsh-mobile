@@ -4462,6 +4462,13 @@ const RENEW_AFTER_MS = 5000
  * page that cannot connect has to ask for it. A brief blip is not worth asking
  * about; only a connection that has stayed down for a moment is.
  */
+/** The mobile CSRF cookie the page sends with each request, if readable. */
+export function csrfToken(): string | undefined {
+  if (typeof document === 'undefined') return undefined
+  const match = /(?:^|;\s*)(?:__Host-)?dsh_ma_csrf=([^;]*)/u.exec(document.cookie)
+  return match?.[1]
+}
+
 export function shouldRenewSession(connection: MobileConnectionState, downForMs: number): boolean {
   return connection !== 'connected' && downForMs >= RENEW_AFTER_MS
 }
@@ -4483,6 +4490,9 @@ export function apply(ctx: ClientContext): void {
    */
   ctx.effect(() => {
     const connection = ctx.get('connection')
+    // The service is absent on the desktop control surface and in the layout
+    // smoke test; touching it unguarded throws inside apply().
+    if (connection === undefined) return
     const state = connection.state
     if (state === undefined || typeof connection.reconnect !== 'function') return
     let current = state.getSnapshot()
@@ -4510,6 +4520,9 @@ export function apply(ctx: ClientContext): void {
    */
   ctx.effect(() => {
     const connection = ctx.get('connection')
+    // The service is absent on the desktop control surface and in the layout
+    // smoke test; touching it unguarded throws inside apply().
+    if (connection === undefined) return
     const state = connection.state
     if (state === undefined || typeof connection.reconnect !== 'function') return
     let downSince: number | undefined
@@ -4527,8 +4540,18 @@ export function apply(ctx: ClientContext): void {
       if (typeof native?.invoke !== 'function') return
       // One attempt per window: a failed renew waits again instead of spinning.
       downSince = undefined
+      const csrfBefore = csrfToken()
       void native.invoke('auth.renew', {}).then(
-        () => { connection.reconnect?.() },
+        async () => {
+          // A renew replaces the session and CSRF cookies; reconnecting before the
+          // new CSRF cookie is visible leaves the page sending the old token, so a
+          // POST fails with 403 depending on timing. Wait for the rotation.
+          for (let attempt = 0; attempt < 25; attempt += 1) {
+            if (csrfToken() !== csrfBefore) break
+            await new Promise(resolve => setTimeout(resolve, 100))
+          }
+          connection.reconnect?.()
+        },
         () => undefined,
       )
     }, 2000)

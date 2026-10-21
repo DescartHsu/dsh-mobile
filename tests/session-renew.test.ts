@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldRenewSession } from '../src/client.js'
+import { csrfToken, shouldRenewSession } from '../src/client.js'
 
 /**
  * A restarted host invalidates the WebView's session cookie, and the browser has
@@ -21,5 +21,22 @@ describe('session renew', () => {
 
   it('never asks while the connection is healthy', () => {
     expect(shouldRenewSession('connected', 60_000)).toBe(false)
+  })
+})
+
+describe('csrf token', () => {
+  it('reads the mobile csrf cookie', () => {
+    const stub = { cookie: 'dsh_ma_session=abc; dsh_ma_csrf=token-123' }
+    const original = (globalThis as { document?: unknown }).document
+    ;(globalThis as { document?: unknown }).document = stub
+    try {
+      expect(csrfToken()).toBe('token-123')
+    } finally {
+      ;(globalThis as { document?: unknown }).document = original
+    }
+  })
+
+  it('returns undefined without a document or cookie', () => {
+    expect(csrfToken()).toBeUndefined()
   })
 })

@@ -976,24 +976,32 @@ describe('dedicated mobile layout boot', () => {
       expect(back(false).defaultPrevented).toBe(false)
       expect(controller?.getSnapshot()).toMatchObject({ detailsOpen: true, sidebarOpen: true })
 
+      // 1. an open details layer closes first
       expect(back().defaultPrevented).toBe(true)
       expect(toggleExpanded).toHaveBeenCalledOnce()
       expect(controller?.getSnapshot()).toMatchObject({
         detailsOpen: false, sidebarOpen: true, panelInfo: { activePanelId: 'alpha' },
       })
-      expect(back().defaultPrevented).toBe(true)
-      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
-      expect(back().defaultPrevented).toBe(true)
-      expect(controller?.getSnapshot().panelInfo.activePanelId).toBeNull()
-      expect(back().defaultPrevented).toBe(false)
 
-      controller?.toggleSidebar()
+      // 2. then the selected panel clears (which also dismisses the drawer it
+      //    was rendered over)
+      expect(back().defaultPrevented).toBe(true)
+      expect(controller?.getSnapshot()).toMatchObject({ panelInfo: { activePanelId: null } })
+
+      // 3. nothing to close on a narrow viewport: Back opens the session list
+      expect(controller?.getSnapshot().sidebarOpen).toBe(false)
+      expect(back().defaultPrevented).toBe(true)
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
+
+      // 4. drawer open and nothing else to close: the page leaves this press to
+      //    the app, which shows its exit hint and closes on the next press
+      expect(back().defaultPrevented).toBe(false)
+      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: true })
+
+      // 5. a wide viewport has no overlay drawer, so Back is never claimed
       viewport.wide = true
       expect(back().defaultPrevented).toBe(false)
-      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
       viewport.wide = false
-      expect(back().defaultPrevented).toBe(true)
-      expect(controller?.getSnapshot().sidebarOpen).toBe(false)
 
       controller?.selectPanel('alpha')
       dispose()

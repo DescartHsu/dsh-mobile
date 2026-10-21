@@ -26,13 +26,13 @@
   <a href="#兼容性">兼容性</a> ·
   <a href="docs/README.md">文档</a> ·
   <a href="#贡献者">贡献者</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.13">更新记录</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.14">更新记录</a> ·
   <a href="README.en.md">English</a>
 </p>
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.13**。区分网关 HTTP 接收超时与请求头过大错误，增加隐私受限的拒绝诊断，并补充图文发送失败回归。Android App **0.6.5** 保持不变，无需同步升级。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.13) · [完整更新记录](CHANGELOG.md)。
+> **当前正式版本：0.6.14**。改善历史消息加载手势与侧栏入口共存，支持自有反向代理的 IPv6 回环／ULA 后端。Android App **0.6.5** 保持不变，无需同步升级。[更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.14) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
@@ -205,6 +205,10 @@ Funnel 的运行组件把公开监听生命周期绑定到父进程和受限控�
 
 </details>
 
+### 实验中的 iroh 连接
+
+[dsh-mobile-iroh](https://github.com/saya-ch/dsh-mobile-iroh) 正在独立开发，探索通过 iroh 连接电脑，并沿用 DSH Mobile 的配对、设备列表和 WebView 体验。目前本地开发候选已接通 Rust 传输与 Android，并通过本地 QUIC／HTTPS／WSS 验证和 Android 构建；尚未并入本插件或正式发布，电脑端操作界面、自动证书配置与真机跨网验收仍待完成。它还不是当前正式 App 可选的连接方式。
+
 ## 扩展与自定义
 
 在 DSH 对话里输入 `/mobile <需求>`，当前会话的 agent 会处理定制请求；文件修改完成后，手机端通常会在几秒内刷新。例如：
@@ -342,7 +346,7 @@ Android App 只是 Kotlin WebView 薄壳，不内置另一份网页；手机浏�
 
 **旧内核限制**：API 兼容实现不能修复内核无法解析的 JavaScript 语法。DSH **0.2.1-rc.2** 的正式前端包含 class static blocks，Chromium **92** 无法解析；该语法从 Chrome 94 默认可用，但这不代表 94 已通过整个 DSH 的兼容验收。[V8 说明](https://v8.dev/blog/v8-release-94)。App 的“内核低于 100”提醒只是建议，点击继续不代表当前 DSH 可以运行。若系统 WebView 无法更新，可使用已确认正常的手机浏览器访问电脑端提供的移动地址，无需清除原有 App 配对。
 
-插件 **0.6.13** 在保留 0.6.12 兼容层和启动反馈的基础上，区分网关接收超时与请求头过大，并增加图文发送失败的打包回归。它不转译 DSH、不修改 DSH 源码，也不自动重发消息；华为 Chromium 92 的实际 App 尚未完成验收。反馈问题时请提供 DSH／插件／App 与 WebView 版本、进入方式和脱敏后的首个控制台错误，不要发送令牌或完整配对地址。
+当前插件保留 0.6.12 的兼容层和启动反馈，以及 0.6.13 的网关接收超时／请求头过大分类与图文发送失败回归。它不转译 DSH、不修改 DSH 源码，也不自动重发消息；华为 Chromium 92 的实际 App 尚未完成验收。反馈问题时请提供 DSH／插件／App 与 WebView 版本、进入方式和脱敏后的首个控制台错误，不要发送令牌或完整配对地址。
 
 > **社区客户端（非官方）**：[微信小程序客户端](https://github.com/StrawberryAO/dsh-mobile-minapp)
 > 原生微信小程序实现，复用「移动访问」的配对与 Remote 流协议（需 dsh-mobile ≥ 0.3.8）。

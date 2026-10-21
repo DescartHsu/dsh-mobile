@@ -26,13 +26,13 @@
   <a href="#compatibility">Compatibility</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="#contributors">Contributors</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.13">Release notes</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.14">Release notes</a> ·
   <a href="README.md">简体中文</a>
 </p>
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.13**. Distinguish Gateway receive timeouts and oversized headers, add privacy-bounded rejection diagnostics, and cover packed text/image prompt failures. Android App **0.6.5** is unchanged and needs no matching update. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.13) · [Full changelog](CHANGELOG.md).
+> **Current stable release: 0.6.14**. Improve history-loading gestures and shared sidebar-footer entries, and support IPv6 loopback/ULA backends for an existing HTTPS reverse proxy. Android App **0.6.5** is unchanged and needs no matching update. [Release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.14) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
@@ -205,6 +205,10 @@ See [Compatibility](#compatibility) for the supported components and platforms. 
 
 </details>
 
+### Experimental iroh connection
+
+[dsh-mobile-iroh](https://github.com/saya-ch/dsh-mobile-iroh) is being developed independently to explore iroh connections while retaining DSH Mobile's pairing, device list and WebView experience. The local development candidate connects the Rust transport and Android app, with local QUIC/HTTPS/WSS checks and Android builds passing. It has not been integrated into this plugin or formally released; the desktop management UI, automatic certificate setup and physical cross-network acceptance remain unfinished. It is not yet a connection option in the current stable app.
+
 ## Extend and customize
 
 Type `/mobile <what you want>` in a DSH conversation to hand the request to the current agent. Once the files have been changed, the phone page usually refreshes within a few seconds. For example:
@@ -342,7 +346,7 @@ The dedicated mobile page synchronously loads the authenticated, same-origin `/m
 
 **Old-engine limits**: API shims cannot repair JavaScript syntax an engine cannot parse. The published **DSH 0.2.1-rc.2** frontend contains class static blocks, which Chromium **92** cannot parse. This syntax became enabled by default in Chrome 94, but that does not establish full DSH compatibility on 94. [V8 announcement](https://v8.dev/blog/v8-release-94). The App's below-100 advisory is not a compatibility guarantee; choosing Continue does not make the current DSH runnable. If system WebView cannot be updated, use a phone browser already confirmed to work with the computer's mobile address, without clearing existing App pairings.
 
-**Plugin 0.6.13** retains the 0.6.12 compatibility layer and startup feedback, distinguishes Gateway receive timeouts from oversized headers, and adds packed text/image prompt-failure checks. It does not transpile or modify DSH, and it does not automatically replay messages; acceptance on the physical Huawei Chromium 92 App remains unverified. Reports should include DSH/plugin/App and WebView versions, entry mode and the first redacted console error, never tokens or complete pairing URLs.
+The current plugin retains the 0.6.12 compatibility layer and startup feedback, alongside 0.6.13's Gateway receive-timeout/header-size classification and packed text/image prompt-failure checks. It does not transpile or modify DSH, and it does not automatically replay messages; acceptance on the physical Huawei Chromium 92 App remains unverified. Reports should include DSH/plugin/App and WebView versions, entry mode and the first redacted console error, never tokens or complete pairing URLs.
 
 > **Community client (unofficial)**: [WeChat Mini-Program client](https://github.com/StrawberryAO/dsh-mobile-minapp)
 > A native WeChat Mini-Program that reuses the Mobile Access pairing and Remote stream protocol (requires dsh-mobile ≥ 0.3.8).

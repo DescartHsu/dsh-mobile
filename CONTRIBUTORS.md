@@ -4,11 +4,11 @@ GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/co
 
 GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-21. The repository maintainer and automated dependency updates remain visible in GitHub's history.
 
-## 待发布代码贡献 / Unreleased code contributions
+## 0.6.14 代码贡献与反馈 / Code contributions and reports for 0.6.14
 
-[@chintoleung](https://github.com/chintoleung) 的 [#239](https://github.com/saya-ch/dsh-mobile/pull/239) 将触摸历史自动加载延后至手势落定，并增加真实分页回归。本地整合保留原作者的三个提交，另加维护者对滚动事件归属和新手势意图的修正；尚未发布。
+[@chintoleung](https://github.com/chintoleung) 的 [#239](https://github.com/saya-ch/dsh-mobile/pull/239) 将触摸历史自动加载延后至手势落定，并增加真实分页回归。0.6.14 保留原作者的三个提交，并追加维护者对滚动事件归属、新手势意图和混合输入的修正。感谢 [@gugubb5](https://github.com/gugubb5) 在 [#237](https://github.com/saya-ch/dsh-mobile/issues/237) 反馈侧栏入口共存问题，以及 [@faruzanCN](https://github.com/faruzanCN) 在 [#238](https://github.com/saya-ch/dsh-mobile/issues/238) 提出 IPv6 反代需求。
 
-[@chintoleung](https://github.com/chintoleung)'s [#239](https://github.com/saya-ch/dsh-mobile/pull/239) defers touch-driven history loading until the gesture settles and adds real pagination regressions. The local integration retains the author's three commits alongside maintainer fixes for scroll-event ownership and new-gesture intent; it is not yet released.
+[@chintoleung](https://github.com/chintoleung)'s [#239](https://github.com/saya-ch/dsh-mobile/pull/239) defers touch-driven history loading until the gesture settles and adds real pagination regressions. Version 0.6.14 retains the author's three commits alongside maintainer fixes for scroll-event ownership, new-gesture intent and mixed input. Thanks [@gugubb5](https://github.com/gugubb5) for reporting sidebar-entry coexistence in [#237](https://github.com/saya-ch/dsh-mobile/issues/237), and [@faruzanCN](https://github.com/faruzanCN) for the IPv6 reverse-proxy request in [#238](https://github.com/saya-ch/dsh-mobile/issues/238).
 
 ## 0.6.12 问题定位 / Issue findings for 0.6.12
 

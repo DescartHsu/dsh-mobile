@@ -927,14 +927,19 @@ export function apply(ctx: MobileClientContext): void {
       } else if (state.panelInfo.activePanelId !== null) {
         event.preventDefault()
         controller.selectPanel(null)
-      } else if (!viewportIsWide() && !state.sidebarOpen) {
-        // Nothing left to close: the first back opens the session list instead of
-        // leaving the app, so a stray press cannot end the session.
-        event.preventDefault()
-        controller.toggleSidebar()
       }
+      // Nothing else to close: leave the press to the app. The platform contract
+      // is that Back is never consumed at the root conversation; the app decides
+      // whether to reveal the session list or confirm an exit.
     }
     window.addEventListener('dsh-mobile:native-back', onNativeBack)
+    // The app asks for the session list on an unconsumed Back. Separate from the
+    // Back event so the root conversation itself stays unclaimed.
+    const onOpenSidebar = (): void => {
+      const state = controller.getSnapshot()
+      if (!viewportIsWide() && !state.sidebarOpen) controller.toggleSidebar()
+    }
+    window.addEventListener('dsh-mobile:open-sidebar', onOpenSidebar)
 
     const retainMainPanels = (): void => {
       controller.retainMainPanels(ctx.slots.entries('main').flatMap(entry =>
@@ -944,6 +949,7 @@ export function apply(ctx: MobileClientContext): void {
     retainMainPanels()
     return () => {
       window.removeEventListener('dsh-mobile:native-back', onNativeBack)
+      window.removeEventListener('dsh-mobile:open-sidebar', onOpenSidebar)
       controller.dispose()
       disposePanels()
       disposeRoot()

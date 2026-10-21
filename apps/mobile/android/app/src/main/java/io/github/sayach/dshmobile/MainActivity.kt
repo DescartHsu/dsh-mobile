@@ -211,7 +211,11 @@ class MainActivity : Activity() {
     private var deviceListVisible = false
     private var rendererCrashTimes: List<Long> = emptyList()
     private var backRequestGeneration = 0
+    /** How long a confirmed exit press stays armed. */
+    private val exitConfirmWindowMs = 2000L
     private var lastExitBackAt = 0L
+    /** 0 = root, 1 = session list shown, 2 = exit confirmed. */
+    private var backExitStage = 0
     private val exitBackWindowMs = 2000L
     private var backRequestPending = false
 
@@ -407,15 +411,27 @@ class MainActivity : Activity() {
         } else if (setupBackAction != null) {
             setupBackAction?.invoke()
         } else {
-            // A single stray press must not end the session; require two
-            // presses within 2 s.
-            val now = android.os.SystemClock.elapsedRealtime()
-            if (now - lastExitBackAt <= 2000L) {
-                lastExitBackAt = 0L
-                finish()
-            } else {
-                lastExitBackAt = now
-                toast(R.string.back_press_again_to_exit)
+            // The page never claims Back at the root conversation, so the app
+            // decides: reveal the session list, then confirm, then exit.
+            when (backExitStage) {
+                0 -> {
+                    runCatching {
+                        browser?.evaluateJavascript(
+                            "window.dispatchEvent(new Event('dsh-mobile:open-sidebar'))",
+                            null,
+                        )
+                    }
+                    backExitStage = 1
+                }
+                1 -> {
+                    toast(R.string.back_press_again_to_exit)
+                    backExitStage = 2
+                    backUiHandler.postDelayed({ backExitStage = 0 }, exitConfirmWindowMs)
+                }
+                else -> {
+                    backExitStage = 0
+                    finish()
+                }
             }
         }
     }

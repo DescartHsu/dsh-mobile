@@ -988,20 +988,23 @@ describe('dedicated mobile layout boot', () => {
       expect(back().defaultPrevented).toBe(true)
       expect(controller?.getSnapshot()).toMatchObject({ panelInfo: { activePanelId: null } })
 
-      // 3. nothing to close on a narrow viewport: Back opens the session list
+      // 3. the root conversation never claims Back: that is the platform contract,
+      //    and the app decides whether to reveal the list or confirm an exit
       expect(controller?.getSnapshot().sidebarOpen).toBe(false)
-      expect(back().defaultPrevented).toBe(true)
-      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
-
-      // 4. drawer open and nothing else to close: the page leaves this press to
-      //    the app, which shows its exit hint and closes on the next press
       expect(back().defaultPrevented).toBe(false)
-      expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: true })
 
-      // 5. a wide viewport has no overlay drawer, so Back is never claimed
+      // 4. a wide viewport has no overlay drawer, so the request is ignored
       viewport.wide = true
+      window.dispatchEvent(new Event('dsh-mobile:open-sidebar'))
+      expect(controller?.getSnapshot().sidebarOpen).toBe(false)
       expect(back().defaultPrevented).toBe(false)
       viewport.wide = false
+
+      // 5. narrow: the app's separate request reveals the session list while Back
+      //    itself stays unclaimed
+      window.dispatchEvent(new Event('dsh-mobile:open-sidebar'))
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
+      expect(back().defaultPrevented).toBe(false)
 
       controller?.selectPanel('alpha')
       dispose()

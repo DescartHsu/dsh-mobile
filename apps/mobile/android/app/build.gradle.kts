@@ -22,8 +22,8 @@ android {
         applicationId = "io.github.sayach.dshmobile"
         minSdk = 29
         targetSdk = 36
-        versionCode = 82
-        versionName = "0.6.6"
+        versionCode = 83
+        versionName = "0.6.7"
     }
 
     signingConfigs {

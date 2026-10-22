@@ -489,10 +489,10 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   const dshVersion = installedDshVersion()
   const loaded = await loadSetup(config)
   const mobileAccess: MobileAccessService = createMobileAccessService(ctx)
-  const template = loopbackTemplate(loaded, ctx.webServer.port)
-  const upstreamLoginUrl = upstreamAuthenticatedUrl(ctx, template.upstreamOrigin)
-  const instanceId = await stableInstanceId(loaded, template)
-  const stateDirectory = dirname(template.stateFile)
+  const baseTemplate = loopbackTemplate(loaded, ctx.webServer.port)
+  const upstreamLoginUrl = upstreamAuthenticatedUrl(ctx, baseTemplate.upstreamOrigin)
+  const instanceId = await stableInstanceId(loaded, baseTemplate)
+  const stateDirectory = dirname(baseTemplate.stateFile)
   const logFile = await installMobileFileLogger(ctx, stateDirectory)
   const logger = ctx.logger('dsh-mobile')
   logger.info('logging initialized file=%s', logFile)
@@ -525,6 +525,9 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
   // FRP registration and unpinned public pairing share the persisted installation
   // identity; CA-backed entries keep their certificate fingerprint.
   const frpIdentity = await loadOrCreateInstallationId(join(stateDirectory, 'installation-id'))
+  // All entries share this authenticated grouping hint independently of their
+  // existing CA/operator/credential instance identities.
+  const template = Object.freeze({ ...baseTemplate, installationId: frpIdentity })
   // Public entries serve no pairing CA, so their new pairings can use this
   // installation's random identity while legacy credentials retain their ID.
   const remoteInstanceId = loaded.kind === 'managed' ? frpIdentity : loaded.config.instanceId ?? frpIdentity

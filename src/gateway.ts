@@ -95,6 +95,7 @@ import {
   renderPairScript,
   resolveAuthPageLocale,
 } from './auth-pages.js'
+import { resolveBrowserUiLocale } from './browser-ui-locale.js'
 
 type GatewayServer = HttpServer | HttpsServer
 
@@ -1721,6 +1722,12 @@ export class MobileAccessGateway {
       : this.config.instanceId
   }
 
+  /** Older Apps require exact wire keys; expose this hint only to explicit opt-in clients after authentication. */
+  private nativeResponseInstallationIdentity(request: IncomingMessage): { readonly installationId?: string } {
+    return this.config.installationId === undefined || request.headers['x-dsh-mobile-capabilities'] !== 'installation-id'
+      ? {} : { installationId: this.config.installationId }
+  }
+
   private async handleNativePair(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const body = await readJsonObject(request, MAX_CONTROL_BODY_BYTES)
     if (typeof body.token !== 'string' || (body.label !== undefined && typeof body.label !== 'string')) {
@@ -1733,6 +1740,7 @@ export class MobileAccessGateway {
     )
     sendJson(response, 201, {
       instanceId: this.nativeResponseInstanceId(result),
+      ...this.nativeResponseInstallationIdentity(request),
       deviceId: result.deviceId,
       deviceToken: result.deviceToken,
       deviceExpiresAt: result.deviceExpiresAt,
@@ -1754,6 +1762,7 @@ export class MobileAccessGateway {
         const result = await this.access.renew(selected.token)
         sendJson(response, 200, {
           instanceId: this.nativeResponseInstanceId(result),
+          ...this.nativeResponseInstallationIdentity(request),
           deviceId: result.deviceId,
           sessionToken: result.sessionToken,
           csrfToken: result.csrfToken,
@@ -1775,6 +1784,7 @@ export class MobileAccessGateway {
         const result = await this.access.probe(selected.token)
         sendJson(response, 200, {
           instanceId: this.nativeResponseInstanceId(result),
+          ...this.nativeResponseInstallationIdentity(request),
           deviceId: result.deviceId,
           deviceExpiresAt: result.deviceExpiresAt,
         }, this.tlsEnabled)
@@ -1853,9 +1863,9 @@ export class MobileAccessGateway {
       && (target.decodedPathname === `${AUTH_PREFIX}/pair` || target.decodedPathname === `${AUTH_PREFIX}/pair.js`)) {
       if (!this.access.pairingStatus().open) throw new HttpError(404, 'not_found')
       const languageHeader = request.headers['accept-language']
-      const locale = resolveAuthPageLocale(typeof languageHeader === 'string' ? languageHeader : undefined)
+      const locale = resolveBrowserUiLocale(request.headers.cookie, typeof languageHeader === 'string' ? languageHeader : undefined)
       setSecurityHeaders(response, this.tlsEnabled)
-      response.setHeader('Vary', 'Accept-Language')
+      response.setHeader('Vary', 'Accept-Language, Cookie')
       const body = target.decodedPathname.endsWith('.js') ? renderPairScript(locale) : renderPairPage(locale)
       response.writeHead(200, {
         'Content-Type': target.decodedPathname.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8',
@@ -1868,9 +1878,9 @@ export class MobileAccessGateway {
       && (target.decodedPathname === `${AUTH_PREFIX}/login` || target.decodedPathname === `${AUTH_PREFIX}/login.js`)) {
       if (target.decodedPathname.endsWith('.js') && target.search !== '') throw new HttpError(400, 'bad_request')
       const languageHeader = request.headers['accept-language']
-      const locale = resolveAuthPageLocale(typeof languageHeader === 'string' ? languageHeader : undefined)
+      const locale = resolveBrowserUiLocale(request.headers.cookie, typeof languageHeader === 'string' ? languageHeader : undefined)
       setSecurityHeaders(response, this.tlsEnabled)
-      response.setHeader('Vary', 'Accept-Language')
+      response.setHeader('Vary', 'Accept-Language, Cookie')
       const body = target.decodedPathname.endsWith('.js') ? renderLoginScript(locale) : renderLoginPage(locale)
       response.writeHead(200, {
         'Content-Type': target.decodedPathname.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8',

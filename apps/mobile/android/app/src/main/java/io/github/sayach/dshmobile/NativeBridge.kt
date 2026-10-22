@@ -48,6 +48,7 @@ internal class NativeBridge(
     private val webView: WebView,
     private val origin: GatewayOrigin,
     restoredState: Bundle? = null,
+    private val activeOwner: () -> Boolean = { true },
 ) {
     private data class Pending(
         val action: String,
@@ -95,6 +96,10 @@ internal class NativeBridge(
         fun takeBytes(): ByteArray = if (count == buf.size) buf else buf.copyOf(count)
     }
 
+    fun hasPendingTransferBlockers(): Boolean = synchronized(requestLock) {
+        pending.keys().isNotEmpty() || activityRequestId != null || processingTarget != null || restoredOperation != null
+    }
+
     private val pending = PendingRequestRegistry<Pending>(MAX_PENDING)
     private val requestLock = Any()
     private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -110,6 +115,7 @@ internal class NativeBridge(
     private val cameraCleanupOwnership = CameraCleanupOwnership<File>()
     private val pickerGrantOwnership = TemporaryGrantOwnership<Uri>()
     @Volatile private var installed = false
+    private val available: Boolean get() = installed && activeOwner()
     @Volatile private var documentGeneration = 0
     @Volatile private var preservingForConfiguration = false
     private var keyboardState = NativeKeyboardState(false, false)
@@ -179,7 +185,7 @@ internal class NativeBridge(
                     isMainFrame: Boolean,
                     replyProxy: JavaScriptReplyProxy,
                 ) {
-                    if (!installed || view !== webView) return
+                    if (!available || view !== webView) return
                     if (!NativeBridgePolicy.isTrustedMessage(origin, sourceOrigin.toString(), isMainFrame)) return
                     handleMessage(message.data, replyProxy)
                 }
@@ -200,7 +206,7 @@ internal class NativeBridge(
     /** (Re)inject the adapter only into the configured exact-origin top-level page. */
     fun injectPage() {
         webView.post {
-            if (!installed || !GatewayUrlPolicy.isSameOrigin(origin, webView.url ?: origin.serialized)) return@post
+            if (!available || !GatewayUrlPolicy.isSameOrigin(origin, webView.url ?: origin.serialized)) return@post
             keyboardSubscriber = null
             runCatching { webView.evaluateJavascript(pageAdapterScript(), null) }
         }
@@ -222,7 +228,7 @@ internal class NativeBridge(
             put("noHardwareKeyboard", state.noHardwareKeyboard)
         }.toString()
         webView.post {
-            if (installed && !preservingForConfiguration && keyboardSubscriber === subscriber) {
+            if (available && !preservingForConfiguration && keyboardSubscriber === subscriber) {
                 runCatching { subscriber.postMessage(message) }
             }
         }
@@ -450,7 +456,7 @@ internal class NativeBridge(
                     val renew = onRenewSession
                     val expectedDocument = pending[requestId]?.documentGeneration
                     val isCurrent = {
-                        installed && !preservingForConfiguration && expectedDocument == documentGeneration
+                        available && !preservingForConfiguration && expectedDocument == documentGeneration
                             && pending[requestId]?.action == "auth.renew"
                     }
                     if (renew == null || !isCurrent()) {
@@ -485,7 +491,7 @@ internal class NativeBridge(
                 "notification.notify" -> startTaskNotification(requestId, input)
                 "notification.settings" -> activity.runOnUiThread {
                     val callback = onOpenTaskNotificationSettings
-                    if (!installed || preservingForConfiguration || callback == null) {
+                    if (!available || preservingForConfiguration || callback == null) {
                         finishPending(requestId, errorJson("unavailable", "notification settings are unavailable", requestId))
                     } else {
                         try {
@@ -499,7 +505,7 @@ internal class NativeBridge(
                 "mobile.display-scale.get", "mobile.display-scale.set" -> activity.runOnUiThread {
                     val getScale = onGetDisplayScale
                     val setScale = onSetDisplayScale
-                    if (!installed || preservingForConfiguration || getScale == null || setScale == null) {
+                    if (!available || preservingForConfiguration || getScale == null || setScale == null) {
                         finishPending(requestId, errorJson("unavailable", "display scale is unavailable", requestId))
                     } else {
                         val requested = (input.opt("percent") as? Number)?.toDouble() ?: Double.NaN
@@ -520,7 +526,7 @@ internal class NativeBridge(
                 }
                 "mobile.switch-computer" -> activity.runOnUiThread {
                     val callback = onSwitchComputer
-                    if (!installed || preservingForConfiguration || callback == null) {
+                    if (!available || preservingForConfiguration || callback == null) {
                         finishPending(requestId, errorJson("unavailable", "device switching is unavailable", requestId))
                     } else {
                         finishPending(requestId, successJson(requestId, JSONObject().put("ok", true)))
@@ -528,7 +534,7 @@ internal class NativeBridge(
                     }
                 }
                 "device.revoked" -> {
-                    activity.runOnUiThread { if (installed) onDeviceRevoked?.invoke() }
+                    activity.runOnUiThread { if (available) onDeviceRevoked?.invoke() }
                     finishPending(requestId, successJson(requestId, JSONObject().put("ok", true)))
                 }
                 else -> finishPending(requestId, errorJson("unsupported", "native capability is unavailable", requestId))
@@ -551,7 +557,7 @@ internal class NativeBridge(
                 }
             }
             "keyboard.subscribe" -> activity.runOnUiThread {
-                if (installed && !preservingForConfiguration) {
+                if (available && !preservingForConfiguration) {
                     keyboardSubscriber = replyProxy
                     publishKeyboardState()
                 }
@@ -559,7 +565,7 @@ internal class NativeBridge(
             "page.scroll" -> {
                 val direction = message.optString("direction")
                 if (direction == "up" || direction == "down") {
-                    activity.runOnUiThread { if (installed) onScrollDirection?.invoke(direction) }
+                    activity.runOnUiThread { if (available) onScrollDirection?.invoke(direction) }
                 }
             }
             "page.background" -> {
@@ -568,7 +574,7 @@ internal class NativeBridge(
                 val blue = message.optInt("blue", -1)
                 if (red in 0..255 && green in 0..255 && blue in 0..255) {
                     val color = Color.rgb(red, green, blue)
-                    activity.runOnUiThread { if (installed) onPageBackgroundColor?.invoke(color) }
+                    activity.runOnUiThread { if (available) onPageBackgroundColor?.invoke(color) }
                 }
             }
         }
@@ -588,7 +594,7 @@ internal class NativeBridge(
         }
         activity.runOnUiThread {
             try {
-                if (!installed || preservingForConfiguration) throw IllegalStateException("bridge unavailable")
+                if (!available || preservingForConfiguration) throw IllegalStateException("bridge unavailable")
                 launch()
             } catch (_: Exception) {
                 failLaunch(requestId, action)
@@ -646,7 +652,7 @@ internal class NativeBridge(
         terminal.pending?.let { call ->
             val body = errorJson("timeout", "native interaction timed out", requestId)
             webView.post {
-                if (installed && !preservingForConfiguration) runCatching { call.replyProxy.postMessage(body) }
+                if (available && !preservingForConfiguration) runCatching { call.replyProxy.postMessage(body) }
             }
         }
     }
@@ -967,7 +973,7 @@ internal class NativeBridge(
             }
             claimed to cameraCleanupOwnership.onTerminal(cleanupCameraFile)
         }
-        webView.post { runCatching { call.replyProxy.postMessage(boundedBody) } }
+        webView.post { if (available) runCatching { call.replyProxy.postMessage(boundedBody) } }
         deleteNow?.delete()
     }
 
@@ -975,7 +981,7 @@ internal class NativeBridge(
         if (replyProxy == null) return
         val bounded = if (NativeBridgePolicy.isMessageWithinLimit(body, NativeBridgePolicy.MAX_REPLY_BYTES)) body
         else errorJson("payload_too_large", "native reply is too large", "")
-        webView.post { runCatching { replyProxy.postMessage(bounded) } }
+        webView.post { if (available) runCatching { replyProxy.postMessage(bounded) } }
     }
 
     private fun requestAction(requestCode: Int): String = when (requestCode) {

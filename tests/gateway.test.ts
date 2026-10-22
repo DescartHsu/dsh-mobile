@@ -888,7 +888,7 @@ describe('HTTP gateway', () => {
     expect(chinesePair.status).toBe(200)
     expect(chinesePair.body).toContain('<html lang="zh-CN">')
     expect(chinesePair.body).toContain('配对码')
-    expect(chinesePair.headers.vary).toBe('Accept-Language')
+    expect(chinesePair.headers.vary).toBe('Accept-Language, Cookie')
 
     const italianScript = await request(instance.address().port, '/mobile-access/pair.js', {
       headers: { ...base, accept: 'text/javascript', 'accept-language': 'it-IT' },
@@ -901,6 +901,43 @@ describe('HTTP gateway', () => {
     })
     expect(englishLogin.status).toBe(200)
     expect(englishLogin.body).toContain('Reconnect this device')
+  })
+
+  it.each([
+    ['en', 'zh-HK,en;q=0.8', ['Pair this device', 'Pairing failed.', 'Reconnect this device', 'The computer is unavailable.']],
+    ['zh', 'en-US', ['配对此设备', '配对失败', '重新连接此设备', '电脑当前不可用']],
+    ['it', 'en-US', ['Abbina questo dispositivo', 'Abbinamento non riuscito', 'Riconnetti questo dispositivo', 'Il computer non è disponibile']],
+  ])('uses remembered %s across pairing and reconnect HTML and scripts', async (locale, language, copy) => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    await instance.access.openPairing()
+    const headers = { ...browserHeaders(instance), 'accept-language': language as string, cookie: `dsh_ma_ui_locale=${locale}` }
+    for (const [index, route] of ['pair', 'pair.js', 'login', 'login.js'].entries()) {
+      const result = await request(instance.address().port, `/mobile-access/${route}`, { headers })
+      expect(result.status).toBe(200)
+      expect(result.body).toContain(copy![index])
+      expect(result.headers['cache-control']).toBe('no-store')
+      expect(result.headers.vary).toBe('Accept-Language, Cookie')
+    }
+    const protectedPage = await request(instance.address().port, '/', { headers: { ...headers, accept: 'text/html' } })
+    expect(protectedPage.status).toBe(302)
+    expect(protectedPage.body).not.toContain('dsh-mobile-gateway')
+  })
+
+  it('keeps remembered locale failures separate from authentication and browser fallback', async () => {
+    const inner = await upstream()
+    const instance = await gateway(inner.port)
+    const authenticated = await pair(instance)
+    for (const preference of ['', 'dsh_ma_ui_locale=%65n', 'dsh_ma_ui_locale=en; dsh_ma_ui_locale=it']) {
+      const headers = { ...browserHeaders(instance), 'accept-language': 'zh-HK,en;q=0.8', cookie: preference }
+      for (const route of ['login', 'login.js']) {
+        const result = await request(instance.address().port, `/mobile-access/${route}`, { headers })
+        expect(result.status).toBe(200)
+        expect(result.body).toContain(route.endsWith('.js') ? '电脑当前不可用' : '重新连接此设备')
+      }
+      const page = await request(instance.address().port, '/', { headers: { ...headers, cookie: `${SESSION_COOKIE}=${authenticated.session}; ${preference}` } })
+      expect(page.status).toBe(200)
+    }
   })
 
   it('uses the authenticated HTTP carrier for dedicated-page uploads, but not stock pages', async () => {

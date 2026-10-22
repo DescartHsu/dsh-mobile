@@ -1008,6 +1008,40 @@ describe('mobile-control localization', () => {
     expect(activity).toContain('bridge.onOpenTaskNotificationSettings = ::openTaskNotificationSettings')
   })
 
+  it('owns locale persistence as an independent disposable client effect', () => {
+    let deliver = () => {}
+    let disconnected = false
+    const writes: string[] = []
+    const root = { lang: 'en' }
+    class Observer {
+      constructor(callback: () => void) { deliver = callback }
+      observe() {}
+      disconnect() { disconnected = true }
+    }
+    vi.stubGlobal('document', {
+      documentElement: root,
+      querySelector: () => ({}),
+      set cookie(value: string) { writes.push(value) },
+    })
+    vi.stubGlobal('window', { location: { protocol: 'https:' }, MutationObserver: Observer })
+    const effects: Array<() => void | (() => void)> = []
+    apply({ effect: (effect, label) => { if (label?.includes('locale persistence')) effects.push(effect) },
+      get: () => { throw new Error('No additional service is needed') },
+      slots: { inject: () => () => {}, register: () => () => {} } })
+    expect(effects).toHaveLength(1)
+    const stop = effects[0]!()
+    expect(writes[0]).toMatch(/^dsh_ma_ui_locale=en;/u)
+    root.lang = 'it'
+    deliver()
+    expect(writes[1]).toMatch(/^dsh_ma_ui_locale=it;/u)
+    expect(typeof stop).toBe('function')
+    if (typeof stop === 'function') stop()
+    expect(disconnected).toBe(true)
+    root.lang = 'zh'
+    deliver()
+    expect(writes).toHaveLength(2)
+  })
+
   it('remounts plugin-owned UI only when the DSH document language changes', () => {
     const documentElement = { lang: 'en-US' }
     let observer: { callback: MutationCallback, disconnect: ReturnType<typeof vi.fn> } | undefined

@@ -21,6 +21,7 @@ import { invokeBoundNativeCapability } from './native-capability.js'
 import { pickBrowserFiles } from './browser-file-picker.js'
 import { createMobileAssetLoadReporter, ownsMobileCustomization, readMobileAssetText, type MobileAssetLoadFailure } from './mobile-custom-assets.js'
 import { EXTENSION_LIMITS, LEGACY_CUSTOM_ASSET_LIMIT } from './extension-limits.js'
+import { installMobileUiLocalePersistence } from './mobile-ui-locale.js'
 
 export { DIAGNOSTIC_REASON_MESSAGES, LOCALIZED_DIAGNOSTIC_COPY, MOBILE_CONTROL_MESSAGES } from './client-messages.js'
 export type { MobileControlLocale } from './client-messages.js'
@@ -4432,6 +4433,8 @@ export const CONTROL_STYLES = `
 
 /** Mount the desktop control or mobile feature enhancements. */
 export function apply(ctx: ClientContext): void {
+  ctx.effect(() => installMobileUiLocalePersistence(document, window), 'dsh-mobile: browser UI locale persistence')
+
   ctx.effect(() => {
     if (window.__DSH_MOBILE_FRONTEND__ !== 'dedicated') return
     return trustAuthenticatedGatewayConnection(ctx.get('connection'))

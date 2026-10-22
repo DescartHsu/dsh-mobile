@@ -931,19 +931,8 @@ export function apply(ctx: MobileClientContext): void {
         event.preventDefault()
         controller.selectPanel(null)
       }
-      // The root conversation is deliberately left unclaimed: the platform
-      // contract is that the host decides what an unconsumed Back means, and the
-      // app reveals the session list or confirms an exit from there.
     }
     window.addEventListener('dsh-mobile:native-back', onNativeBack)
-    // The app asks for the session list on an unconsumed Back. Separate from the
-    // Back event so the root conversation itself stays unclaimed.
-    const onOpenSidebar = (): void => {
-      const state = controller.getSnapshot()
-      if (!viewportIsWide() && !state.sidebarOpen) controller.toggleSidebar()
-    }
-    window.addEventListener('dsh-mobile:open-sidebar', onOpenSidebar)
-
     const retainMainPanels = (): void => {
       controller.retainMainPanels(ctx.slots.entries('main').flatMap(entry =>
         entry.options.key === undefined ? [] : [entry.options.key]))
@@ -952,7 +941,6 @@ export function apply(ctx: MobileClientContext): void {
     retainMainPanels()
     return () => {
       window.removeEventListener('dsh-mobile:native-back', onNativeBack)
-      window.removeEventListener('dsh-mobile:open-sidebar', onOpenSidebar)
       controller.dispose()
       disposePanels()
       disposeRoot()

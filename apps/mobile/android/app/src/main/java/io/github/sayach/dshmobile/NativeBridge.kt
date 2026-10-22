@@ -52,6 +52,7 @@ internal class NativeBridge(
     private data class Pending(
         val action: String,
         val replyProxy: JavaScriptReplyProxy,
+        val documentGeneration: Int,
     )
 
     /** Restored operations have no surviving JavaScript caller and are cleanup-only tombstones. */
@@ -109,6 +110,7 @@ internal class NativeBridge(
     private val cameraCleanupOwnership = CameraCleanupOwnership<File>()
     private val pickerGrantOwnership = TemporaryGrantOwnership<Uri>()
     @Volatile private var installed = false
+    @Volatile private var documentGeneration = 0
     @Volatile private var preservingForConfiguration = false
     private var keyboardState = NativeKeyboardState(false, false)
     private var keyboardSubscriber: JavaScriptReplyProxy? = null
@@ -153,7 +155,10 @@ internal class NativeBridge(
      * through `auth.renew`; the activity renews natively and installs the
      * resulting cookies, so a running page recovers without a reload.
      */
-    var onRenewSession: ((callback: (Boolean, String?) -> Unit) -> Unit)? = null
+    var onRenewSession: ((requestId: String, isCurrent: () -> Boolean, callback: (Boolean, String?) -> Unit) -> Unit)? = null
+
+    /** Withdraw only the native renewal matching the page's pending request ID. */
+    var onCancelRenewSession: ((requestId: String) -> Unit)? = null
 
     /** Install the origin-scoped WebMessage channel and page-side Promise adapter. */
     fun install(): Boolean {
@@ -187,6 +192,7 @@ internal class NativeBridge(
 
     /** A new page must subscribe again; the last insets state remains available for its first reply. */
     fun onTopLevelNavigation(url: String) {
+        documentGeneration += 1
         keyboardSubscriber = null
         if (!GatewayUrlPolicy.isSameOrigin(origin, url)) return
     }
@@ -304,6 +310,8 @@ internal class NativeBridge(
         onPageBackgroundColor = null
         onScrollDirection = null
         onDeviceRevoked = null
+        onRenewSession = null
+        onCancelRenewSession = null
 
         val temporaryResources = synchronized(requestLock) {
             cancelActivityTimeoutLocked()
@@ -430,7 +438,7 @@ internal class NativeBridge(
             postDirectReply(replyProxy, errorJson("bad_message", "message is invalid", requestId))
             return
         }
-        if (!pending.reserve(requestId, Pending(action, replyProxy))) {
+        if (!pending.reserve(requestId, Pending(action, replyProxy, documentGeneration))) {
             postDirectReply(replyProxy, errorJson("bad_message", "duplicate request or bridge is busy", requestId))
             return
         }
@@ -438,19 +446,24 @@ internal class NativeBridge(
         val input = parsed.optJSONObject("input") ?: JSONObject()
         try {
             when (action) {
-                "auth.renew" -> {
+                "auth.renew" -> activity.runOnUiThread {
                     val renew = onRenewSession
-                    if (renew == null) {
+                    val expectedDocument = pending[requestId]?.documentGeneration
+                    val isCurrent = {
+                        installed && !preservingForConfiguration && expectedDocument == documentGeneration
+                            && pending[requestId]?.action == "auth.renew"
+                    }
+                    if (renew == null || !isCurrent()) {
                         finishPending(requestId, errorJson("unavailable", "renew is unavailable", requestId))
                     } else {
-                        renew { renewed, reason ->
-                            activity.runOnUiThread {
-                                finishPending(
-                                    requestId,
+                        try {
+                            renew(requestId, isCurrent) { renewed, reason ->
+                                finishPending(requestId,
                                     if (renewed) successJson(requestId, JSONObject().put("renewed", true))
-                                    else errorJson("failed", reason ?: "renew failed", requestId),
-                                )
+                                    else errorJson(reason ?: "failed", "session renewal did not complete", requestId))
                             }
+                        } catch (_: Exception) {
+                            finishPending(requestId, errorJson("unavailable", "renew is unavailable", requestId))
                         }
                     }
                 }
@@ -527,6 +540,16 @@ internal class NativeBridge(
 
     private fun handlePageEvent(message: JSONObject, replyProxy: JavaScriptReplyProxy) {
         when (message.optString("event")) {
+            "auth.renew.cancel" -> {
+                val requestId = message.optString("requestId")
+                if (requestId.isBlank() || requestId.length > MAX_REQUEST_ID_CHARS) return
+                activity.runOnUiThread {
+                    if (pending[requestId]?.action == "auth.renew") {
+                        onCancelRenewSession?.invoke(requestId)
+                        finishPending(requestId, errorJson("cancelled", "session renewal was cancelled", requestId))
+                    }
+                }
+            }
             "keyboard.subscribe" -> activity.runOnUiThread {
                 if (installed && !preservingForConfiguration) {
                     keyboardSubscriber = replyProxy
@@ -1137,6 +1160,7 @@ internal class NativeBridge(
               const item = pending.get(response.requestId);
               if (!item) return;
               clearTimeout(item.timer);
+              if (item.cleanup) item.cleanup();
               pending.delete(response.requestId);
               if (response.ok) item.resolve(materialize(response.value));
               else item.reject(Object.assign(new Error(response.message || response.code), { code: response.code }));
@@ -1146,7 +1170,10 @@ internal class NativeBridge(
           window.__DSH_MOBILE_NATIVE_STATE__ = { pending };
           window.__DSH_MOBILE_NATIVE__ = {
             capabilities: () => Promise.resolve(['files.pick','camera.capture','share','clipboard.read','clipboard.write','auth.renew','notification.notify','notification.settings','mobile.switch-computer','mobile.display-scale.get','mobile.display-scale.set']),
-            invoke: (action, input = {}) => new Promise((resolve, reject) => {
+            invoke: (action, input = {}, options = {}) => new Promise((resolve, reject) => {
+              const signal = action === 'auth.renew' ? options.signal : undefined;
+              const cancellation = () => Object.assign(new Error('session renewal was cancelled'), { name: 'AbortError', code: 'cancelled' });
+              if (signal && signal.aborted) { reject(cancellation()); return; }
               const requestId = crypto.randomUUID();
               let raw;
               try { raw = JSON.stringify({ version: 1, requestId, action, input }); }
@@ -1154,10 +1181,26 @@ internal class NativeBridge(
               if (new TextEncoder().encode(raw).byteLength > $MAX_MESSAGE_BYTES) { reject(Object.assign(new Error('native message is too large'), { code: 'bad_message' })); return; }
               const waitsForActivity = action === 'files.pick' || action === 'camera.capture';
               const timeout = waitsForActivity ? ${NativeBridgePolicy.PAGE_ACTIVITY_TIMEOUT_MS} : 60000;
-              const timer = setTimeout(() => { const item = pending.get(requestId); if (item) { pending.delete(requestId); item.reject(Object.assign(new Error('native capability timed out'), { code: 'timeout' })); } }, timeout);
-              pending.set(requestId, { resolve, reject, timer });
+              const cancelNativeRenewal = () => {
+                if (action !== 'auth.renew') return;
+                try { bridge.postMessage(JSON.stringify({ version: 1, event: 'auth.renew.cancel', requestId })); } catch (_) {}
+              };
+              const cleanup = () => { if (signal) signal.removeEventListener('abort', onAbort); };
+              const onAbort = () => {
+                const item = pending.get(requestId); if (!item) return;
+                pending.delete(requestId); clearTimeout(item.timer); cleanup(); cancelNativeRenewal(); reject(cancellation());
+              };
+              const timer = setTimeout(() => {
+                const item = pending.get(requestId); if (!item) return;
+                pending.delete(requestId); cleanup(); cancelNativeRenewal(); item.reject(Object.assign(new Error('native capability timed out'), { code: 'timeout' }));
+              }, timeout);
+              pending.set(requestId, { resolve, reject, timer, cleanup });
+              if (signal) {
+                signal.addEventListener('abort', onAbort, { once: true });
+                if (signal.aborted) { onAbort(); return; }
+              }
               try { bridge.postMessage(raw); }
-              catch (_) { clearTimeout(timer); pending.delete(requestId); reject(Object.assign(new Error('native capability unavailable'), { code: 'unavailable' })); }
+              catch (_) { clearTimeout(timer); cleanup(); pending.delete(requestId); reject(Object.assign(new Error('native capability unavailable'), { code: 'unavailable' })); }
             })
           };
           window.dispatchEvent(new Event('dsh-mobile-native-ready'));

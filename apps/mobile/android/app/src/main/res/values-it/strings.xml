@@ -199,5 +199,4 @@
     <string name="webview_update_action">Opzioni di aggiornamento</string>
     <string name="webview_continue">Continua</string>
     <string name="device_storage_unavailable">L’archiviazione sicura dei dispositivi associati non è disponibile. Sblocca il dispositivo e riapri l’app o riprova. L’operazione non è stata completata.</string>
-    <string name="back_press_again_to_exit">Premi di nuovo indietro per chiudere</string>
 </resources>

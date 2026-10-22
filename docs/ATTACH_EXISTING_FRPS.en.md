@@ -17,6 +17,14 @@ frps `proxyBindAddr` is global to proxy listeners, not a per-entry switch. Bindi
 
 The [official frps configuration reference](https://gofrp.org/en/docs/reference/server-configures/) defines `proxyBindAddr` as the proxy listening address and `vhostHTTPPort` as the HTTP-proxy listening port; use the values actually configured on your server.
 
+## Enter addresses and ports separately
+
+**VPS address** takes a hostname or IP only, without `https://`, a path or a port; enter the frps control port in its own field. **Public entry** requires a complete `https://domain` or `https://PUBLIC_IPV4` without a nonstandard port, path, query or credentials. The plugin does not add a missing scheme. Private, loopback and reserved IPv4 addresses are not public entries.
+
+Public-CA mode uses HTTPS 443. For self-signed mode, keep `https://PUBLIC_IPV4` in the address field and put the TCP port, such as `33080`, in **Public entry port**; the plugin builds the actual pairing address from both. Use public-CA mode for domains rather than the current IPv4-only self-signed mode.
+
+The development build adds Chinese, English and Italian field-level feedback: submission or preview marks invalid fields and focuses the first error; editing rechecks and clears corrected errors. This interaction improvement is not yet released. It does not relax the validation above or change server listeners or ports for you.
+
 ## Public-CA mode
 
 1. In **Self-hosted FRP**, choose **Attach to my existing frps** and **Public CA certificate**. Enter the VPS address, frps control port, high-entropy shared token, public domain or IPv4 HTTPS origin, and the frps instance's actual `vhostHTTPPort`. Do not assume the managed deployment's default of 7080.

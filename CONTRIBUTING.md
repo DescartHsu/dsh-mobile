@@ -107,6 +107,8 @@ The compatibility, viewport and missing-companion negative lanes emit a final `D
 
 Follow the [Android build instructions](apps/mobile/README.md#build) and keep both app manuals aligned. Preserve application identity, stable signing and stored pairings. Never uninstall or clear a user's app to bypass a signing mismatch. Ask before altering real device data; use a separate test package for destructive test flows.
 
+Current Debug builds use `io.github.sayach.dshmobile.debug` and a `-debug` version suffix, with data separate from the official App and older unsuffixed Debug installs. Do not describe their pairings as migrated or remove the older app to install them. Release package identity and signing remain unchanged.
+
 Review the internal [design reference](design-system/dsh-mobile/MASTER.md) for native screens and plugin-owned controls. DSH source and installed frontend artifacts stay read-only. Use documented extension points for plugin behavior; isolate and report an upstream defect rather than patching DSH code or bundles to make a Mobile check pass.
 
 For macOS cloudflared changes, build and run `npm run smoke:cloudflared-component`. It verifies official archives and reinitialization in temporary state, then removes its owned files; it never executes downloaded Mach-O binaries. `-- --archive-dir <directory>` reuses independently verified official archives.

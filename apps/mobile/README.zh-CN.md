@@ -35,6 +35,12 @@ DeepSeek Harness 是这个社区维护的 Android WebView App 的显示名称。
 
 删除本机记录会移除保存的设备令牌和固定 CA，不等于撤销电脑授权或清除所有 WebView 短期 Cookie。需要立即终止访问时，请在电脑的 **移动访问** 中撤销设备。Android“清除应用数据”会删除全部配对和网页数据，不是普通重连的处理步骤。
 
+## 开发中，尚未发布
+
+开发版插件在支持图片附件的专用移动菜单中提供 **相册 → 拍照 → 文件**。相册通过标准选择器只请求图片，不触发拍摄；取消不改变草稿，旧结果不能附加到其他输入框或文档。App 0.6.4 起已支持这条选择器路径，当前正式版 0.6.6 也可使用；新菜单入口尚不属于已发布的插件 0.6.15，本身不要求另装 APK。**文件**仍是通用附件入口，实际选择器取决于 Android 与可用应用。
+
+前台恢复使用 DSH 的公开重连操作；未来新版 App 还会声明 `auth.renew` 能力，在一次持续断连中尝试一次原生续期，当前正式 App 0.6.6 不提供该能力。网页请求的续期沿用已有取消和连接期限，已显示文档上只保留小型 **停止重连** 按钮，不主动收起键盘；Session Cookie 按主机串行写入，跨 Activity 重建也等待系统真实回调。恢复不自动重放操作或刷新当前页面，根页面按返回仍退出 App。这些原生改动尚未发布，也不保证恢复未保存网页。
+
 ## 0.6.6 更新
 
 Android 0.6.6／构建 82 避免续期或安装 Cookie 尚未完成时重复触发自动恢复。同一凭据的后台恢复会等待上一项任务真正退出，不再重叠执行。
@@ -125,6 +131,8 @@ Set-Location apps/mobile/android
 ```
 
 Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。正式发布沿用只保存在仓库 Secrets 中的签名密钥，本地未签名 Release 构建或 Debug 安装不能替代正式签名核验。
+
+当前源码的 Debug 构建使用包名 `io.github.sayach.dshmobile.debug` 与 `-debug` 版本后缀，可与正式 App 并存，存储和配对彼此独立。它不会升级或迁移旧版无后缀 Debug 应用；切换包名时应保留旧应用和数据，不要为此卸载或清除。Release 构建继续使用 `io.github.sayach.dshmobile` 与既定正式签名。
 
 已核验的正式版本为 [Android 0.6.6](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.6)，构建 82，SHA-256：`a63fb40da261d290d4435d713258b508be3e4f0592d223a325dca1a5b32f3c95`。下载的 APK 沿用正式发布签名及包名 `io.github.sayach.dshmobile`。旧版本历史集中在 [CHANGELOG](../../CHANGELOG.md)。
 

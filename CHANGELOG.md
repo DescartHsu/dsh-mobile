@@ -2,6 +2,14 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## Unreleased
+
+- Add **Gallery** beside **Take photo** and DSH's existing **File** action in the dedicated mobile attachment menu. Gallery opens the standard image-only picker, preserves cancellation and ignores results belonging to an old composer or document. Android App 0.6.4+ already supports this picker path; this plugin shortcut does not itself require a new APK. Thanks @abworks-dev for [#249](https://github.com/saya-ch/dsh-mobile/pull/249).
+- Nudge DSH's public connection service when a disconnected page returns to the foreground. Supporting future App builds can renew authentication once per continuous outage through an advertised native capability, without automatically replaying requests or refreshing the page. Published App 0.6.6 does not expose this new capability. Thanks @ayiejosh for [#241](https://github.com/saya-ch/dsh-mobile/pull/241); original contributor commits are retained alongside maintainer corrections, without upstream bundle rewriting or broader immutable caching.
+- In the unreleased Android build, reuse existing recovery cancellation and connection deadlines for page-requested renewal. Serialize Session Cookie writes by host across Activity replacement, wait for actual platform callbacks and reject stale results. An already displayed document keeps its compact **Stop reconnecting** action and keyboard state; Back still exits at the root.
+- Give Debug builds the separate package `io.github.sayach.dshmobile.debug` and a `-debug` version suffix. They can coexist with the official App but do not inherit data from it or older unsuffixed Debug installs. Release package identity and signing remain unchanged.
+- Show field-specific FRP configuration errors in Chinese, English and Italian, focus the first invalid field and clear corrected errors. Keep the existing HTTPS, public-address and port checks rather than guessing a scheme or changing the server configuration. Thanks @chenyxuan for [#250](https://github.com/saya-ch/dsh-mobile/issues/250).
+
 ## 0.6.15 - 2026-10-21
 
 - Keep the dedicated Mobile page's plugin-update notifications connected during idle periods, without gzip buffering. Live module updates retain the mobile layout and the page's selected modules instead of replacing them with the desktop layout. Upgrade and reload the dedicated page to use the corrected stream; stock and older pages keep their existing behavior.

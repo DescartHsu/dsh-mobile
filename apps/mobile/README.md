@@ -35,6 +35,12 @@ Page zoom changes the whole page and is separate from per-address text preferenc
 
 Deleting a local record removes its saved token and pinned CA, not the computer's authorization or every short-lived WebView cookie. Use **Mobile Access** on the computer to revoke access immediately. A full Android clear-app-data reset removes all pairings and web data and is not a normal reconnection step.
 
+## In development — not yet released
+
+The development plugin adds **Gallery → Take photo → File** to the dedicated mobile attachment menu when image attachments are supported. Gallery requests images through the standard picker, without a capture request; cancellation keeps the draft unchanged and old results cannot attach to another composer or document. App 0.6.4+ already supports this picker path, including the current 0.6.6 release. The new menu shortcut is not part of published plugin 0.6.15 and does not itself require another APK. **File** remains the general attachment entry; the picker shown depends on Android and the available providers.
+
+Foreground recovery uses DSH's public reconnect operation. A future App build also advertises `auth.renew` for one native renewal attempt during a continuous disconnection; published App 0.6.6 does not offer that capability. Page-requested renewal uses the existing cancellation and connection deadline, retains a compact **Stop reconnecting** action over an already displayed document and does not deliberately hide its keyboard. Session Cookie writes wait for platform callbacks and are serialized by host across Activity replacement. Recovery neither automatically replays operations nor refreshes the current page; Back at the root still exits the app. These native changes remain unreleased and do not guarantee recovery of an unsaved page.
+
 ## 0.6.6 update
 
 Android 0.6.6/build 82 prevents repeated automatic recovery while renewal or Cookie installation is already pending. Background restore work for the same credential waits for the previous worker to exit instead of overlapping it.
@@ -125,6 +131,8 @@ Set-Location apps/mobile/android
 ```
 
 The Debug APK is `app/build/outputs/apk/debug/app-debug.apk`. Official releases use the established signing key stored only in repository Secrets. A local unsigned Release build or a Debug install is not official-signer evidence.
+
+Current-source Debug builds use package `io.github.sayach.dshmobile.debug` with a `-debug` version suffix. They install beside the official App with separate storage and pairings. They do not upgrade or migrate an older unsuffixed Debug installation; preserve that app and its data rather than uninstalling or clearing it to switch packages. Release builds keep `io.github.sayach.dshmobile` and the established signer.
 
 The verified stable release is [Android 0.6.6](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.6), build 82, SHA-256 `a63fb40da261d290d4435d713258b508be3e4f0592d223a325dca1a5b32f3c95`. The downloaded APK retains the established release signer and package `io.github.sayach.dshmobile`. Earlier release history belongs in [CHANGELOG](../../CHANGELOG.md).
 

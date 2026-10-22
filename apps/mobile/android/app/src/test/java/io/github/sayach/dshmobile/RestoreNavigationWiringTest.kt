@@ -31,7 +31,7 @@ class RestoreNavigationWiringTest {
         assertTrue(methodBody(activity, "scheduleAutomaticRecovery").contains("restoreAttemptGate.retryCallback"))
         val restore = methodBody(activity, "restoreTrustedDevice")
         assertTrue(restore.contains("runOnUiThread(restoreAttemptGate.callback(generation)"))
-        assertTrue(restore.contains("isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) }"))
+        assertTrue(restore.contains("isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) && requestIsCurrent() }"))
     }
 
     @Test
@@ -47,7 +47,7 @@ class RestoreNavigationWiringTest {
         assertFalse("The restore worker must not bypass the per-credential physical slot", restore.contains("restoreExecutor.execute"))
         val cookies = restore.substringAfter("installNativeSession(")
         assertTrue(cookies.indexOf("restoreAttemptGate.completeRestore(generation)") < cookies.indexOf("showBrowser("))
-        assertTrue(cookies.contains("isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) }"))
+        assertTrue(cookies.contains("isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) && requestIsCurrent() }"))
     }
 
     @Test

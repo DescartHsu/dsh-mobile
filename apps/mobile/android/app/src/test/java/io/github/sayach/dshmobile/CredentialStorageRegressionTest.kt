@@ -113,6 +113,39 @@ class CredentialStorageRegressionTest {
         assertTrue(store.storageUnavailable)
     }
 
+    @Test fun aRenewalCallbackCanObserveUnavailableStorageWithoutErasingPairingsOrHoldingItsWaiterUntilTimeout() {
+        val preferences = MemoryCredentialPreferences()
+        val crypto = JvmCredentialEncryption()
+        val store = PairedDeviceStore(preferences, crypto)
+        store.upsert(record())
+        assertTrue(store.read() is CredentialRead.Loaded)
+        val before = preferences.strings.toMap()
+        val replies = mutableListOf<String?>()
+        val waiter = NativeSessionRenewalGate()
+        val request = requireNotNull(waiter.begin("held-renewal", replies::add))
+        val logical = RestoreAttemptGate()
+        val generation = logical.begin()
+        assertTrue(logical.claimRestore(generation))
+        val callback = Runnable {
+            when (store.read()) {
+                CredentialRead.Unreadable -> {
+                    logical.completeRestore(generation)
+                    waiter.finish(request, "unavailable")
+                }
+                else -> throw AssertionError("Storage must become unreadable before the held result")
+            }
+        }
+        crypto.failDecrypt = true
+        callback.run()
+        assertEquals(listOf("unavailable"), replies)
+        assertFalse(waiter.pending)
+        assertFalse(logical.restorePending)
+        assertFalse(waiter.finish(request))
+        assertEquals(before, preferences.strings)
+        crypto.failDecrypt = false
+        assertEquals(listOf(record()), store.load())
+    }
+
     @Test fun everyMutationRetainsCiphertextAndIvWhileKeystoreIsUnreadable() {
         val preferences = MemoryCredentialPreferences(); val crypto = JvmCredentialEncryption(); val store = PairedDeviceStore(preferences, crypto)
         val original = listOf(record('a'), record('b', "Other computer"))

@@ -1,8 +1,14 @@
 # 贡献者 / Contributors
 
-GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-21 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
+GitHub 的 [Contributors 图表](https://github.com/saya-ch/dsh-mobile/graphs/contributors) 按进入默认分支的提交自动统计，无法手动加入仅提交 issue 或 PR 提案的成员。本页按截至 2026-10-22 的实际参与方式感谢社区成员；仓库维护者与自动依赖更新仍可在 GitHub 历史记录中查看。
 
-GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-21. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+GitHub's Contributors graph counts commits on the default branch; issue reports and PR proposals cannot be manually added to it. This page credits community members by how they contributed, through 2026-10-22. The repository maintainer and automated dependency updates remain visible in GitHub's history.
+
+## 待发布贡献与反馈 / Unreleased contributions and reports
+
+[@abworks-dev](https://github.com/abworks-dev) 的 [#249](https://github.com/saya-ch/dsh-mobile/pull/249) 提供相册图片选择入口；[@ayiejosh](https://github.com/ayiejosh) 的 [#241](https://github.com/saya-ch/dsh-mobile/pull/241) 提供前台恢复与原生续期方案。两份 PR 的原作者提交保留，随后追加选择器、恢复归属、取消和 Cookie 写入修正；未保留上游前端包改写。感谢 [@chenyxuan](https://github.com/chenyxuan) 在 [#250](https://github.com/saya-ch/dsh-mobile/issues/250) 反馈 FRP 表单报错不明确，推动字段级提示改进。这批改动尚未发布；审查与整合历史见对应 PR。
+
+[@abworks-dev](https://github.com/abworks-dev)'s [#249](https://github.com/saya-ch/dsh-mobile/pull/249) contributes the Gallery image-picker shortcut; [@ayiejosh](https://github.com/ayiejosh)'s [#241](https://github.com/saya-ch/dsh-mobile/pull/241) contributes foreground recovery and native renewal proposals. Both authors' original commits are retained alongside picker, recovery ownership, cancellation and Cookie-write corrections; upstream frontend-bundle rewriting is not retained. Thanks [@chenyxuan](https://github.com/chenyxuan) for reporting unclear FRP form errors in [#250](https://github.com/saya-ch/dsh-mobile/issues/250), informing field-level feedback. These changes are unreleased; the linked PRs record their review and integration history.
 
 ## 0.6.15 反馈 / Reports for 0.6.15
 

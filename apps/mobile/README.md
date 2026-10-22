@@ -4,14 +4,14 @@
 
 DeepSeek Harness is the display name of this community-maintained Android WebView app. It opens the plugin's authenticated HTTPS page rather than bundling another DSH frontend. The app and mobile browsers receive the same DSH features and computer-side mobile customizations.
 
-The current stable app is **0.6.5** (build 81). The npm plugin and Android App have independent versions: a plugin update does not automatically require another APK. See the [0.6.5 changes](#065-update).
+The current stable app is **0.6.6** (build 82). The npm plugin and Android App have independent versions: a plugin update does not automatically require another APK. See the [0.6.6 changes](#066-update).
 
 Android 10 or later is supported. The local iOS experiment is not a published or supported client.
 
 ## Install and pair
 
 1. Install and enable the plugin using the [project quick start](../../README.en.md#quick-start). Complete LAN setup from the command line or the computer's **Mobile Access** panel.
-2. Install the signed Android APK from [GitHub Releases](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5). Upgrade an official installation in place using the same release signer to retain its pairings. A differently signed Debug APK cannot replace it; do not uninstall or clear data just to bypass that mismatch.
+2. Install the signed Android APK from [GitHub Releases](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.6). Upgrade an official installation in place using the same release signer to retain its pairings. A differently signed Debug APK cannot replace it; do not uninstall or clear data just to bypass that mismatch.
 3. On the computer, generate a pairing key/link under **Mobile Access → Local network**, or configure a remote provider and generate its remote pairing QR code. In the app, choose the matching connection mode and scan or paste the link.
 4. Name the computer. The app stores each LAN or remote pairing as its own record. The phone does not need a cpolar, Cloudflare or Tailscale app.
 
@@ -34,6 +34,18 @@ The **Paired computers** list shows names, connection types, addresses, reachabi
 Page zoom changes the whole page and is separate from per-address text preferences. App-only actions are shown only when the native bridge supports them. Native screens follow the Android system language in Simplified Chinese, English or Italian; webpage copy follows DSH's selected locale. DSH does not currently expose Italian.
 
 Deleting a local record removes its saved token and pinned CA, not the computer's authorization or every short-lived WebView cookie. Use **Mobile Access** on the computer to revoke access immediately. A full Android clear-app-data reset removes all pairings and web data and is not a normal reconnection step.
+
+## In development — not yet released
+
+The development plugin adds **Gallery → Take photo → File** to the dedicated mobile attachment menu when image attachments are supported. Gallery requests images through the standard picker, without a capture request; cancellation keeps the draft unchanged and old results cannot attach to another composer or document. App 0.6.4+ already supports this picker path, including the current 0.6.6 release. The new menu shortcut is not part of published plugin 0.6.15 and does not itself require another APK. **File** remains the general attachment entry; the picker shown depends on Android and the available providers.
+
+Foreground recovery uses DSH's public reconnect operation. A future App build also advertises `auth.renew` for one native renewal attempt during a continuous disconnection; published App 0.6.6 does not offer that capability. Page-requested renewal uses the existing cancellation and connection deadline, retains a compact **Stop reconnecting** action over an already displayed document and does not deliberately hide its keyboard. Session Cookie writes wait for platform callbacks and are serialized by host across Activity replacement. Recovery neither automatically replays operations nor refreshes the current page; Back at the root still exits the app. These native changes remain unreleased and do not guarantee recovery of an unsaved page.
+
+## 0.6.6 update
+
+Android 0.6.6/build 82 prevents repeated automatic recovery while renewal or Cookie installation is already pending. Background restore work for the same credential waits for the previous worker to exit instead of overlapping it.
+
+Cancellation and the connection deadline withdraw queued work and late results so an older recovery cannot replace a newer action. Existing pairings, package identity and the pairing protocol are unchanged; no data reset or re-pairing is required for this update. Network availability and recovery of an unsaved webpage still depend on the connection and WebView state.
 
 ## 0.6.5 update
 
@@ -81,7 +93,7 @@ App 0.6.4+ uses the system Photo Picker on Android 13+ for supported image filte
 
 Standard file callbacks belong to the current WebView, Origin and document. With navigation-listener support, pending requests are withdrawn before document replacement and new selection waits for navigation to finish. Older WebViews use available callbacks; if selection stops opening after changing pages, update WebView or return to the device list and reopen the computer, without clearing data.
 
-DSH keeps its file action in **Add**; Mobile adds **Take photo** when the active attachment owner accepts images. Camera capture explicitly requests permission and returns a full-resolution JPEG. For troubleshooting, select one small JPEG/PNG and inspect the unsent draft preview. Files awaiting submission need not already exist as computer-side image objects; no model request is necessary to check selection.
+DSH keeps its file action in **Add**; Mobile adds **Take photo** and **Gallery** when the active attachment owner accepts images. Only the dedicated Mobile page puts **Gallery → Take photo → File** first; all other official actions retain their upstream order, and stock/desktop menu ordering is unchanged. **Gallery** opens an image-only standard file selector without requesting camera capture, using the system picker described above in the App and the browser's file picker elsewhere. It does not require a new Bridge capability or App build. **Take photo** explicitly requests camera permission and returns a full-resolution JPEG. Both use DSH's existing draft attachment intake; cancelling selection adds nothing, and a result belonging to a previous conversation or disposed page is ignored. For troubleshooting, select one small JPEG/PNG and inspect the unsent draft preview. Files awaiting submission need not already exist as computer-side image objects; no model request is necessary to check selection.
 
 ### Keyboard and page space
 
@@ -132,12 +144,14 @@ Set-Location apps/mobile/android
 
 The Debug APK is `app/build/outputs/apk/debug/app-debug.apk`. Official releases use the established signing key stored only in repository Secrets. A local unsigned Release build or a Debug install is not official-signer evidence.
 
-The verified stable release is [Android 0.6.5](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.5), SHA-256 `41bd476c5ccf90020ecf624844a29886d55060a79533b599e9aa5bf0a1d71844`. Earlier release history belongs in [CHANGELOG](../../CHANGELOG.md).
+Current-source Debug builds use package `io.github.sayach.dshmobile.debug` with a `-debug` version suffix. They install beside the official App with separate storage and pairings. They do not upgrade or migrate an older unsuffixed Debug installation; preserve that app and its data rather than uninstalling or clearing it to switch packages. Release builds keep `io.github.sayach.dshmobile` and the established signer.
+
+The verified stable release is [Android 0.6.6](https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.6), build 82, SHA-256 `a63fb40da261d290d4435d713258b508be3e4f0592d223a325dca1a5b32f3c95`. The downloaded APK retains the established release signer and package `io.github.sayach.dshmobile`. Earlier release history belongs in [CHANGELOG](../../CHANGELOG.md).
 
 ## Acceptance and known limits
 
 - Connection-control development builds used Debug metadata 0.6.4/build 80 on PJW110, Android 16 and Google WebView 153.0.8010.36. Against an isolated DSH 0.2.0-rc.2/plugin 0.6.10 instance over USB and pinned HTTPS, checks covered pairing/startup/saved-connection cancellation, Back, failed manual connections and return from a failed page after stopping native recovery. Held module responses also verified early webpage display, touch-through outside compact cancellation, cancellation and later completion. Pairings were retained and owned QA records removed.
 - Debug builds of App 0.6.4 retained one WebView across document replacement/reload, rejected an old selection, and received controlled PNG bytes with a decoded DSH draft preview. A held navigation and HTTP 204 also checked selector availability. Earlier checks covered model-menu Back, rotation with draft/reference/image retention, known revocation, re-pairing, icon choices and list ordering. None required a model prompt.
-- These observations do not establish final 0.6.5/build 81 official-signer device acceptance, every public provider, remote 60-second timing, full native recovery with a still-live draft, HyperOS/older WebViews or every screen/gesture configuration. Self-signed FRP still lacks a recorded real-VPS-plus-phone end-to-end check. Permission grants alone do not establish voice transcription, and process-death restoration is not guaranteed.
+- These observations do not establish final official-signer APK device acceptance, every public provider, remote 60-second timing, full native recovery with a still-live draft, HyperOS/older WebViews or every screen/gesture configuration. Self-signed FRP still lacks a recorded real-VPS-plus-phone end-to-end check. Permission grants alone do not establish voice transcription, and process-death restoration is not guaranteed.
 
 Apache-2.0 licensed. See [LICENSE](../../LICENSE).

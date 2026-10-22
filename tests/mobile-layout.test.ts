@@ -981,10 +981,13 @@ describe('dedicated mobile layout boot', () => {
       expect(controller?.getSnapshot()).toMatchObject({
         detailsOpen: false, sidebarOpen: true, panelInfo: { activePanelId: 'alpha' },
       })
+
       expect(back().defaultPrevented).toBe(true)
       expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
+
       expect(back().defaultPrevented).toBe(true)
       expect(controller?.getSnapshot().panelInfo.activePanelId).toBeNull()
+
       expect(back().defaultPrevented).toBe(false)
 
       controller?.toggleSidebar()

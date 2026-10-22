@@ -23,7 +23,15 @@ class SameHostSwitchWiringTest {
         assertTrue(switch.contains("webView === browser && gatewayOrigin == sourceOrigin && automaticSameHost()"))
         assertTrue(switch.contains("sameHostRestoreAttempt = pendingConnection"))
         val restore = method(text, "restoreTrustedDevice")
-        assertTrue(restore.contains("isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) }"))
+        assertTrue(restore.contains("isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) && requestIsCurrent() && claimSuccess() }"))
+        val invalidate = method(text, "invalidateRestoreAttempts")
+        assertTrue(invalidate.contains("draftTransfer?.abort()"))
+        assertTrue(invalidate.contains("releaseCapturedDraft()"))
+        assertTrue(invalidate.contains("bridgeSessionRenewal.cancel(errorCode = errorCode)"))
+        val cookies = restore.substringAfter("installNativeSession(")
+        assertTrue(cookies.contains("onFailure = ::unavailable"))
+        assertTrue(cookies.indexOf("onAuthenticated(selectedOrigin, saved)") < cookies.indexOf("activatePairedDevice(saved)"))
+        assertTrue(cookies.contains("if (onSessionInstalled != null) onSessionInstalled()"))
         assertTrue(restore.indexOf("if (!claimSuccess())") < restore.indexOf("savePairedDevice(mode"))
     }
 

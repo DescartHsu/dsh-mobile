@@ -23,7 +23,7 @@ The [official frps configuration reference](https://gofrp.org/en/docs/reference/
 
 Public-CA mode uses HTTPS 443. For self-signed mode, keep `https://PUBLIC_IPV4` in the address field and put the TCP port, such as `33080`, in **Public entry port**; the plugin builds the actual pairing address from both. Use public-CA mode for domains rather than the current IPv4-only self-signed mode.
 
-The development build adds Chinese, English and Italian field-level feedback: submission or preview marks invalid fields and focuses the first error; editing rechecks and clears corrected errors. This interaction improvement is not yet released. It does not relax the validation above or change server listeners or ports for you.
+Plugin 0.6.16 adds Chinese, English and Italian field-level feedback: submission or preview marks invalid fields and focuses the first error; editing rechecks and clears corrected errors. It does not relax the validation above or change server listeners or ports for you.
 
 ## Public-CA mode
 

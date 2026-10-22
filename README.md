@@ -26,20 +26,20 @@
   <a href="#兼容性">兼容性</a> ·
   <a href="docs/README.md">文档</a> ·
   <a href="#贡献者">贡献者</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.15">更新记录</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.16">更新记录</a> ·
   <a href="README.en.md">English</a>
 </p>
 
 > DSH Mobile 是 DeepSeek Harness 社区插件，原生 App 仅支持 Android。
 >
-> **当前正式版本：0.6.15**。改善移动页面的插件更新通知，兼容同源 Blob 音视频与 Firefox 隐私设置下的管理操作，并补充连接诊断。Android App **0.6.6** 独立发布，改善自动重连与取消。[插件更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.15) · [完整更新记录](CHANGELOG.md)。
+> **当前正式版本：0.6.16**。新增相册入口、浏览器语言记忆和 FRP 字段提示，改善前台重连；配合独立发布的 Android App **0.6.7**，可选择同电脑局域网／远程切换，并迁移符合条件的纯文本草稿。[插件更新与下载](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.16) · [完整更新记录](CHANGELOG.md)。
 >
 > **版本说明**：自插件 **0.6.2** 起，Android App 与插件独立编号、独立发布，版本号无需一致；插件升级不代表 App 需要同步升级。[兼容说明](#兼容性)。
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.6/dsh-mobile-android-v0.6.6.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.6/dsh-mobile-android-v0.6.6.apk"><strong>下载 Android App 0.6.6</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.6">版本说明与校验文件</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.7/dsh-mobile-android-v0.6.7.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile 安卓应用图标" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.7/dsh-mobile-android-v0.6.7.apk"><strong>下载 Android App 0.6.7</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.7">版本说明与校验文件</a></sub>
 </p>
 
 DSH Mobile 是一个 DeepSeek Harness 插件，让手机浏览器或 Android App 通过局域网，或可选的 Tailscale Funnel、cpolar、cloudflared、自建 FRP 或自有反向代理远程通道连接电脑，继续使用同一份会话、工作区、消息和工具。电脑端分别启停局域网与远程访问、分别管理配对授权；Android App 统一显示已配对电脑。插件不修改 DeepSeek Harness 源码。
@@ -143,7 +143,7 @@ dsh plugin --profile web add dshmarket
 
 不安装 App 也可以访问：点击 **复制配对链接**，在手机浏览器中打开。局域网使用私有证书，浏览器首次访问可能提示不受信任；只在确认这是自己的 DSH 网关后按浏览器指引继续。公开证书的远程入口不应出现证书警告，若出现请检查通道和证书，不要直接忽略。
 
-手机浏览器中的配对和重新连接页面支持简体中文、英文和意大利文，正式插件 0.6.15 按浏览器的 `Accept-Language` 选择语言。开发版本会优先记住当前网关主机名下最后显示的 DSH 语言，没有可用偏好时再使用浏览器语言；清除网站数据或更换主机名可能重置偏好。Android 原生界面仍跟随系统语言；DSH 内的插件控制面板继续跟随 DSH 当前语言。
+手机浏览器中的配对和重新连接页面支持简体中文、英文和意大利文。插件 0.6.16 起优先使用当前网关主机名下记住的 DSH 显示语言，没有可用偏好时再按浏览器的 `Accept-Language` 选择；清除网站数据或更换主机名可能重置偏好。Android 原生界面跟随系统语言；DSH 内的插件控制面板跟随 DSH 当前语言。
 
 浏览器手动配对时填写电脑端显示的 43 位配对码；以 `dsh1.` 或 `dsh2.` 开头的是 Android App 密钥，不要填入浏览器配对框。优先打开电脑端复制的配对链接，它会自动填写配对码；过期后在电脑端重新生成。
 
@@ -263,6 +263,8 @@ Android App 在“已配对设备”中统一显示电脑及其局域网／远�
 - 点按设备行可连接；右侧“…”和长按提供相同的操作面板，可编辑名称、立即检测、重新配对或删除本地记录。删除前会二次确认，并提供短暂撤销；撤销只恢复本机记录，不恢复电脑端已经撤销的授权。
 - 在 WebView 页面打开 DSH **设置 → 通用设置 → 切换电脑** 可回到已配对设备列表。在线收到电脑端撤销通知后，App 保留条目并显示“电脑端已移除”，停止自动重连，提供重新配对和删除本地记录。
 - **0.6.0 新增**：列表保持固定顺序，新配对追加到末尾，升级保留旧版可见顺序；操作面板提供 **上移／置顶**，顺序与启动选择分开。App 内还可长按左上角抽屉开关返回列表，短按仍开关抽屉；手机浏览器没有此原生动作。
+
+App 0.6.7 配合插件 0.6.16，可在列表 **设置 → 同电脑自动连接** 中选择 **手动**（默认）、**自动检测并提示** 或 **自动切换并提醒**。同一电脑的局域网和远程入口须分别配对；自动模式只迁移符合条件的当前会话纯文本草稿，不是完整页面状态迁移。附件、引用或待完成操作等情况需要确认，详见 [App 切换说明](apps/mobile/README.zh-CN.md#同电脑自动连接)。
 
 电脑端撤销会永久删除持久化存储中的设备记录及令牌摘要，而不是保留 `revokedAt` 标记；启动时也会清理旧版留下的已撤销记录。删除后，旧令牌与未知令牌一样返回 `401 authentication_failed`。现有 App 若在离线期间被撤销，再次检测时可能显示“配对已过期”，需要重新配对；在线会话仍会收到撤销通知并立即断开。
 

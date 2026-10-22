@@ -430,13 +430,28 @@ try {
   }
   await withControl(browser, 'FRP missing component explains disabled save', {
     layoutFixture: true, frpFixture: true, frpInstalled: false,
-  }, async ({ page, consumed, settle, openRemote }) => {
+  }, async ({ page, state, count, waitRequest, consumed, settle, openRemote }) => {
     await openRemote()
     await page.locator('.dsh-mobile-control__self-hosted').evaluate(node => { node.open = true })
+    const refreshBefore = count('GET', remotePath)
+    const refreshConsumed = await consumed(remotePath)
+    state.holdNextRemote = true
     const previous = await consumed(`${prefix}/remote/provider`)
     await page.locator('.dsh-mobile-control__provider.is-frp').click()
     await settle(`${prefix}/remote/provider`, previous)
+    const refresh = await waitRequest('GET', remotePath, refreshBefore)
+    assert.equal(typeof refresh.release, 'function', 'Provider refresh was not held')
     const hint = page.locator('#dsh-mobile-frp-action-hint')
+    const provider = page.locator('.dsh-mobile-control__provider.is-frp')
+    const install = page.getByRole('button', { name: 'Install official frpc', exact: true })
+    assert.match(await hint.textContent(), /remote operation is in progress/u)
+    assert.equal(await provider.isDisabled(), true)
+    assert.equal(await install.isDisabled(), true)
+    assert.equal(await page.locator('.dsh-mobile-control__frp-setup .dsh-mobile-control__primary').last().isDisabled(), true)
+    refresh.release()
+    await settle(remotePath, refreshConsumed)
+    await waitUntil(async () => ({ provider: await provider.isEnabled(), install: await install.isEnabled() }),
+      enabled => enabled.provider && enabled.install, 'FRP provider refresh idle controls')
     assert.equal(await hint.isVisible(), true)
     assert.match(await hint.textContent(), /Install.*frpc/u)
     assert.equal(await page.locator('.dsh-mobile-control__frp-setup .dsh-mobile-control__primary').last().isDisabled(), true)

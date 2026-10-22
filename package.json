@@ -83,7 +83,10 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-connection",
-        "@deepseek-ai/dsh-client-ui-sidebar"
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-ui-workspace"
       ],
       "immediately": true
     }
@@ -121,6 +124,7 @@
     "smoke:module-recovery": "node ./scripts/smoke-client-module-recovery.mjs",
     "smoke:module-settings": "node ./scripts/smoke-client-module-settings.mjs",
     "smoke:attachments": "node ./scripts/smoke-mobile-attachments.mjs",
+    "smoke:draft-transfer": "node ./scripts/smoke-draft-transfer.mjs",
     "smoke:gallery": "node ./scripts/smoke-gallery.mjs",
     "smoke:browser-auth-cookies": "node ./scripts/smoke-browser-auth-cookies.mjs",
     "smoke:upstream-auth": "node ./scripts/smoke-upstream-auth.mjs",

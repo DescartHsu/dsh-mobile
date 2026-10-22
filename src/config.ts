@@ -129,6 +129,8 @@ export interface ResolvedGatewayConfig {
   readonly excludedClientModules: readonly string[]
   readonly websocketCompression: ResolvedWebSocketCompressionConfig
   readonly instanceId: string
+  /** Plugin-wide installation identity, disclosed only after native authentication. */
+  readonly installationId?: string
   /** Identity returned only for authenticated legacy native credentials without a stored binding. */
   readonly legacyInstanceId?: string
   readonly pairingCaFile?: string

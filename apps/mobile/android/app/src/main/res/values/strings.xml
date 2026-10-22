@@ -198,4 +198,14 @@
     <string name="webview_update_action">View update options</string>
     <string name="webview_continue">Continue</string>
     <string name="device_storage_unavailable">Paired-device storage is unavailable. Unlock this device and reopen the app or retry. This operation could not be completed.</string>
+    <string name="same_host_title">Automatic same-computer connection</string>
+    <string name="same_host_limits">Default: manual. Switch only between independently paired entries with matching authenticated identity. Automatic mode migrates supported plain text without asking. Attachments, references, recording, pending work or unsupported state require confirmation. A target conflict or migration failure keeps the original page. Only limited plain-text state is transferred; messages are never replayed.</string>
+    <string name="same_host_manual">Manual</string>
+    <string name="same_host_enable">Automatic switch and notify</string>
+    <string name="same_host_switch_title">Change connection?</string>
+    <string name="same_host_switch_warning">Changing address reloads DSH. Unsent text, attachments and page state may be lost. Cancel to keep this page; save or copy your work first.</string>
+    <string name="same_host_switch_confirm">Switch and reload</string>
+    <string name="same_host_detect">Detect and ask</string>
+    <string name="same_host_switched">Switching connection automatically…</string>
+    <string name="same_host_migration_retained">Migration did not complete. The original page has been kept.</string>
 </resources>

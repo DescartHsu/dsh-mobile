@@ -95,6 +95,10 @@ internal class NativeBridge(
         fun takeBytes(): ByteArray = if (count == buf.size) buf else buf.copyOf(count)
     }
 
+    fun hasPendingTransferBlockers(): Boolean = synchronized(requestLock) {
+        pending.keys().isNotEmpty() || activityRequestId != null || processingTarget != null || restoredOperation != null
+    }
+
     private val pending = PendingRequestRegistry<Pending>(MAX_PENDING)
     private val requestLock = Any()
     private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor()

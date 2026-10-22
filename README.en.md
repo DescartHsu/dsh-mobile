@@ -26,20 +26,20 @@
   <a href="#compatibility">Compatibility</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="#contributors">Contributors</a> ·
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.15">Release notes</a> ·
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.16">Release notes</a> ·
   <a href="README.md">简体中文</a>
 </p>
 
 > DSH Mobile is a DeepSeek Harness community plugin; the native app supports Android only.
 >
-> **Current stable release: 0.6.15**. Improve mobile-page plugin-update notifications, support same-origin Blob media and management actions under Firefox privacy settings, and add connection diagnostics. Independently released Android App **0.6.6** improves automatic recovery and cancellation. [Plugin release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.15) · [Full changelog](CHANGELOG.md).
+> **Current stable release: 0.6.16**. Add Gallery, remembered browser language and FRP field feedback, and improve foreground reconnection. Independently released Android App **0.6.7** offers optional same-computer LAN/remote switching with eligible plain-text draft transfer. [Plugin release notes and downloads](https://github.com/saya-ch/dsh-mobile/releases/tag/v0.6.16) · [Full changelog](CHANGELOG.md).
 >
 > **Version policy**: since plugin **0.6.2**, the Android app and plugin use independent version numbers and releases. Their numbers do not need to match, and a plugin update does not imply an app update. [Compatibility notes](#compatibility).
 
 <p align="center">
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.6/dsh-mobile-android-v0.6.6.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
-  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.6/dsh-mobile-android-v0.6.6.apk"><strong>Download Android app 0.6.6</strong></a><br>
-  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.6">Release notes and checksums</a></sub>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.7/dsh-mobile-android-v0.6.7.apk"><img src="https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg" alt="DSH Mobile Android app icon" width="72" height="72"></a><br>
+  <a href="https://github.com/saya-ch/dsh-mobile/releases/download/android-v0.6.7/dsh-mobile-android-v0.6.7.apk"><strong>Download Android app 0.6.7</strong></a><br>
+  <sub><a href="https://github.com/saya-ch/dsh-mobile/releases/tag/android-v0.6.7">Release notes and checksums</a></sub>
 </p>
 
 DSH Mobile is a DeepSeek Harness plugin that lets a mobile browser or the Android app connect over a protected LAN or an optional Tailscale Funnel, cpolar, cloudflared, self-hosted FRP, or own reverse-proxy remote path. Both routes reach the same sessions, Workspaces, messages, and tools. The computer manages their switches and pairing authorizations separately; the Android app lists paired computers together. The plugin does not modify DeepSeek Harness source.
@@ -143,7 +143,7 @@ For a routed network such as WireGuard, 0.6.0 offers [additional trusted network
 
 The app is optional: select **Copy pairing link** and open it in a mobile browser. LAN uses a private certificate, which the browser may warn about on first visit; continue only after confirming that this is your DSH gateway. A public-certificate remote origin should not show a certificate warning. If it does, check the channel and certificate instead of bypassing the warning.
 
-Browser pairing and reauthentication pages support Simplified Chinese, English and Italian. Published plugin 0.6.15 selects them using the browser's `Accept-Language`. The development version prefers the last DSH display language remembered for that gateway hostname, falling back to the browser language when no usable preference exists; clearing site data or changing hostname can reset it. Native Android screens still follow the system language, while the DSH plugin control panel follows DSH's current language.
+Browser pairing and reauthentication pages support Simplified Chinese, English and Italian. Since plugin 0.6.16, they prefer the DSH display language remembered for that gateway hostname, falling back to the browser's `Accept-Language` when no usable preference exists; clearing site data or changing hostname can reset it. Native Android screens follow the system language, while the DSH plugin control panel follows DSH's current language.
 
 For manual browser pairing, enter the 43-character pairing code shown on the computer. Keys starting with `dsh1.` or `dsh2.` belong in the Android app, not the browser field. Prefer the pairing link copied from the computer, which fills the code automatically; generate a new link when it expires.
 
@@ -263,6 +263,8 @@ Each row shows its custom name, transport, Origin, periodically refreshed reacha
 - Tap a row to connect. The overflow button and long press open the same action sheet for rename, check now, pair again, or delete the local record. Deletion has a second confirmation and a short undo window; undo restores only the local row and never restores a computer-side revocation.
 - Open DSH **Settings → General → Switch computer** in the WebView to return to the list. An online computer-side revocation keeps the row as **Removed on computer**, stops reconnection and offers re-pairing or local deletion.
 - **Added in 0.6.0**: fixed order, new computers appended, and migration of the previously visible order. **Move up / Move to top** save the arrangement independently from startup selection. Inside the app, hold the top-left drawer toggle to return to the list; a normal tap still toggles the drawer. Browsers have no such native action.
+
+With App 0.6.7 and plugin 0.6.16, open the list's **Settings → Automatic same-computer connection** to choose **Manual** (default), **Detect and ask**, or **Automatic switch and notify**. Pair the computer's LAN and remote entries separately. Automatic mode transfers only eligible plain-text drafts in the current Session, not full page state; attachments, references or pending operations require confirmation. See the [App switching guide](apps/mobile/README.md#automatic-same-computer-connection).
 
 Revoking a device permanently deletes its durable record and token digest instead of retaining a `revokedAt` tombstone. Startup also removes legacy revoked rows. A deleted token receives `401 authentication_failed`, just like an unknown token. Existing apps checking a device that was revoked while offline may therefore show **Pairing expired** and require pairing again; online Sessions still receive the revocation notification and disconnect immediately.
 

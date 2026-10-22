@@ -24,6 +24,7 @@ import { pickBrowserFiles } from './browser-file-picker.js'
 import { createMobileAssetLoadReporter, ownsMobileCustomization, readMobileAssetText, type MobileAssetLoadFailure } from './mobile-custom-assets.js'
 import { EXTENSION_LIMITS, LEGACY_CUSTOM_ASSET_LIMIT } from './extension-limits.js'
 import { installMobileConnectionRecovery, type MobileConnectionState } from './client-recovery.js'
+import { installMobileUiLocalePersistence } from './mobile-ui-locale.js'
 
 export { shouldNudgeReconnect, shouldRenewSession } from './client-recovery.js'
 export type { MobileConnectionState } from './client-recovery.js'
@@ -4493,6 +4494,8 @@ export const CONTROL_STYLES = `
 
 /** Mount the desktop control or mobile feature enhancements. */
 export function apply(ctx: ClientContext): void {
+  ctx.effect(() => installMobileUiLocalePersistence(document, window), 'dsh-mobile: browser UI locale persistence')
+
   ctx.effect(() => {
     if (window.__DSH_MOBILE_FRONTEND__ !== 'dedicated') return
     const connection = ctx.get('connection')

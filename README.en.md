@@ -143,7 +143,7 @@ For a routed network such as WireGuard, 0.6.0 offers [additional trusted network
 
 The app is optional: select **Copy pairing link** and open it in a mobile browser. LAN uses a private certificate, which the browser may warn about on first visit; continue only after confirming that this is your DSH gateway. A public-certificate remote origin should not show a certificate warning. If it does, check the channel and certificate instead of bypassing the warning.
 
-Browser pairing and reauthentication pages use the browser's `Accept-Language` to show Simplified Chinese, English, or Italian. Android screens follow the system language, while the DSH plugin control panel follows the language selected by DSH.
+Browser pairing and reauthentication pages remember the language last displayed by DSH in that browser on the gateway hostname, using a non-secret preference cookie that outlives the short authentication session. Without a saved preference, they use the browser's `Accept-Language`. Supported copy remains Simplified Chinese, English, and Italian; a different unsupported DSH language falls back to English. Clearing site data, cookie expiry or changing the gateway hostname can restore browser-language fallback. Native Android screens still follow the system language, while the DSH plugin control panel follows DSH's current language.
 
 For manual browser pairing, enter the 43-character pairing code shown on the computer. Keys starting with `dsh1.` or `dsh2.` belong in the Android app, not the browser field. Prefer the pairing link copied from the computer, which fills the code automatically; generate a new link when it expires.
 

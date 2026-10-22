@@ -95,6 +95,7 @@ import {
   renderPairScript,
   resolveAuthPageLocale,
 } from './auth-pages.js'
+import { resolveBrowserUiLocale } from './browser-ui-locale.js'
 
 type GatewayServer = HttpServer | HttpsServer
 
@@ -1862,9 +1863,9 @@ export class MobileAccessGateway {
       && (target.decodedPathname === `${AUTH_PREFIX}/pair` || target.decodedPathname === `${AUTH_PREFIX}/pair.js`)) {
       if (!this.access.pairingStatus().open) throw new HttpError(404, 'not_found')
       const languageHeader = request.headers['accept-language']
-      const locale = resolveAuthPageLocale(typeof languageHeader === 'string' ? languageHeader : undefined)
+      const locale = resolveBrowserUiLocale(request.headers.cookie, typeof languageHeader === 'string' ? languageHeader : undefined)
       setSecurityHeaders(response, this.tlsEnabled)
-      response.setHeader('Vary', 'Accept-Language')
+      response.setHeader('Vary', 'Accept-Language, Cookie')
       const body = target.decodedPathname.endsWith('.js') ? renderPairScript(locale) : renderPairPage(locale)
       response.writeHead(200, {
         'Content-Type': target.decodedPathname.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8',
@@ -1877,9 +1878,9 @@ export class MobileAccessGateway {
       && (target.decodedPathname === `${AUTH_PREFIX}/login` || target.decodedPathname === `${AUTH_PREFIX}/login.js`)) {
       if (target.decodedPathname.endsWith('.js') && target.search !== '') throw new HttpError(400, 'bad_request')
       const languageHeader = request.headers['accept-language']
-      const locale = resolveAuthPageLocale(typeof languageHeader === 'string' ? languageHeader : undefined)
+      const locale = resolveBrowserUiLocale(request.headers.cookie, typeof languageHeader === 'string' ? languageHeader : undefined)
       setSecurityHeaders(response, this.tlsEnabled)
-      response.setHeader('Vary', 'Accept-Language')
+      response.setHeader('Vary', 'Accept-Language, Cookie')
       const body = target.decodedPathname.endsWith('.js') ? renderLoginScript(locale) : renderLoginPage(locale)
       response.writeHead(200, {
         'Content-Type': target.decodedPathname.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8',

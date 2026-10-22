@@ -218,6 +218,7 @@ export function createDraftTransfer(view: Window, page: Document): {
   return {
     api: safeApi,
     observe(sessionId, input) {
+      if (disposed) return () => undefined
       const key = {}, entry = { sessionId, input }
       observed.set(key, entry); invalidate()
       const changed = (): void => {
@@ -226,10 +227,14 @@ export function createDraftTransfer(view: Window, page: Document): {
       }
       changed()
       const unsubscribe = input.state.subscribe(changed)
-      subscriptions.add(unsubscribe)
-      return () => { unsubscribe(); subscriptions.delete(unsubscribe); observed.delete(key); invalidate() }
+      const remove = (): void => {
+        if (!subscriptions.delete(remove)) return
+        unsubscribe(); observed.delete(key); invalidate()
+      }
+      subscriptions.add(remove)
+      return remove
     },
-    dispose() { disposed = true; voiceObserver.disconnect(); page.removeEventListener('click', onClick, true); clearLease(); clearImport(); for (const unsubscribe of subscriptions) unsubscribe(); subscriptions.clear(); observed.clear(); for (const name of events) page.removeEventListener(name, onActivity, true) },
+    dispose() { if (disposed) return; disposed = true; voiceObserver.disconnect(); page.removeEventListener('click', onClick, true); clearLease(); clearImport(); for (const remove of subscriptions) remove(); subscriptions.clear(); observed.clear(); for (const name of events) page.removeEventListener(name, onActivity, true) },
   }
 }
 
@@ -272,6 +277,7 @@ export function installDraftTransfer(ctx: Context, view: Window, page: Document)
   Object.defineProperty(view, '__dshMobileDraftTransfer', { configurable: true, value: api })
   function Observer({ sessionId }: { sessionId: string }): ReturnType<typeof createElement> {
     useEffect(() => {
+      if (!active) return
       const sessions = ctx.get('sessions') as { scope(id: string): unknown }
       const conversation = ctx.get('conversation') as { input: { for(scope: unknown): DraftTransferInput } }
       if (typeof sessions?.scope !== 'function' || typeof conversation?.input?.for !== 'function') return
@@ -288,6 +294,7 @@ export function installDraftTransfer(ctx: Context, view: Window, page: Document)
     name: 'conversation.input.overlay', id: 'dsh-mobile-draft-transfer',
   }, Observer))
   return () => {
+    if (!active) return
     active = false; removeSlot(); mounted.clear(); controller.dispose()
     if (view.__dshMobileDraftTransfer === api) {
       if (previous === undefined) delete view.__dshMobileDraftTransfer

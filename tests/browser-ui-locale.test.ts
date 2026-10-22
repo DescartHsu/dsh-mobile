@@ -9,7 +9,8 @@ describe('remembered browser UI locale', () => {
   it.each([undefined, '', 'other=en', 'dsh_ma_ui_locale=', 'dsh_ma_ui_locale=EN',
     'dsh_ma_ui_locale=%65n', 'dsh_ma_ui_locale=fr', 'dsh_ma_ui_locale=<script>',
     'dsh_ma_ui_locale=en=extra', 'dsh_ma_ui_locale=en; dsh_ma_ui_locale=zh',
-    'dsh_ma_ui_locale=en; dsh_ma_ui_locale=en', 'x'.repeat(8193),
+    'dsh_ma_ui_locale=en; dsh_ma_ui_locale=en', 'dsh_ma_ui_locale',
+    'dsh_ma_ui_locale; dsh_ma_ui_locale=en', 'dsh_ma_ui_locale=en; dsh_ma_ui_locale', 'x'.repeat(8193),
   ])('falls back safely for absent or invalid preference %#', header => {
     expect(readBrowserUiLocale(header)).toBeUndefined()
     expect(resolveBrowserUiLocale(header, 'zh-HK,en;q=0.8')).toBe('zh')
@@ -18,6 +19,7 @@ describe('remembered browser UI locale', () => {
 
   it('does not let an unrelated malformed cookie invalidate the preference', () => {
     expect(readBrowserUiLocale('unrelated; dsh_ma_ui_locale=it; other=<bad>')).toBe('it')
+    expect(readBrowserUiLocale('dsh_ma_ui_localeX; dsh_ma_ui_locale=it')).toBe('it')
   })
 
   it('writes a persistent narrow host-only presentation cookie, secure on HTTPS', () => {

@@ -254,6 +254,9 @@ async function runCase({ width, height = 900, locale, bridgeMode }) {
     }
     const geometry = await page.evaluate(() => ({ viewport: innerWidth, body: document.body.scrollWidth, root: document.documentElement.scrollWidth,
       language: document.documentElement.lang, fontRowLanguage: document.querySelector('[data-mobile-font-setting]')?.getAttribute('lang') }))
+    const expectedLanguage = locale.startsWith('zh') ? 'zh' : 'en'
+    assert.equal(geometry.language.toLowerCase().split(/[-_]/u)[0], expectedLanguage, 'Stored Host language displaced the browser-derived settings matrix')
+    assert.equal(geometry.fontRowLanguage, expectedLanguage, 'Mobile settings did not follow the active DSH language')
     assert(geometry.body <= geometry.viewport + 1 && geometry.root <= geometry.viewport + 1, `Settings overflow ${JSON.stringify(geometry)}`)
     assert.equal(settingsWrites.length, 0, `Local settings wrote Host preferences: ${settingsWrites.join(', ')}`)
     assert.deepEqual(errors, [], 'Settings generated unhandled page errors')
@@ -263,7 +266,7 @@ async function runCase({ width, height = 900, locale, bridgeMode }) {
     await row.waitFor({ state: 'hidden' })
     assert.equal(await page.evaluate(() => window.__settingsRetainedDocument), 'retain settings navigation', 'Closing settings replaced the DSH document')
     await page.locator('.dshm-main').waitFor({ state: 'visible' })
-    cases.push({ width, height, locale, bridgeMode, language: geometry.fontRowLanguage, typographySupport })
+    cases.push({ width, height, locale, bridgeMode, expectedLanguage, language: geometry.fontRowLanguage, typographySupport })
   } finally { await context.close() }
 }
 
@@ -361,12 +364,13 @@ try {
   browser = await chromium.launch({ headless: true })
   desktop = await browser.newPage({ locale: 'en-US' })
   await openPairing(desktop, await dsh.ready(), dsh.logs)
-  await runLanguageCase()
   for (const width of [320, 288]) {
     for (const [locale, bridgeMode] of [['en-US', 'browser'], ['zh-CN', 'old-app'], ['it-IT', 'scale-app']]) await runCase({ width, locale, bridgeMode })
   }
   await runCase({ width: 375, height: 812, locale: 'en-US', bridgeMode: 'browser' })
   await runCase({ width: 844, height: 393, locale: 'zh-CN', bridgeMode: 'scale-app' })
+  // Explicit language selection persists on the fixture Host, unlike browser-derived preferences above.
+  await runLanguageCase()
   console.log(JSON.stringify({ passed: cases.length, tarballSha256, cases, nativeScaleBridge: 'simulated; actual Android viewport reflow is device-tested separately',
     typography: 'real mounted React/DSH settings, local storage migration, role writes, reset, touch targets and no Host writes' }))
 } catch (error) {

@@ -115,6 +115,8 @@ class MainActivity : Activity() {
         val pendingDownload: PendingDownload?,
     )
 
+    private data class StagedBrowser(val browser: WebView, val bridge: NativeBridge)
+
     private val preferences by lazy { getSharedPreferences(PREFERENCES_NAME, MODE_PRIVATE) }
     private val lanCredentialStore by lazy { DeviceCredentialStore(this, "lan") }
     private val remoteCredentialStore by lazy { DeviceCredentialStore(this, "remote") }
@@ -2500,6 +2502,16 @@ class MainActivity : Activity() {
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(target, false)
         installBrowserCompatibilityShim(target, targetOrigin)
+        // WebMessage objects are injected only for navigations after listener registration.
+        // Keep the staged document inert until this exact browser becomes the active page.
+        val targetBridge = NativeBridge(this, target, targetOrigin, activeOwner = {
+            webView === target && gatewayOrigin == targetOrigin && !isFinishing && !isDestroyed
+        })
+        if (!runCatching { targetBridge.install() }.getOrDefault(false)) {
+            targetBridge.dispose(); parent.removeView(target); target.destroy(); parent.removeView(shield)
+            releaseCapturedDraft(); settled()
+            return
+        }
         val transfer = PlainTextDraftTransfer(restoreUiHandler)
         draftTransfer = transfer
         var failed = false
@@ -2524,7 +2536,7 @@ class MainActivity : Activity() {
                 nativeBridge?.hasPendingTransferBlockers() != true &&
                 client.currentDocumentGeneration <= 1 && (target.url == null || target.url == url)
         }, onAbort = {
-            client.dispose(); parent.removeView(target); target.destroy(); parent.removeView(shield)
+            client.dispose(); targetBridge.dispose(); parent.removeView(target); target.destroy(); parent.removeView(shield)
             if (draftTransfer === transfer) {
                 source.setOnTouchListener(null); draftTransfer = null
                 if (capturedDraft?.second?.optString("token") == snapshot.optString("token")) capturedDraft = null
@@ -2539,7 +2551,7 @@ class MainActivity : Activity() {
             client.dispose(); parent.removeView(shield); parent.removeView(target)
             accessMode = saved.mode; activatePairedDevice(saved); draftTransfer = null; capturedDraft = null
             settled()
-            showBrowser(targetOrigin, requested.caCertificate, url, stagedBrowser = target)
+            showBrowser(targetOrigin, requested.caCertificate, url, stagedBrowser = StagedBrowser(target, targetBridge))
             Toast.makeText(this, R.string.same_host_switched, Toast.LENGTH_LONG).show()
         })
         target.loadUrl(url)
@@ -3141,7 +3153,7 @@ class MainActivity : Activity() {
         origin: GatewayOrigin,
         caCertificate: ByteArray?,
         requestedInitialUrl: String = origin.serialized,
-        stagedBrowser: WebView? = null,
+        stagedBrowser: StagedBrowser? = null,
     ) {
         if (!isOriginAllowedForAccessMode(origin)) {
             val cleared = withCredentialStorage { credentialStore().clear() } != null
@@ -3178,7 +3190,7 @@ class MainActivity : Activity() {
             setBackgroundColor(initialChromeColor)
         }
         window.isNavigationBarContrastEnforced = false
-        val browser = stagedBrowser ?: WebView(this)
+        val browser = stagedBrowser?.browser ?: WebView(this)
         (browser.parent as? ViewGroup)?.removeView(browser)
         browser.alpha = 1f
         browser.setOnTouchListener(null)
@@ -3208,7 +3220,7 @@ class MainActivity : Activity() {
         browser.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
             if (right - left != oldRight - oldLeft) displayScale.apply()
         }
-        installBrowserCompatibilityShim(browser, origin)
+        if (stagedBrowser == null) installBrowserCompatibilityShim(browser, origin)
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
@@ -3339,7 +3351,7 @@ class MainActivity : Activity() {
         }
         nativeBridge?.dispose()
         val bridgeState = restoredNativeBridgeState.also { restoredNativeBridgeState = null }
-        nativeBridge = NativeBridge(this, browser, origin, bridgeState).also { bridge ->
+        nativeBridge = (stagedBrowser?.bridge ?: NativeBridge(this, browser, origin, bridgeState)).also { bridge ->
             bridge.onPageBackgroundColor = { color ->
                 root.setBackgroundColor(color)
                 statusBarBackdrop.setBackgroundColor(color)
@@ -3402,7 +3414,7 @@ class MainActivity : Activity() {
             ?: origin.serialized
         retryUrl = initialUrl
         if (stagedBrowser == null) browser.loadUrl(initialUrl)
-        else { nativeBridge?.injectPage(); finishConnectionAttempt() }
+        else { displayScale.onDocumentReady(); nativeBridge?.injectPage(); finishConnectionAttempt() }
     }
 
     /** Request task-reminder permission in foreground, or open its system settings once decided. */

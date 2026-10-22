@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { webcrypto } from 'node:crypto'
-import { createDraftTransfer, DRAFT_TRANSFER_MAX_BYTES, type DraftTransferInput } from '../src/draft-transfer.js'
+import { createDraftTransfer, DRAFT_TRANSFER_MAX_BYTES, installDraftTransfer, type DraftTransferInput } from '../src/draft-transfer.js'
+
+const pendingEffects = vi.hoisted(() => [] as Array<() => void | (() => void)>)
+vi.mock('react', async importOriginal => ({
+  ...await importOriginal<typeof import('react')>(),
+  useEffect: (effect: () => void | (() => void)) => { pendingEffects.push(effect) },
+}))
 
 function fixture(text = '') {
   vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} })
@@ -16,8 +22,54 @@ function fixture(text = '') {
   const unmount = controller.observe('session-1', input)
   return { ...controller, page, view, input, update, unmount, listeners }
 }
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
+afterEach(() => { pendingEffects.length = 0; vi.unstubAllGlobals(); vi.useRealTimers() })
 describe('limited public input draft transfer', () => {
+  it('rejects late composer observation and releases each subscription only once', () => {
+    const f = fixture('retained')
+    const listeners = new Set<() => void>()
+    const unsubscribe = vi.fn(() => { listeners.clear() })
+    const subscribe = vi.fn((listener: () => void) => { listeners.add(listener); return unsubscribe })
+    const input: DraftTransferInput = {
+      state: { getSnapshot: f.input.state.getSnapshot, subscribe }, setDraft: f.input.setDraft,
+    }
+    const remove = f.observe('session-2', input)
+    expect(subscribe).toHaveBeenCalledOnce()
+    f.dispose(); f.dispose(); remove(); remove()
+    expect(unsubscribe).toHaveBeenCalledOnce()
+    expect(listeners.size).toBe(0)
+    const lateRemove = f.observe('session-2', input)
+    lateRemove(); lateRemove()
+    expect(subscribe).toHaveBeenCalledOnce()
+    expect(f.api.capture()).toBeNull()
+  })
+  it('does not reacquire services or subscribe when a queued passive effect runs after disposal', () => {
+    const f = fixture('retained')
+    let renderObserver: (() => void) | undefined
+    const subscribe = vi.spyOn(f.input.state, 'subscribe')
+    const removeSlot = vi.fn()
+    const get = vi.fn((name: string) => name === 'sessions'
+      ? { scope: () => ({}) } : { input: { for: () => f.input } })
+    const ctx: Parameters<typeof installDraftTransfer>[0] = {
+      get,
+      slots: {
+        inject: (_name, registration) => registration(),
+        register: (_options, component) => {
+          renderObserver = () => { Reflect.apply(component, undefined, [{ sessionId: 'session-1' }]) }
+          return removeSlot
+        },
+      },
+    }
+    const dispose = installDraftTransfer(ctx, f.view, f.page)
+    renderObserver!()
+    expect(pendingEffects).toHaveLength(1)
+    dispose(); dispose()
+    expect(removeSlot).toHaveBeenCalledOnce()
+    pendingEffects.shift()!()
+    expect(get).not.toHaveBeenCalled()
+    expect(subscribe).not.toHaveBeenCalled()
+    expect(f.view.__dshMobileDraftTransfer).toBeUndefined()
+    f.dispose()
+  })
   it('captures/validates plain text and restores exact text without submission', () => {
     const source = fixture('  a\n\n"\\😀\u2028\n')
     const snapshot = source.api.capture()!

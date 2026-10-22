@@ -89,6 +89,9 @@ jobs:
       - name: Verify Gallery selection, menu order and stale-result cleanup
         if: matrix.dsh == '0.2.1-rc.2'
         run: npm run smoke:gallery
+      - name: Verify limited plain-text draft transfer through public DSH input APIs
+        if: matrix.dsh == '0.2.1-rc.2'
+        run: npm run smoke:draft-transfer
       - run: npm run smoke:composer-overflow
       - name: Verify the real stock composer with optional plugin controls
         if: matrix.dsh == '0.2.0-rc.2' || matrix.dsh == '0.2.1-alpha.2' || matrix.dsh == '0.2.1-alpha.3' || matrix.dsh == '0.2.1-rc.2'

@@ -1,10 +1,11 @@
 /** Packed plugin, real DSH input, two authenticated Origins; no prompts or user profile. */
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { createServer, request } from 'node:http'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { packBundle, installPackedBundle } from './packed-profile.mjs'
@@ -17,8 +18,15 @@ const previousCache = process.env.npm_config_cache
 process.env.npm_config_cache = join(root, 'npm-cache')
 let browser, dsh, proxy
 const sockets = new Set()
+const requests = new Set()
 const errors = [], prompts = []
+let failure
 let sequence = 0
+const rememberSocket = socket => {
+  if (sockets.has(socket)) return
+  sockets.add(socket)
+  socket.once('close', () => sockets.delete(socket))
+}
 async function rpc(page, method, data) {
   const response = await page.evaluate(async ({ method, data, id }) => {
     const result = await fetch(`/api/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' },
@@ -47,16 +55,20 @@ async function alternateOrigin(origin) {
         if (typeof headers.location === 'string' && headers.location.startsWith(upstream.origin + '/')) headers.location = `http://${req.headers.host}` + headers.location.slice(upstream.origin.length)
         res.writeHead(incoming.statusCode, headers); incoming.pipe(res)
       })
+    requests.add(forwarded)
+    forwarded.once('close', () => requests.delete(forwarded))
+    forwarded.on('socket', rememberSocket)
     forwarded.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end() })
     req.pipe(forwarded)
   })
-  proxy.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)) })
+  proxy.on('connection', rememberSocket)
   proxy.on('upgrade', (req, socket, head) => {
     const upstreamSocket = connect(Number(upstream.port), upstream.hostname, () => {
       upstreamSocket.write(`${req.method} ${req.url} HTTP/${req.httpVersion}\r\n${Object.entries(canonicalHeaders(req)).map(([key, value]) => `${key}: ${value}\r\n`).join('')}\r\n`)
       if (head.length) upstreamSocket.write(head)
       upstreamSocket.pipe(socket); socket.pipe(upstreamSocket)
     })
+    rememberSocket(upstreamSocket)
     socket.on('error', () => upstreamSocket.destroy()); upstreamSocket.on('error', () => socket.destroy())
     socket.on('close', () => upstreamSocket.destroy())
   })
@@ -71,7 +83,10 @@ async function capture(page) {
 async function release(page, snapshot) { await page.evaluate(value => window.__dshMobileDraftTransfer.release(value), snapshot) }
 try {
   await mkdir(join(root, 'workspace'))
-  const tarball = await packBundle(fileURLToPath(new URL('..', import.meta.url)), root)
+  const tarball = process.env.DSH_BOOT_SMOKE_MOBILE_TARBALL === undefined
+    ? await packBundle(fileURLToPath(new URL('..', import.meta.url)), root)
+    : resolve(process.env.DSH_BOOT_SMOKE_MOBILE_TARBALL)
+  console.log(JSON.stringify({ artifactSha256: createHash('sha256').update(await readFile(tarball)).digest('hex') }))
   const home = await createMobileProfile(root, { tarball, dshBin, packageStoreDirectory: join(root, 'store') })
   const fixture = join(root, 'draft-state-fixture')
   await mkdir(join(fixture, 'lib'), { recursive: true })
@@ -167,13 +182,39 @@ try {
   assert.deepEqual(prompts, [], 'Migration must never submit a message')
   console.log('Packed two-Origin real-input migration passed: Unicode text visible in target, source preserved/change invalidation, target conflict/cleared-target rejection, conditional owned-import rollback, attachments protected, no prompts.')
 } catch (error) {
-  console.error(sanitized(String(error?.stack ?? error))); if (dsh) console.error(sanitized(dsh.logs()))
-  process.exitCode = 1
+  failure = new Error(`${sanitized(String(error?.stack ?? error))}\n${dsh === undefined ? '' : sanitized(dsh.logs())}`)
 } finally {
-  await browser?.close().catch(() => {})
-  for (const socket of sockets) socket.destroy()
-  if (proxy) await new Promise(resolve => proxy.close(resolve))
-  await dsh?.close()
-  await removeTemporaryRoot(root, 'dsh-mobile-transfer-smoke-')
+  const failures = failure === undefined ? [] : [failure]
+  const cleanup = { browserClosed: browser === undefined, proxyClosed: proxy === undefined,
+    proxySocketsRemaining: undefined, proxyRequestsRemaining: undefined, dshExit: undefined, temporaryRootRemoved: false }
+  if (browser !== undefined) await browser.close().then(() => { cleanup.browserClosed = true }, error => failures.push(error))
+  if (proxy !== undefined) {
+    try {
+      const closed = proxy.listening ? new Promise((done, reject) => proxy.close(error => error ? reject(error) : done())) : Promise.resolve()
+      await Promise.all([...requests].map(outgoing => new Promise(done => { outgoing.once('close', done); outgoing.destroy() })))
+      await Promise.all([...sockets].map(socket => new Promise(done => {
+        if (socket.closed) { done(); return }
+        socket.once('close', done)
+        socket.destroy()
+      })))
+      await closed
+      cleanup.proxyClosed = true
+    } catch (error) { failures.push(error) }
+  }
+  cleanup.proxySocketsRemaining = sockets.size
+  cleanup.proxyRequestsRemaining = requests.size
+  if (sockets.size !== 0 || requests.size !== 0) failures.push(new Error('Draft transfer proxy still owns live requests or sockets'))
+  if (dsh !== undefined) {
+    try {
+      cleanup.dshExit = await dsh.close()
+      if (cleanup.dshExit.forced || (cleanup.dshExit.code !== 0 && cleanup.dshExit.signal !== 'SIGTERM')) {
+        failures.push(new Error(`Draft transfer DSH fixture did not stop quiescently: ${sanitized(JSON.stringify(cleanup.dshExit))}`))
+      }
+    } catch (error) { failures.push(error) }
+  }
+  await removeTemporaryRoot(root, 'dsh-mobile-transfer-smoke-').then(() => { cleanup.temporaryRootRemoved = true }, error => failures.push(error))
   if (previousCache === undefined) delete process.env.npm_config_cache; else process.env.npm_config_cache = previousCache
+  console.log(`Draft transfer fixture cleanup ${JSON.stringify(cleanup)}`)
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) throw new AggregateError(failures, 'Draft transfer acceptance and cleanup failed')
 }

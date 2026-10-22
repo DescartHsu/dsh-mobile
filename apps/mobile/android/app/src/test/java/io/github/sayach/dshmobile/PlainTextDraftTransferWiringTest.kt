@@ -27,12 +27,49 @@ class PlainTextDraftTransferWiringTest {
         val stage = text.substring(start, text.indexOf("private fun trySameHostFallback", start))
         assertTrue(stage.contains("SecureWebViewClient(targetOrigin, requested.caCertificate"))
         assertTrue(stage.contains("MIXED_CONTENT_NEVER_ALLOW"))
-        assertFalse(stage.contains("NativeBridge("))
+        val registration = stage.indexOf("targetBridge.install()")
+        assertTrue(registration >= 0 && registration < stage.indexOf("target.loadUrl(url)"))
+        assertTrue(stage.contains("NativeBridge(this, target, targetOrigin, activeOwner = {"))
+        assertTrue(stage.contains("webView === target && gatewayOrigin == targetOrigin && !isFinishing && !isDestroyed"))
+        assertTrue(stage.contains("stagedBrowser = StagedBrowser(target, targetBridge)"))
         assertTrue(stage.contains("generation == restoreGeneration"))
         assertTrue(stage.contains("lifecycleOwner == sameHostGate.generation"))
         assertTrue(stage.contains("PairedDeviceStatusPolicy.mayApplyResult(it, saved)"))
         assertTrue(stage.contains("target.destroy(); parent.removeView(shield)"))
         assertTrue(text.contains("if (stagedBrowser == null) browser.loadUrl(initialUrl)"))
+    }
+
+    @Test fun stagedPromotionReusesThePreNavigationBridgeAndInitializesDisplayScaleWithoutReload() {
+        val activity = source("MainActivity")
+        val show = activity.substringAfter("private fun showBrowser(").substringBefore("private fun openTaskNotificationSettings")
+        assertTrue(show.contains("stagedBrowser: StagedBrowser? = null"))
+        assertTrue(show.contains("val browser = stagedBrowser?.browser ?: WebView(this)"))
+        assertTrue(show.contains("nativeBridge = (stagedBrowser?.bridge ?: NativeBridge(this, browser, origin, bridgeState))"))
+        assertTrue(show.contains("if (stagedBrowser == null) installBrowserCompatibilityShim(browser, origin)"))
+        assertTrue(show.contains("else { displayScale.onDocumentReady(); nativeBridge?.injectPage(); finishConnectionAttempt() }"))
+    }
+
+    @Test fun stagedBridgeCannotHandleMessagesOrPublishItsAdapterUntilPromoted() {
+        val bridge = source("NativeBridge")
+        assertTrue(bridge.contains("private val activeOwner: () -> Boolean = { true }"))
+        assertTrue(bridge.contains("private val available: Boolean get() = installed && activeOwner()"))
+        val message = bridge.substringAfter("override fun onPostMessage(").substringBefore("installed = true")
+        assertTrue(message.indexOf("if (!available || view !== webView) return") < message.indexOf("handleMessage(message.data, replyProxy)"))
+        val inject = bridge.substringAfter("fun injectPage()").substringBefore("fun updateKeyboardState")
+        assertTrue(inject.contains("if (!available || !GatewayUrlPolicy.isSameOrigin"))
+        assertTrue(inject.indexOf("if (!available") < inject.indexOf("webView.evaluateJavascript"))
+        val renewal = bridge.substringAfter("\"auth.renew\" -> activity.runOnUiThread").substringBefore("\"files.pick\" ->")
+        assertTrue(renewal.contains("available && !preservingForConfiguration && expectedDocument == documentGeneration"))
+        assertTrue(bridge.contains("webView.post { if (available) runCatching { call.replyProxy.postMessage(boundedBody) } }"))
+    }
+
+    @Test fun everyUnpromotedTargetFailureDisposesItsBridgeBeforeDestroyingTheWebView() {
+        val activity = source("MainActivity")
+        val stage = activity.substringAfter("private fun stagePlainTextTransfer").substringBefore("private fun trySameHostFallback")
+        assertTrue(stage.contains("targetBridge.dispose(); parent.removeView(target); target.destroy(); parent.removeView(shield)"))
+        val abort = stage.substringAfter("}, onAbort = {").substringBefore("}, onCommit = {")
+        assertTrue(abort.indexOf("targetBridge.dispose()") < abort.indexOf("target.destroy()"))
+        assertTrue(abort.contains("settled()"))
     }
 
     @Test fun microphoneGrantsBlockMigrationUntilDocumentNavigationOrTeardown() {

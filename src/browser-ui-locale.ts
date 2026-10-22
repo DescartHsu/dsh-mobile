@@ -5,10 +5,16 @@ const UI_LOCALE_COOKIE = 'dsh_ma_ui_locale'
 /** Read presentation data only; malformed or ambiguous cookies keep browser negotiation. */
 export function readBrowserUiLocale(cookieHeader: string | undefined): AuthPageLocale | undefined {
   if (cookieHeader === undefined || cookieHeader.length > 8192) return undefined
-  const values = cookieHeader.split(';').filter(part => part.slice(0, part.indexOf('=')).trim() === UI_LOCALE_COOKIE)
-  if (values.length !== 1) return undefined
-  const value = values[0]!.slice(values[0]!.indexOf('=') + 1).trim()
-  return value === 'en' || value === 'zh' || value === 'it' ? value : undefined
+  let locale: AuthPageLocale | undefined
+  for (const part of cookieHeader.split(';')) {
+    const separator = part.indexOf('=')
+    const name = (separator === -1 ? part : part.slice(0, separator)).trim()
+    if (name !== UI_LOCALE_COOKIE) continue
+    const value = separator === -1 ? '' : part.slice(separator + 1).trim()
+    if (locale !== undefined || (value !== 'en' && value !== 'zh' && value !== 'it')) return undefined
+    locale = value
+  }
+  return locale
 }
 
 /** Prefer the last DSH display language over the browser's default language. */

@@ -123,6 +123,10 @@ class MainActivity : Activity() {
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val restoreExecutor = Executors.newFixedThreadPool(3)
     private val restoreWorkGate = NativeRestoreWorkGate<String>(restoreExecutor)
+    // Reserve bounded probe capacity: two slow status jobs plus LAN renewal may occupy restoreExecutor.
+    // The shared work gate still serializes physical operations for the same credential.
+    private val sameHostProbeExecutor = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L,
+        java.util.concurrent.TimeUnit.MILLISECONDS, java.util.concurrent.ArrayBlockingQueue(1))
     private val connectionCancellationExecutor = Executors.newFixedThreadPool(2)
     private val recoveryHandler = Handler(Looper.getMainLooper())
     private val restoreUiHandler = Handler(Looper.getMainLooper())
@@ -170,6 +174,8 @@ class MainActivity : Activity() {
     )
 
     private var pendingAudioPermission: PendingAudioPermission? = null
+    // WebView exposes grants, not reliable track-ended events. Refuse migration for this document.
+    private var audioCaptureGrantedBrowser: WebView? = null
     private var gatewayOrigin: GatewayOrigin? = null
     private var accessMode = AccessMode.LAN
     private var setupBackAction: (() -> Unit)? = null
@@ -313,6 +319,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        sameHostGate.resume()
+        sameHostMonitor.start()
         nativeBridge?.onHostResumed()
         webView?.onResume()
         window.decorView.requestApplyInsets()
@@ -320,6 +328,19 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        draftTransfer?.abort()
+        releaseCapturedDraft()
+        sameHostMonitor.stop()
+        sameHostGate.pause()
+        sameHostProbeCancellation?.cancel()
+        sameHostProbeCancellation = null
+        if (sameHostRestoreAttempt != null && pendingConnection === sameHostRestoreAttempt) {
+            withdrawConnectionAttempt()
+            cancelAutomaticRecovery()
+            invalidateRestoreAttempts()
+        }
+        sameHostRestoreAttempt = null
+        sameHostConfirmation?.dismiss()
         pauseDeviceListRefresh()
         cancelPendingWebBack()
         nativeBridge?.updateKeyboardState(NativeKeyboardState(false, false))
@@ -344,9 +365,10 @@ class MainActivity : Activity() {
         }
         ioExecutor.shutdownNow()
         restoreExecutor.shutdownNow()
+        sameHostProbeExecutor.shutdownNow()
         // A cancelled worker may register its final disconnect after Activity teardown.
         Thread({
-            for (executor in listOf(ioExecutor, restoreExecutor)) {
+            for (executor in listOf(ioExecutor, restoreExecutor, sameHostProbeExecutor)) {
                 while (!executor.awaitTermination(1, java.util.concurrent.TimeUnit.DAYS)) Unit
             }
             connectionCancellationExecutor.shutdown()
@@ -750,8 +772,10 @@ class MainActivity : Activity() {
             showDeviceList()
             return
         }
-        activeDeviceKey = preferred.key
-        restoreStartupDevice(preferred)
+        val startup = if (automaticSameHost()) SameHostSwitchPolicy.candidate(preferred, devices,
+            if (sameHostMonitor.hasWifi()) AccessMode.LAN else AccessMode.REMOTE, System.currentTimeMillis()) ?: preferred else preferred
+        activeDeviceKey = startup.key
+        restoreStartupDevice(startup)
     }
 
     private fun restoreStartupDevice(device: PairedDeviceRecord) {
@@ -766,6 +790,7 @@ class MainActivity : Activity() {
             generation = beginRestoreAttempt(),
             deviceKey = device.key,
         ) { disposition ->
+            if (trySameHostFallback(device, disposition) { showDeviceList() }) return@restoreTrustedDevice
             if (disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
                 if (!scheduleAutomaticRecovery() && !isFinishing && !isDestroyed) {
                     showDeviceList()
@@ -1144,8 +1169,8 @@ class MainActivity : Activity() {
     private fun showDeviceListSettings() {
         AlertDialog.Builder(this)
             .setTitle(R.string.device_list_settings)
-            .setItems(arrayOf(getString(R.string.launch_settings), getString(R.string.icon_settings))) { _, which ->
-                if (which == 0) showLaunchSettings() else showIconSettings()
+            .setItems(arrayOf(getString(R.string.launch_settings), getString(R.string.icon_settings), getString(R.string.same_host_title))) { _, which ->
+                when (which) { 0 -> showLaunchSettings(); 1 -> showIconSettings(); else -> showSameHostSettings() }
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -2092,6 +2117,7 @@ class MainActivity : Activity() {
                     val granted = permissions.size == 1 && permissions[0] == Manifest.permission.RECORD_AUDIO &&
                         grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
                     if (granted && currentPage) {
+                        audioCaptureGrantedBrowser = pending.owner
                         pending.request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
                     } else {
                         pending.request.deny()
@@ -2157,6 +2183,7 @@ class MainActivity : Activity() {
         origin: GatewayOrigin,
         session: NativeSession,
         credential: DeviceCredential,
+        activate: Boolean = true,
     ): PairedDeviceRecord? {
         dismissDeviceUndo()
         val key = "${mode.name.lowercase()}:${session.instanceId}"
@@ -2177,15 +2204,20 @@ class MainActivity : Activity() {
                 lastConnectedAt = now,
                 lastReachableAt = now,
                 status = PairedDeviceStatus.REACHABLE,
+                installationId = session.installationId ?: existing?.takeIf { it.deviceToken == token }?.installationId,
         )
         if (withCredentialStorage { pairedDeviceStore.upsert(record) } == null) return null
-        activeDeviceKey = key
-        preferences.edit()
-            .putString(PREFERENCE_LAST_DEVICE_KEY, key)
-            .putLong(lastConnectedPreference(mode), now)
-            .putString(originPreference(mode), origin.serialized)
-            .apply()
+        if (activate) activatePairedDevice(record)
         return record
+    }
+
+    private fun activatePairedDevice(record: PairedDeviceRecord) {
+        activeDeviceKey = record.key
+        preferences.edit()
+            .putString(PREFERENCE_LAST_DEVICE_KEY, record.key)
+            .putLong(lastConnectedPreference(record.mode), record.lastConnectedAt ?: System.currentTimeMillis())
+            .putString(originPreference(record.mode), record.origin.serialized)
+            .apply()
     }
 
     private fun showPairedDeviceNamePrompt(record: PairedDeviceRecord, complete: () -> Unit) {
@@ -2231,6 +2263,275 @@ class MainActivity : Activity() {
         }
     }
 
+    private val sameHostGate = SameHostSwitchGate()
+    private val sameHostMonitor by lazy { SameHostNetworkMonitor(this, ::checkSameHostConnection) }
+    private var capturedDraft: Pair<WebView, org.json.JSONObject>? = null
+    private fun releaseCapturedDraft() {
+        capturedDraft?.let { (browser, snapshot) -> PlainTextDraftTransfer(restoreUiHandler).release(browser, snapshot) }
+        capturedDraft = null
+        webView?.setOnTouchListener(null)
+    }
+    private var draftTransfer: PlainTextDraftTransfer? = null
+    private var sameHostConfirmation: AlertDialog? = null
+    private var sameHostRestoreAttempt: ConnectionAttemptController.Attempt? = null
+    private var sameHostProbeCancellation: NativeConnectionCancellation? = null
+    private var sameHostObservedWifi: Boolean? = null
+    private fun sameHostMode() = SameHostSwitchMode.resolve(preferences.getString("same_host_mode", null),
+        preferences.getBoolean("automatic_same_host", false))
+    private fun automaticSameHost() = sameHostMode() != SameHostSwitchMode.MANUAL
+
+    private fun showSameHostSettings() {
+        val choices = arrayOf(getString(R.string.same_host_manual), getString(R.string.same_host_detect), getString(R.string.same_host_enable))
+        AlertDialog.Builder(this).setTitle(R.string.same_host_title)
+            .setSingleChoiceItems(choices, sameHostMode().ordinal) { dialog, which ->
+                fun save() {
+                    preferences.edit().putString("same_host_mode", SameHostSwitchMode.entries[which].name).apply()
+                    sameHostGate.invalidate()
+                    sameHostProbeCancellation?.cancel()
+                    sameHostProbeCancellation = null
+                    sameHostConfirmation?.dismiss()
+                    checkSameHostConnection()
+                }
+                dialog.dismiss()
+                if (which == SameHostSwitchMode.AUTOMATIC.ordinal) {
+                    AlertDialog.Builder(this).setTitle(R.string.same_host_enable).setMessage(R.string.same_host_limits)
+                        .setNegativeButton(R.string.cancel, null)
+                        .setPositiveButton(R.string.same_host_enable) { _, _ -> save() }.show()
+                } else save()
+            }
+            .setNegativeButton(R.string.cancel, null).show()
+    }
+
+    /** Only authenticated probes can trigger recovery or offer a voluntary LAN return. */
+    private fun checkSameHostConnection() {
+        if (!automaticSameHost() || showingSetup || sameHostRestoreAttempt != null || sameHostConfirmation != null ||
+            (webView != null && recoveryStoppedBrowser === webView)) return
+        val rows = pairedDeviceStore.load()
+        val active = rows.firstOrNull { it.key == activeDeviceKey } ?: return
+        if (!SameHostSwitchPolicy.eligible(active, System.currentTimeMillis())) return
+        // Probe the independently paired remote endpoint while LAN renewal may still be running.
+        // No credential or TLS policy is borrowed from the current endpoint.
+        val wifi = sameHostMonitor.hasWifi()
+        if (sameHostObservedWifi != null && sameHostObservedWifi != wifi) {
+            sameHostProbeCancellation?.cancel()
+            sameHostProbeCancellation = null
+            sameHostGate.networkChanged()
+        }
+        sameHostObservedWifi = wifi
+        val proactiveRemote = active.mode == AccessMode.LAN && !wifi
+        if (!proactiveRemote && (pendingConnection != null || restoreAttemptGate.restorePending)) return
+        val target = when {
+            proactiveRemote -> SameHostSwitchPolicy.candidate(active, rows, AccessMode.REMOTE, System.currentTimeMillis())
+            active.mode == AccessMode.REMOTE -> SameHostSwitchPolicy.candidate(active, rows, AccessMode.LAN, System.currentTimeMillis())
+            else -> active
+        } ?: return
+        val owner = sameHostGate.begin(android.os.SystemClock.elapsedRealtime()) ?: return
+        val restoreOwner = restoreGeneration
+        val sourceBrowser = webView
+        val sourceOrigin = gatewayOrigin
+        val sourceDocument = secureWebViewClient?.currentDocumentGeneration
+        val cancellation = NativeConnectionCancellation { task -> connectionCancellationExecutor.execute(task) }
+        sameHostProbeCancellation = cancellation
+        val timeout = Runnable {
+            cancellation.cancel()
+            sameHostGate.finish(owner)
+            if (sameHostProbeCancellation === cancellation) sameHostProbeCancellation = null
+        }
+        restoreUiHandler.postDelayed(timeout, 10_000)
+        restoreWorkGate.submit(
+            key = "${target.instanceId}:${target.deviceToken}",
+            workExecutor = sameHostProbeExecutor,
+            isCurrent = { sameHostGate.current(owner) && !cancellation.isCancelled },
+            onRejected = { runOnUiThread {
+                restoreUiHandler.removeCallbacks(timeout)
+                if (sameHostProbeCancellation === cancellation) sameHostProbeCancellation = null
+                sameHostGate.finish(owner)
+            } },
+        ) {
+            val result = runCatching { NativeAuthClient.probe(target.origin, target.deviceToken, target.caCertificate,
+                target.instanceId, cancellation) }
+            runOnUiThread {
+                restoreUiHandler.removeCallbacks(timeout)
+                if (sameHostProbeCancellation === cancellation) sameHostProbeCancellation = null
+                if (!sameHostGate.current(owner)) return@runOnUiThread
+                if (cancellation.isCancelled) { sameHostGate.finish(owner); return@runOnUiThread }
+                sameHostGate.finish(owner)
+                if (restoreGeneration != restoreOwner || showingSetup || activeDeviceKey != active.key ||
+                    (!proactiveRemote && pendingConnection != null)) return@runOnUiThread
+                if (webView !== sourceBrowser || gatewayOrigin != sourceOrigin ||
+                    secureWebViewClient?.currentDocumentGeneration != sourceDocument) return@runOnUiThread
+                if (proactiveRemote && sameHostMonitor.hasWifi()) return@runOnUiThread
+                val current = pairedDeviceStore.load().firstOrNull { it.key == target.key } ?: return@runOnUiThread
+                if (!PairedDeviceStatusPolicy.mayApplyResult(current, target)) return@runOnUiThread
+                val updated = PairedDeviceStatusPolicy.applyProbe(current, target, result.getOrNull(),
+                    (result.exceptionOrNull() as? NativeAuthFailure)?.kind, System.currentTimeMillis())
+                withCredentialStorage { pairedDeviceStore.update(target.key) { updated } }
+                if (target.key != active.key && result.isSuccess && updated.status == PairedDeviceStatus.REACHABLE &&
+                    updated.installationId == active.installationId) {
+                    requestSameHostSwitch(active, updated) { }
+                } else if (target.key == active.key && result.isFailure &&
+                    ConnectionRestorePolicy.failureDisposition(result.exceptionOrNull(), false) == RestoreFailureDisposition.RETRY_TRANSIENT) {
+                    recoverAutomatically()
+                }
+            }
+        }
+    }
+
+    /** A cross-Origin reload has no public draft/attachment export; never silently replace a mounted page. */
+    private fun requestSameHostSwitch(from: PairedDeviceRecord, to: PairedDeviceRecord, failure: () -> Unit): Boolean {
+        if (!automaticSameHost() || !sameHostGate.foreground || !sameHostGate.reserveSwitch(android.os.SystemClock.elapsedRealtime())) return false
+        withdrawConnectionAttempt()
+        cancelAutomaticRecovery()
+        invalidateRestoreAttempts()
+        finishConnectionAttempt()
+        val generation = restoreGeneration
+        val lifecycleOwner = sameHostGate.generation
+        val sourceOrigin = gatewayOrigin
+        val browser = webView
+        val silent = !SameHostSwitchPolicy.requiresConfirmation(sameHostMode(), browser != null)
+        var snapshot: org.json.JSONObject? = null
+        fun connect() {
+            if (webView !== browser || gatewayOrigin != sourceOrigin) return
+            if (!sameHostGate.foreground || lifecycleOwner != sameHostGate.generation || isFinishing || isDestroyed || generation != restoreGeneration || activeDeviceKey != from.key || !automaticSameHost()) return
+            val rows = pairedDeviceStore.load()
+            val latest = rows.firstOrNull { it.key == to.key } ?: return
+            val source = rows.firstOrNull { it.key == from.key } ?: return
+            if (!PairedDeviceStatusPolicy.mayApplyResult(source, from) || !PairedDeviceStatusPolicy.mayApplyResult(latest, to) ||
+                SameHostSwitchPolicy.candidate(source, listOf(latest), latest.mode, System.currentTimeMillis()) == null) return
+            finishConnectionAttempt()
+            if (snapshot != null) { browser?.clearFocus(); browser?.setOnTouchListener { _, _ -> true } }
+            restoreTrustedDevice(latest.origin, latest.credential(), latest.mode, beginRestoreAttempt(),
+                deviceKey = latest.key, preserveWebView = browser, deferActivation = true,
+                claimSuccess = { sameHostGate.foreground && lifecycleOwner == sameHostGate.generation &&
+                    webView === browser && gatewayOrigin == sourceOrigin && automaticSameHost() },
+                onAuthenticated = if (snapshot != null && browser != null) { targetOrigin, saved, settled ->
+                    val authOwner = pendingConnection
+                    stagePlainTextTransfer(browser, sourceOrigin!!, targetOrigin, latest, saved, snapshot!!,
+                        lifecycleOwner, { settled(); if (sameHostRestoreAttempt === authOwner) sameHostRestoreAttempt = null })
+                } else null,
+                onActivated = {
+                    if (pendingConnection === sameHostRestoreAttempt) sameHostRestoreAttempt = null
+                    if (silent) Toast.makeText(this, R.string.same_host_switched, Toast.LENGTH_LONG).show()
+                }) {
+                finishConnectionAttempt()
+                sameHostRestoreAttempt = null
+                browser?.setOnTouchListener(null)
+                if (browser != null && snapshot != null) PlainTextDraftTransfer(restoreUiHandler).release(browser, snapshot!!)
+                if (browser != null && webView === browser) {
+                    Toast.makeText(this, R.string.background_restore_failed, Toast.LENGTH_LONG).show()
+                } else failure()
+            }
+            sameHostRestoreAttempt = pendingConnection
+        }
+        fun confirm() {
+            if (!sameHostGate.foreground || lifecycleOwner != sameHostGate.generation || generation != restoreGeneration || webView !== browser || showingSetup || isFinishing || isDestroyed) return
+            finishConnectionAttempt()
+            sameHostConfirmation = AlertDialog.Builder(this).setTitle(R.string.same_host_switch_title)
+                .setMessage(R.string.same_host_switch_warning)
+                .setNegativeButton(R.string.cancel) { _, _ -> finishConnectionAttempt() }
+                .setPositiveButton(R.string.same_host_switch_confirm) { _, _ -> connect() }
+                .create().also { dialog ->
+                    dialog.setOnDismissListener { sameHostConfirmation = null }
+                    dialog.show()
+                }
+        }
+        if (sameHostMode() == SameHostSwitchMode.AUTOMATIC && browser != null &&
+            pendingAudioPermission == null && audioCaptureGrantedBrowser !== browser && !fileChooserTransitions.active &&
+            !webFileChooser.active && nativeBridge?.hasPendingTransferBlockers() != true) {
+            browser.setOnTouchListener { _, _ -> true }
+            val transfer = PlainTextDraftTransfer(restoreUiHandler)
+            transfer.capture(browser) { captured ->
+                browser.setOnTouchListener(null)
+                if (webView !== browser || gatewayOrigin != sourceOrigin || !sameHostGate.foreground ||
+                    lifecycleOwner != sameHostGate.generation) {
+                    if (captured != null) transfer.release(browser, captured)
+                    return@capture
+                }
+                snapshot = captured
+                if (captured != null) capturedDraft = browser to captured
+                if (captured == null) confirm() else connect()
+            }
+        } else if (silent) connect() else confirm()
+        return true
+    }
+
+    private fun stagePlainTextTransfer(source: WebView, sourceOrigin: GatewayOrigin, targetOrigin: GatewayOrigin,
+        requested: PairedDeviceRecord, saved: PairedDeviceRecord, snapshot: org.json.JSONObject,
+        lifecycleOwner: Int, settled: () -> Unit) {
+        val sourceKey = activeDeviceKey
+        val sourceRecord = pairedDeviceStore.load().firstOrNull { it.key == sourceKey }
+        val generation = restoreGeneration
+        val target = WebView(this)
+        configureWebViewHttpCache(target)
+        val parent = source.parent as? ViewGroup
+        if (parent == null) { target.destroy(); releaseCapturedDraft(); settled(); return }
+        val shield = View(this).apply { isClickable = true; isFocusableInTouchMode = true }
+        parent.addView(target, ViewGroup.LayoutParams(source.width, source.height))
+        target.alpha = 0f
+        target.setOnTouchListener { _, _ -> true }
+        parent.addView(shield, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        shield.requestFocus()
+        target.settings.apply {
+            javaScriptEnabled = true; domStorageEnabled = true
+            allowFileAccess = false; allowContentAccess = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            safeBrowsingEnabled = true; mediaPlaybackRequiresUserGesture = true
+            javaScriptCanOpenWindowsAutomatically = false; setSupportMultipleWindows(false)
+            userAgentString = "$userAgentString DSHMobile/${BuildConfig.VERSION_NAME}"
+        }
+        CookieManager.getInstance().setAcceptThirdPartyCookies(target, false)
+        installBrowserCompatibilityShim(target, targetOrigin)
+        val transfer = PlainTextDraftTransfer(restoreUiHandler)
+        draftTransfer = transfer
+        var failed = false
+        val sourceUri = Uri.parse(snapshot.getString("href"))
+        val url = targetOrigin.serialized.trimEnd('/') + (sourceUri.encodedPath ?: "/") +
+            (sourceUri.encodedQuery?.let { "?$it" } ?: "") + (sourceUri.encodedFragment?.let { "#$it" } ?: "")
+        val client = SecureWebViewClient(targetOrigin, requested.caCertificate,
+            openExternal = { failed = true; transfer.abort() }, onBlocked = { failed = true; transfer.abort() },
+            onFailure = { failed = true; transfer.abort() }, onRendererGone = { failed = true; transfer.abort() },
+            onTopLevelUrlChanged = { changed -> if (changed != url) { failed = true; transfer.abort() } },
+            onLoaded = {}, onBeforeTopLevelNavigation = {})
+        target.webViewClient = client
+        transfer.restore(source, target, snapshot, current = {
+            val rows = pairedDeviceStore.load()
+            !failed && sameHostGate.foreground && lifecycleOwner == sameHostGate.generation &&
+                generation == restoreGeneration && automaticSameHost() && webView === source &&
+                gatewayOrigin == sourceOrigin && activeDeviceKey == sourceKey && !isFinishing && !isDestroyed &&
+                sourceRecord != null && rows.any { it.key == sourceKey && PairedDeviceStatusPolicy.mayApplyResult(it, sourceRecord) } &&
+                rows.any { it.key == saved.key && PairedDeviceStatusPolicy.mayApplyResult(it, saved) } &&
+                pendingAudioPermission == null && audioCaptureGrantedBrowser !== source &&
+                !webFileChooser.active && !fileChooserTransitions.active &&
+                nativeBridge?.hasPendingTransferBlockers() != true &&
+                client.currentDocumentGeneration <= 1 && (target.url == null || target.url == url)
+        }, onAbort = {
+            client.dispose(); parent.removeView(target); target.destroy(); parent.removeView(shield)
+            if (draftTransfer === transfer) {
+                source.setOnTouchListener(null); draftTransfer = null
+                if (capturedDraft?.second?.optString("token") == snapshot.optString("token")) capturedDraft = null
+            }
+            settled()
+            if (sameHostGate.foreground && lifecycleOwner == sameHostGate.generation &&
+                generation == restoreGeneration && webView === source && gatewayOrigin == sourceOrigin &&
+                activeDeviceKey == sourceKey && !isFinishing && !isDestroyed) {
+                Toast.makeText(this, R.string.same_host_migration_retained, Toast.LENGTH_LONG).show()
+            }
+        }, onCommit = {
+            client.dispose(); parent.removeView(shield); parent.removeView(target)
+            accessMode = saved.mode; activatePairedDevice(saved); draftTransfer = null; capturedDraft = null
+            settled()
+            showBrowser(targetOrigin, requested.caCertificate, url, stagedBrowser = target)
+            Toast.makeText(this, R.string.same_host_switched, Toast.LENGTH_LONG).show()
+        })
+        target.loadUrl(url)
+    }
+
+    private fun trySameHostFallback(from: PairedDeviceRecord, disposition: RestoreFailureDisposition, failure: () -> Unit): Boolean {
+        if (!automaticSameHost() || from.mode != AccessMode.LAN || !SameHostSwitchPolicy.mayFallback(disposition)) return false
+        val target = SameHostSwitchPolicy.candidate(from, pairedDeviceStore.load(), AccessMode.REMOTE, System.currentTimeMillis()) ?: return false
+        return requestSameHostSwitch(from, target, failure)
+    }
+
     private fun recoverAutomatically() {
         loadingConnectionAttempt = null
         loadingDocumentGeneration = null
@@ -2256,6 +2557,7 @@ class MainActivity : Activity() {
                 deviceKey = paired.key,
                 preserveWebView = webView,
             ) { disposition ->
+                if (trySameHostFallback(paired, disposition) { showDeviceList() }) return@restoreTrustedDevice
                 if (disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
                     if (!scheduleAutomaticRecovery()) finishAutomaticRecoveryAfterRetryBudget { showDeviceList() }
                 } else {
@@ -2349,11 +2651,17 @@ class MainActivity : Activity() {
     }
 
     private fun invalidateRestoreAttempts() {
+        draftTransfer?.abort()
+        releaseCapturedDraft()
         restoreAttemptGate.invalidate()
         connectionCenterStatus?.visibility = View.GONE
     }
 
     private fun cancelRestoreForConfiguration() {
+        sameHostGate.invalidate()
+        sameHostProbeCancellation?.cancel()
+        sameHostProbeCancellation = null
+        sameHostConfirmation?.dismiss()
         withdrawConnectionAttempt()
         cancelAutomaticRecovery()
         invalidateRestoreAttempts()
@@ -2376,7 +2684,10 @@ class MainActivity : Activity() {
         generation: Int = beginRestoreAttempt(),
         deviceKey: String? = null,
         preserveWebView: WebView? = null,
+        deferActivation: Boolean = false,
         claimSuccess: () -> Boolean = { true },
+        onActivated: () -> Unit = {},
+        onAuthenticated: ((GatewayOrigin, PairedDeviceRecord, () -> Unit) -> Unit)? = null,
         onFailure: (RestoreFailureDisposition) -> Unit,
     ) {
         val requestedDevice = deviceKey?.let { key -> pairedDeviceStore.load().firstOrNull { it.key == key } }
@@ -2436,7 +2747,12 @@ class MainActivity : Activity() {
                         credential.instanceId,
                         cancellation = attempt.cancellation,
                     ).also { session ->
-                        if (session.instanceId != credential.instanceId) instanceMismatch = true
+                        if (session.instanceId != credential.instanceId ||
+                            (onAuthenticated != null && (requestedDevice?.installationId == null ||
+                                session.installationId != requestedDevice.installationId)) ||
+                            (requestedDevice?.installationId != null && session.installationId != null &&
+                                requestedDevice.installationId != session.installationId) ||
+                            (requestedDevice?.deviceId?.isNotEmpty() == true && requestedDevice.deviceId != session.deviceId)) instanceMismatch = true
                     }.takeUnless { instanceMismatch }
                 } catch (failure: Exception) {
                     lastFailure = failure
@@ -2495,8 +2811,9 @@ class MainActivity : Activity() {
                         restoreAttemptGate.completeRestore(generation)
                         return@callback
                     }
-                    accessMode = mode
-                    if (savePairedDevice(mode, selectedOrigin, renewed, credential) == null) {
+                    if (!deferActivation) accessMode = mode
+                    val saved = savePairedDevice(mode, selectedOrigin, renewed, credential, activate = !deferActivation)
+                    if (saved == null) {
                         restoreAttemptGate.completeRestore(generation)
                         onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
                         return@callback
@@ -2508,6 +2825,23 @@ class MainActivity : Activity() {
                         session = renewed,
                         isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) },
                     ) {
+                        if (onAuthenticated != null) {
+                            onAuthenticated(selectedOrigin, saved) {
+                                restoreAttemptGate.completeRestore(generation)
+                                finishConnectionAttempt(attempt)
+                            }
+                            return@installNativeSession
+                        }
+                        if (deferActivation) {
+                            if (!claimSuccess()) {
+                                restoreAttemptGate.completeRestore(generation)
+                                finishConnectionAttempt(attempt)
+                                return@installNativeSession
+                            }
+                            accessMode = mode
+                            activatePairedDevice(saved)
+                        }
+                        onActivated()
                         restoreAttemptGate.completeRestore(generation)
                         if (preserveWebView == null) {
                             failureDialog?.dismiss()
@@ -2676,6 +3010,7 @@ class MainActivity : Activity() {
         origin: GatewayOrigin,
         caCertificate: ByteArray?,
         requestedInitialUrl: String = origin.serialized,
+        stagedBrowser: WebView? = null,
     ) {
         if (!isOriginAllowedForAccessMode(origin)) {
             val cleared = withCredentialStorage { credentialStore().clear() } != null
@@ -2712,7 +3047,10 @@ class MainActivity : Activity() {
             setBackgroundColor(initialChromeColor)
         }
         window.isNavigationBarContrastEnforced = false
-        val browser = WebView(this)
+        val browser = stagedBrowser ?: WebView(this)
+        (browser.parent as? ViewGroup)?.removeView(browser)
+        browser.alpha = 1f
+        browser.setOnTouchListener(null)
         configureWebViewHttpCache(browser)
         webView = browser
         loadingConnectionAttempt = pendingConnection
@@ -2805,6 +3143,7 @@ class MainActivity : Activity() {
                     displayScale.onDocumentStarted()
                     cancelPendingWebBack()
                     pendingAudioPermission = null
+                    if (audioCaptureGrantedBrowser === browser) audioCaptureGrantedBrowser = null
                     nativeBridge?.onTopLevelNavigation(it)
                 }
             },
@@ -2852,6 +3191,7 @@ class MainActivity : Activity() {
                     return
                 }
                 if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    audioCaptureGrantedBrowser = browser
                     request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
                     return
                 }
@@ -2923,7 +3263,8 @@ class MainActivity : Activity() {
         val initialUrl = requestedInitialUrl.takeIf { GatewayUrlPolicy.isSameOrigin(origin, it) }
             ?: origin.serialized
         retryUrl = initialUrl
-        browser.loadUrl(initialUrl)
+        if (stagedBrowser == null) browser.loadUrl(initialUrl)
+        else { nativeBridge?.injectPage(); finishConnectionAttempt() }
     }
 
     /** Request task-reminder permission in foreground, or open its system settings once decided. */
@@ -3236,6 +3577,7 @@ class MainActivity : Activity() {
         secureWebViewClient?.dispose()
         secureWebViewClient = null
         pendingAudioPermission = null
+        audioCaptureGrantedBrowser = null
         nativeBridge?.dispose(changingConfigurations)
         nativeBridge = null
         webView?.apply {

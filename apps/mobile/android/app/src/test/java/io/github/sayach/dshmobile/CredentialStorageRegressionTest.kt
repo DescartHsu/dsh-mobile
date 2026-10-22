@@ -51,6 +51,22 @@ class CredentialStorageRegressionTest {
         status = PairedDeviceStatus.REACHABLE,
     )
 
+    @Test fun authenticatedInstallationIdentityPersistsWithoutChangingLegacyRecordsOrPins() {
+        val preferences = MemoryCredentialPreferences(); val crypto = JvmCredentialEncryption()
+        val store = PairedDeviceStore(preferences, crypto)
+        val legacy = record()
+        store.upsert(legacy)
+        assertNull(PairedDeviceStore(preferences, crypto).load().single().installationId)
+        val learned = legacy.copy(installationId = "f".repeat(64))
+        store.upsert(learned)
+        val reopened = PairedDeviceStore(preferences, crypto).load().single()
+        assertEquals(learned, reopened)
+        assertEquals(legacy.instanceId, reopened.instanceId)
+        assertEquals(legacy.deviceToken, reopened.deviceToken)
+        assertThrows(IllegalArgumentException::class.java) { store.upsert(legacy.copy(installationId = "bad")) }
+        assertEquals(learned, store.load().single())
+    }
+
     @Test fun anExpiredPinnedCaKeepsAllEncryptedRowsReadableAndRepairable() {
         val preferences = MemoryCredentialPreferences()
         val crypto = JvmCredentialEncryption()

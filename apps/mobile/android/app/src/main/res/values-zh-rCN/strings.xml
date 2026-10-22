@@ -197,4 +197,14 @@
     <string name="webview_update_action">查看更新选项</string>
     <string name="webview_continue">继续使用</string>
     <string name="device_storage_unavailable">安全配对存储暂时不可用。请解锁设备后重新打开 App 或重试，本次操作未能完成。</string>
+    <string name="same_host_title">同电脑自动连接</string>
+    <string name="same_host_limits">默认手动。只在已独立配对且认证安装身份一致的入口间切换。自动模式可免确认迁移受支持的纯文本；附件、引用、录音、待完成操作或不支持的状态仍需确认。目标冲突或迁移失败时保留原页面。仅迁移有限纯文本状态，不会重放消息。</string>
+    <string name="same_host_manual">手动</string>
+    <string name="same_host_enable">自动切换并提醒</string>
+    <string name="same_host_switch_title">切换连接？</string>
+    <string name="same_host_switch_warning">更换地址会重载 DSH，未发送文字、附件和页面状态可能丢失。取消可保留页面，请先保存或复制内容。</string>
+    <string name="same_host_switch_confirm">切换并重载</string>
+    <string name="same_host_detect">自动检测并提示</string>
+    <string name="same_host_switched">正在自动切换连接…</string>
+    <string name="same_host_migration_retained">迁移未完成，已保留原页面。</string>
 </resources>

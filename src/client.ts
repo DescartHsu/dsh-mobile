@@ -10,6 +10,7 @@ import { createFrpAttachFrpcToml, createFrpAttachTemplate } from './frp-attach.j
 import { parseFrpSettings, type FrpSettings } from './frp-config.js'
 import { installNativeMobileSurface, NATIVE_MOBILE_STYLES, resolveNativeMobileLanguage } from './native-mobile.js'
 import { installVoiceSession } from './voice-session.js'
+import { installDraftTransfer } from './draft-transfer.js'
 import { installMobileFontPreference, MobileFontSizeRow } from './mobile-font.js'
 import { MobileDisplayScaleRow } from './mobile-display-scale.js'
 import { MobileNativeSettingsActionController, type MobileNativeSettingsAction } from './mobile-native-settings-action.js'
@@ -4449,6 +4450,8 @@ export function apply(ctx: ClientContext): void {
     document.head.append(style)
     const removeCustom = !desktopAdmin || gatewayCustomization ? installCustomAssets() : () => undefined
     const removeVoiceSession = installVoiceSession(!desktopAdmin)
+    const removeDraftTransfer = !desktopAdmin && document.querySelector('meta[name="dsh-mobile-gateway"][content="authenticated"]') !== null
+      ? installDraftTransfer(ctx, window, document) : () => undefined
     const removeModuleSettings = ctx.slots.inject('settings.general.item', () => ctx.slots.register({
       name: 'settings.general.item', id: 'dsh-mobile-client-modules', order: 120,
     }, () => createElement(ClientModuleSettingsRow, { scope: desktopAdmin ? 'computer' : 'device', locale: selectedMobileControlLocale() })))
@@ -4477,7 +4480,7 @@ export function apply(ctx: ClientContext): void {
         getLayout: () => ctx.get('layout'),
         getSidebarRight: () => ctx.get('sidebarRight'),
       }))
-      return () => { disposeClientModuleDialogs(); removeModuleSettings(); removeSettingsAction(); removeCustom(); removeSurface(); removeVoiceSession(); localFont.dispose(); style.remove() }
+      return () => { disposeClientModuleDialogs(); removeModuleSettings(); removeSettingsAction(); removeCustom(); removeSurface(); removeVoiceSession(); removeDraftTransfer(); localFont.dispose(); style.remove() }
     }
     const removeControl = installDshLanguageBoundSurface(() => {
       const control = installControl()
@@ -4507,7 +4510,7 @@ export function apply(ctx: ClientContext): void {
       }, createElement('rect', { x: 4, y: 1, width: 8, height: 14, rx: 2 }), createElement('path', { d: 'M7 12h2' })), wide ? createElement('span', { className: 'dsh-mobile-control__trigger-label' }, t('mobileAccess')) : undefined)))
       return () => { disposeSlot(); control.remove() }
     })
-    return () => { disposeClientModuleDialogs(); removeModuleSettings(); removeControl(); removeCustom(); removeVoiceSession(); style.remove() }
+    return () => { disposeClientModuleDialogs(); removeModuleSettings(); removeControl(); removeCustom(); removeVoiceSession(); removeDraftTransfer(); style.remove() }
   }, 'dsh-mobile: stock mobile adaptation and local control')
 }
 

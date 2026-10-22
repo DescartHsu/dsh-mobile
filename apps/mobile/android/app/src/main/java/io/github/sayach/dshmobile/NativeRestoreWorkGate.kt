@@ -14,6 +14,7 @@ internal class NativeRestoreWorkGate<K : Any>(private val executor: Executor) {
         val key: K,
         val isCurrent: () -> Boolean,
         val onRejected: () -> Unit,
+        val executor: Executor,
         val operation: () -> Unit,
     )
 
@@ -21,8 +22,8 @@ internal class NativeRestoreWorkGate<K : Any>(private val executor: Executor) {
     private val waiting = mutableMapOf<K, Work<K>>()
 
     /** Enqueue the newest owner; cancellation does not release a still-running physical request. */
-    fun submit(key: K, isCurrent: () -> Boolean, onRejected: () -> Unit, operation: () -> Unit) {
-        val work = Work(key, isCurrent, onRejected, operation)
+    fun submit(key: K, isCurrent: () -> Boolean, onRejected: () -> Unit, workExecutor: Executor = executor, operation: () -> Unit) {
+        val work = Work(key, isCurrent, onRejected, workExecutor, operation)
         val start = synchronized(this) {
             if (running.containsKey(key)) {
                 waiting[key] = work
@@ -38,7 +39,7 @@ internal class NativeRestoreWorkGate<K : Any>(private val executor: Executor) {
     private fun execute(work: Work<K>) {
         val entered = AtomicBoolean(false)
         try {
-            executor.execute {
+            work.executor.execute {
                 entered.set(true)
                 try {
                     if (work.isCurrent()) work.operation()

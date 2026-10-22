@@ -199,4 +199,14 @@
     <string name="webview_update_action">Opzioni di aggiornamento</string>
     <string name="webview_continue">Continua</string>
     <string name="device_storage_unavailable">L’archiviazione sicura dei dispositivi associati non è disponibile. Sblocca il dispositivo e riapri l’app o riprova. L’operazione non è stata completata.</string>
+    <string name="same_host_title">Connessione automatica allo stesso computer</string>
+    <string name="same_host_limits">Predefinito: manuale. Il cambio avviene solo tra connessioni abbinate separatamente con identità autenticata corrispondente. La modalità automatica trasferisce il testo semplice supportato senza conferma. Allegati, riferimenti, registrazioni, operazioni in sospeso o stati non supportati richiedono conferma. Un conflitto nella destinazione o una migrazione non riuscita mantiene la pagina originale. Viene trasferito solo uno stato limitato di testo semplice; nessun messaggio viene reinviato.</string>
+    <string name="same_host_manual">Manuale</string>
+    <string name="same_host_enable">Cambio automatico con avviso</string>
+    <string name="same_host_switch_title">Cambiare connessione?</string>
+    <string name="same_host_switch_warning">Cambiare indirizzo ricarica DSH. Testo non inviato, allegati e stato della pagina potrebbero andare persi. Annulla per mantenere la pagina; salva o copia prima il lavoro.</string>
+    <string name="same_host_switch_confirm">Cambia e ricarica</string>
+    <string name="same_host_detect">Rileva e chiedi</string>
+    <string name="same_host_switched">Cambio automatico della connessione in corso…</string>
+    <string name="same_host_migration_retained">Migrazione non completata. La pagina originale è stata mantenuta.</string>
 </resources>

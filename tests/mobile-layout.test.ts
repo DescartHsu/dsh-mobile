@@ -976,17 +976,25 @@ describe('dedicated mobile layout boot', () => {
       expect(back(false).defaultPrevented).toBe(false)
       expect(controller?.getSnapshot()).toMatchObject({ detailsOpen: true, sidebarOpen: true })
 
+      // 1. an open details layer closes first
       expect(back().defaultPrevented).toBe(true)
       expect(toggleExpanded).toHaveBeenCalledOnce()
       expect(controller?.getSnapshot()).toMatchObject({
         detailsOpen: false, sidebarOpen: true, panelInfo: { activePanelId: 'alpha' },
       })
+
+      // 2. then the open drawer
       expect(back().defaultPrevented).toBe(true)
       expect(controller?.getSnapshot()).toMatchObject({ sidebarOpen: false, panelInfo: { activePanelId: 'alpha' } })
+
+      // 3. then the selected panel
       expect(back().defaultPrevented).toBe(true)
       expect(controller?.getSnapshot().panelInfo.activePanelId).toBeNull()
+
+      // 4. the root conversation is left to the host: nothing is consumed
       expect(back().defaultPrevented).toBe(false)
 
+      // 5. a wide viewport has no overlay drawer
       controller?.toggleSidebar()
       viewport.wide = true
       expect(back().defaultPrevented).toBe(false)
@@ -994,6 +1002,11 @@ describe('dedicated mobile layout boot', () => {
       viewport.wide = false
       expect(back().defaultPrevented).toBe(true)
       expect(controller?.getSnapshot().sidebarOpen).toBe(false)
+
+      // 6. the app reveals the list through its own request, not through Back
+      window.dispatchEvent(new Event('dsh-mobile:open-sidebar'))
+      expect(controller?.getSnapshot().sidebarOpen).toBe(true)
+      expect(back().defaultPrevented).toBe(true)
 
       controller?.selectPanel('alpha')
       dispose()

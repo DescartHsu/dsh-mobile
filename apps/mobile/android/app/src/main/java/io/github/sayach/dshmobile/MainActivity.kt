@@ -211,6 +211,12 @@ class MainActivity : Activity() {
     private var deviceListVisible = false
     private var rendererCrashTimes: List<Long> = emptyList()
     private var backRequestGeneration = 0
+    /** How long a confirmed exit press stays armed. */
+    private val exitConfirmWindowMs = 2000L
+    private var lastExitBackAt = 0L
+    /** 0 = root, 1 = session list shown, 2 = exit confirmed. */
+    private var backExitStage = 0
+    private val exitBackWindowMs = 2000L
     private var backRequestPending = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -385,7 +391,16 @@ class MainActivity : Activity() {
                 )) {
                     MobileBackAction.NATIVE_BACK -> handleNativeBack(browser)
                     MobileBackAction.RETRY -> toast(R.string.back_page_unresponsive)
-                    MobileBackAction.PAGE_HANDLED, MobileBackAction.IGNORE -> Unit
+                    MobileBackAction.PAGE_HANDLED -> {
+                        // The page closed the drawer this press; arm the exit
+                        // confirmation so the next unclaimed press closes the app.
+                        if (backExitStage == 1) {
+                            toast(R.string.back_press_again_to_exit)
+                            backExitStage = 2
+                            backUiHandler.postDelayed({ backExitStage = 0 }, exitConfirmWindowMs)
+                        }
+                    }
+                    MobileBackAction.IGNORE -> Unit
                 }
             }
         }
@@ -405,7 +420,28 @@ class MainActivity : Activity() {
         } else if (setupBackAction != null) {
             setupBackAction?.invoke()
         } else {
-            finish()
+            // The page never claims Back at the root conversation, so the app
+            // decides: reveal the session list, then confirm, then exit.
+            when (backExitStage) {
+                0 -> {
+                    runCatching {
+                        browser?.evaluateJavascript(
+                            "window.dispatchEvent(new Event('dsh-mobile:open-sidebar'))",
+                            null,
+                        )
+                    }
+                    backExitStage = 1
+                }
+                1 -> {
+                    toast(R.string.back_press_again_to_exit)
+                    backExitStage = 2
+                    backUiHandler.postDelayed({ backExitStage = 0 }, exitConfirmWindowMs)
+                }
+                else -> {
+                    backExitStage = 0
+                    finish()
+                }
+            }
         }
     }
 
@@ -2873,6 +2909,41 @@ class MainActivity : Activity() {
                 preferences.edit().putInt(PREFERENCE_WEB_CHROME_COLOR, color).apply()
             }
             bridge.onDeviceRevoked = ::handleDeviceRevoked
+            bridge.onRenewSession = { done ->
+                // Runs on the bridge's message thread, where any throw kills the
+                // app. Nothing below may escape: report the failure to the page.
+                val replied = java.util.concurrent.atomic.AtomicBoolean(false)
+                val reply: (Boolean, String?) -> Unit = { ok, reason ->
+                    if (replied.compareAndSet(false, true)) runOnUiThread { done(ok, reason) }
+                }
+                try {
+                    val candidates = withCredentialStorage { pairedDeviceStore.load() } ?: emptyList()
+                    val record = candidates.firstOrNull { it.origin.serialized == origin.serialized }
+                        ?: candidates.maxByOrNull { it.lastConnectedAt ?: 0L }
+                    if (record == null) {
+                        reply(false, "no paired device record (" + candidates.size + " known)")
+                    } else if (record.status == PairedDeviceStatus.REVOKED) {
+                        reply(false, "device record is revoked")
+                    } else {
+                        restoreExecutor.execute {
+                            try {
+                                val session = NativeAuthClient.renew(
+                                    record.origin,
+                                    record.deviceToken,
+                                    record.caCertificate,
+                                    record.instanceId,
+                                )
+                                // CookieManager.setCookie needs a Looper thread.
+                                runOnUiThread { installNativeSession(origin, session) { reply(true, null) } }
+                            } catch (failure: Throwable) {
+                                reply(false, record.mode.name + " / " + failure::class.simpleName + ": " + failure.message)
+                            }
+                        }
+                    }
+                } catch (failure: Throwable) {
+                    reply(false, "handler failed: " + failure::class.simpleName + ": " + failure.message)
+                }
+            }
             bridge.onSwitchComputer = ::showDeviceList
             bridge.onOpenTaskNotificationSettings = ::openTaskNotificationSettings
             bridge.onGetDisplayScale = { displayScale.percent }

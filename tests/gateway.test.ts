@@ -1,6 +1,6 @@
 import { createHash, X509Certificate } from 'node:crypto'
 import { createSocket } from 'node:dgram'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import {
   createServer,
   request as requestHttp,
@@ -252,6 +252,7 @@ async function upstream(
   batchedBundleResponder?: BatchedBundleResponder,
   extraBatchedEntries = 0,
   secondApplicationBatchEntries = 0,
+  bundleUrlOverride?: (id: string, url: string) => string,
 ): Promise<{
   port: number
   observations: UpstreamObservation[]
@@ -321,9 +322,10 @@ async function upstream(
     if ((documentPath === '/' || documentPath === '/index.html') && incoming.headers.accept?.includes('text/html')) {
       const pluginUrl = (id: string, name: string, rev: string): string => {
         if (boot === 'batched-relative-invalid' && id === 'feature') return 'plugins/../api/secret'
-        return boot === 'batched-relative' || boot === 'batched-relative-invalid'
+        const url = boot === 'batched-relative' || boot === 'batched-relative-invalid'
           ? `plugins/??${id}/client.js&rev=${rev}`
           : `/plugins/${name}.js?rev=${rev}`
+        return bundleUrlOverride?.(id, url) ?? url
       }
       const entries = boot === 'legacy'
         ? [
@@ -1051,6 +1053,61 @@ describe('HTTP gateway', () => {
     expect(inner.observations.map(observation => observation.url)).toContain('/plugins/feature.js?rev=feature')
     expect(inner.observations.map(observation => observation.url)).not.toContain('/plugins/layout.js?rev=layout')
     expect(inner.observations.map(observation => observation.url)).not.toContain('/plugins/application.js?rev=stock')
+  })
+
+  it('preserves upstream history constants in direct and merged client resources', async () => {
+    const source = 'const HISTORY_PAGE_OPTIONS = { maxMessages: 500,\nturnWindow: { minMessages: 50, minTurns: 2 } };\n'
+    const sourcePath = '/plugins/@deepseek-ai/dsh-api-session-controller/client.js?rev=history'
+    const inner = await upstream('batched', false, Buffer.alloc(0), [], undefined, (incoming, response) => {
+      if (incoming.url !== sourcePath) return false
+      response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'content-length': Buffer.byteLength(source) })
+      response.end(incoming.method === 'HEAD' ? undefined : source)
+      return true
+    }, 0, 0, (id, url) => id === 'feature' ? sourcePath : url)
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-history-bytes-'))
+    cleanups.push(() => rm(directory, { recursive: true, force: true }))
+    const mobileLayoutFile = join(directory, 'mobile-layout.js')
+    await writeFile(mobileLayoutFile, 'globalThis.__dedicatedMobileLayout = true;\n', 'utf8')
+    const instance = await gateway(inner.port, { mobileLayoutFile })
+    const paired = await pair(instance)
+    const headers = { ...browserHeaders(instance), accept: 'text/html', cookie: `${SESSION_COOKIE}=${paired.session}` }
+    const page = await request(instance.address().port, '/', { headers })
+    const batchPath = /"url":"(\/mobile-access\/mobile-boot\/[a-f\d]{64}\.js)"/u.exec(page.body)?.[1]
+    expect(batchPath).toBeDefined()
+    const direct = await request(instance.address().port, sourcePath, { headers })
+    expect(direct.status).toBe(200)
+    expect(direct.rawBody).toEqual(Buffer.from(source))
+    const batch = await request(instance.address().port, batchPath!, { headers })
+    expect(batch.status).toBe(200)
+    expect(batch.body).toContain(source)
+  })
+
+  it('revalidates the same boot URL when an owned layout file changes', async () => {
+    const inner = await upstream('batched')
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-mobile-layout-revalidation-'))
+    cleanups.push(() => rm(directory, { recursive: true, force: true }))
+    const mobileLayoutFile = join(directory, 'mobile-layout.js')
+    await writeFile(mobileLayoutFile, 'globalThis.__layoutRevision = "first";\n', 'utf8')
+    await utimes(mobileLayoutFile, new Date('2020-01-01T00:00:00Z'), new Date('2020-01-01T00:00:00Z'))
+    const instance = await gateway(inner.port, { mobileLayoutFile })
+    const paired = await pair(instance)
+    const headers = { ...browserHeaders(instance), accept: 'text/html', cookie: `${SESSION_COOKIE}=${paired.session}` }
+    const page = await request(instance.address().port, '/', { headers })
+    const batchPath = /"url":"(\/mobile-access\/mobile-boot\/[a-f\d]{64}\.js)"/u.exec(page.body)?.[1]
+    expect(batchPath).toBeDefined()
+    const first = await request(instance.address().port, batchPath!, { headers })
+    expect(first.status).toBe(200)
+    expect(first.headers['cache-control']).toBe('private, no-cache')
+    await writeFile(mobileLayoutFile, 'globalThis.__layoutRevision = "second";\n', 'utf8')
+    await utimes(mobileLayoutFile, new Date('2020-01-02T00:00:00Z'), new Date('2020-01-02T00:00:00Z'))
+    const next = await request(instance.address().port, batchPath!, { headers: { ...headers, 'if-none-match': String(first.headers.etag) } })
+    expect(next.status).toBe(200)
+    expect(next.headers['cache-control']).toBe('private, no-cache')
+    expect(next.headers.etag).not.toBe(first.headers.etag)
+    expect(next.body).toContain('globalThis.__layoutRevision = "second";')
+    expect(next.body).not.toContain('globalThis.__layoutRevision = "first";')
+    const current = await request(instance.address().port, batchPath!, { headers: { ...headers, 'if-none-match': String(next.headers.etag) } })
+    expect(current.status).toBe(304)
   })
 
   it('omits an optional module from the served graph, size probes, and assembled mobile batch only', async () => {

@@ -188,6 +188,7 @@ class MainActivity : Activity() {
     private var nearbyPermissionLimited = false
     private var showingSetup = false
     private val restoreAttemptGate = RestoreAttemptGate()
+    private val bridgeSessionRenewal = NativeSessionRenewalGate()
     private val restoreGeneration: Int get() = restoreAttemptGate.generation
     private val pairingAttemptGate = PairingAttemptGate()
     private val pairingGeneration: Int get() = pairingAttemptGate.generation
@@ -503,6 +504,7 @@ class MainActivity : Activity() {
         mode: AccessMode,
         message: CharSequence = getString(R.string.restoring_trust),
         preserveBrowser: WebView? = null,
+        keepVisibleDocument: Boolean = false,
         onCancelled: (ConnectionAttemptController.Reason) -> Unit = { showConnectionCenter() },
     ): ConnectionAttemptController.Attempt {
         withdrawConnectionAttempt()
@@ -515,7 +517,7 @@ class MainActivity : Activity() {
             pendingConnection = null
             dismissConnectionProgress()
             cancelAutomaticRecovery()
-            invalidateRestoreAttempts()
+            invalidateRestoreAttempts(if (reason == ConnectionAttemptController.Reason.TIMED_OUT) "timeout" else "cancelled")
             invalidatePairingAttempts()
             scanCanceled.set(true)
             if (preserveBrowser != null && webView === preserveBrowser) recoveryStoppedBrowser = preserveBrowser
@@ -534,6 +536,10 @@ class MainActivity : Activity() {
         }
         pendingConnection = attempt
         failureDialog?.dismiss()
+        if (keepVisibleDocument && preserveBrowser != null) {
+            showCompactConnectionWaiting(attempt, stopReconnecting = true)
+            return attempt
+        }
         currentFocus?.let { focused ->
             getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(focused.windowToken, 0)
         }
@@ -635,8 +641,17 @@ class MainActivity : Activity() {
         if (connectionPageVisible || loadingConnectionAttempt !== attempt || !connectionAttempts.isCurrent(attempt)
             || loadingDocumentGeneration != generation || secureWebViewClient?.currentDocumentGeneration != generation
             || webView !== browser || isFinishing || isDestroyed) return
+        showCompactConnectionWaiting(attempt)
+    }
+
+    /** A visible page retains input focus; only the native cancellation control overlays its content. */
+    private fun showCompactConnectionWaiting(attempt: ConnectionAttemptController.Attempt, stopReconnecting: Boolean = false) {
+        if (pendingConnection !== attempt || !connectionAttempts.isCurrent(attempt)) return
         detachConnectionWaitingView()
-        val cancel = secondaryButton(R.string.connection_cancel, 48) { connectionAttempts.cancel(attempt) }
+        val cancel = secondaryButton(
+            if (stopReconnecting) R.string.connection_stop_reconnecting else R.string.connection_cancel,
+            48,
+        ) { connectionAttempts.cancel(attempt) }
         val compact = FrameLayout(this).apply {
             isClickable = false
             isFocusable = false
@@ -708,6 +723,7 @@ class MainActivity : Activity() {
     }
 
     private fun withdrawConnectionAttempt() {
+        bridgeSessionRenewal.cancel()
         connectionAttempts.withdraw()
         pendingConnection = null
         connectionCancellationAction = null
@@ -1827,6 +1843,11 @@ class MainActivity : Activity() {
                                 origin = origin,
                                 session = renewed,
                                 isCurrent = { generation == pairingGeneration && accessMode == mode && connectionAttempts.isCurrent(attempt) },
+                                onFailure = {
+                                    status.setText(R.string.pairing_failed)
+                                    completePairingAttempt(generation)
+                                    button.isEnabled = true
+                                },
                             ) {
                                 pairingAttemptGate.complete(generation)
                                 showBrowser(origin, existingCredential.caCertificate)
@@ -1897,6 +1918,11 @@ class MainActivity : Activity() {
                             origin = origin,
                             session = session,
                             isCurrent = { generation == pairingGeneration && accessMode == mode && connectionAttempts.isCurrent(attempt) },
+                            onFailure = {
+                                status.setText(R.string.pairing_failed)
+                                completePairingAttempt(generation)
+                                button.isEnabled = true
+                            },
                         ) {
                             pairingAttemptGate.complete(generation)
                             if (record.displayName == localizedDefaultDeviceName(record.mode)) {
@@ -2131,25 +2157,18 @@ class MainActivity : Activity() {
     private fun installNativeSession(
         origin: GatewayOrigin,
         session: NativeSession,
-        isCurrent: () -> Boolean = { true },
+        isCurrent: () -> Boolean,
+        onFailure: () -> Unit,
         complete: () -> Unit,
     ) {
         if (!isCurrent() || session.origin != origin) return
-        val cookies = CookieManager.getInstance()
-        val aliases = nativeSessionCookies(session)
-        fun installAlias(index: Int) {
-            if (!isCurrent()) return
-            if (index == aliases.size) {
-                cookies.flush()
-                complete()
-                return
-            }
-            cookies.setCookie(origin.serialized, aliases[index]) {
-                if (!isCurrent()) return@setCookie
-                installAlias(index + 1)
-            }
-        }
-        installAlias(0)
+        (application as MobileApplication).sessionCookieInstaller.install(
+            key = origin.host,
+            cookies = nativeSessionCookies(session).map { NativeSessionCookieWrite(origin.serialized, it) },
+            isCurrent = { !isFinishing && !isDestroyed && isCurrent() },
+            onFailure = onFailure,
+            complete = complete,
+        )
     }
 
     private fun savePairedDevice(
@@ -2345,10 +2364,12 @@ class MainActivity : Activity() {
     }
 
     private fun beginRestoreAttempt(): Int {
+        bridgeSessionRenewal.cancel()
         return restoreAttemptGate.begin()
     }
 
-    private fun invalidateRestoreAttempts() {
+    private fun invalidateRestoreAttempts(errorCode: String = "cancelled") {
+        bridgeSessionRenewal.cancel(errorCode = errorCode)
         restoreAttemptGate.invalidate()
         connectionCenterStatus?.visibility = View.GONE
     }
@@ -2369,6 +2390,102 @@ class MainActivity : Activity() {
         pairingAttemptGate.invalidate()
     }
 
+    /** Trust restoration distinguishes an absent record from temporarily unreadable encrypted storage. */
+    private fun readPairedRestoreRecords(): List<PairedDeviceRecord>? = when (val current = pairedDeviceStore.read()) {
+        CredentialRead.Absent -> emptyList()
+        CredentialRead.Unreadable -> { showCredentialStorageFailure(); null }
+        is CredentialRead.Loaded -> current.value
+    }
+
+    /** Renew only the credential and document which requested the bridge operation. */
+    private fun renewSessionFromPage(
+        requestId: String,
+        browser: WebView,
+        origin: GatewayOrigin,
+        bridgeIsCurrent: () -> Boolean,
+        done: (Boolean, String?) -> Unit,
+    ) {
+        val documentGeneration = secureWebViewClient?.currentDocumentGeneration
+        if (!bridgeIsCurrent() || webView !== browser || gatewayOrigin != origin || documentGeneration == null
+            || fileChooserTransitions.active || isFinishing || isDestroyed
+            || !isDshDocumentUrl(origin, browser.url.orEmpty())) {
+            done(false, "cancelled")
+            return
+        }
+        if (recoveryStoppedBrowser === browser) {
+            done(false, "cancelled")
+            return
+        }
+        if (bridgeSessionRenewal.pending || pendingConnection != null || restoreAttemptGate.restorePending || recoveryScheduled) {
+            done(false, "busy")
+            return
+        }
+        val key = activeDeviceKey
+        val devices = readPairedRestoreRecords()
+        if (devices == null) {
+            done(false, "unavailable")
+            return
+        }
+        val device = devices.firstOrNull { it.key == key && it.origin == origin }
+        if (key == null || device == null) {
+            done(false, "no_credential")
+            return
+        }
+        if (device.status == PairedDeviceStatus.REVOKED || device.status == PairedDeviceStatus.EXPIRED
+            || device.status == PairedDeviceStatus.ADDRESS_CHANGED || device.expiresAt <= System.currentTimeMillis()) {
+            done(false, "authentication_failed")
+            return
+        }
+        val generation = beginRestoreAttempt()
+        // The existing connection owns the overall deadline and visible Stop action.
+        val attempt = startConnectionAttempt(device.mode, preserveBrowser = browser, keepVisibleDocument = true)
+        val request = bridgeSessionRenewal.begin(requestId) { errorCode -> done(errorCode == null, errorCode) }
+        if (request == null) {
+            finishConnectionAttempt(attempt)
+            done(false, "busy")
+            return
+        }
+        fun ownsDocument(): Boolean = bridgeSessionRenewal.isCurrent(request) && bridgeIsCurrent()
+            && webView === browser && gatewayOrigin == origin && activeDeviceKey == key
+            && secureWebViewClient?.currentDocumentGeneration == documentGeneration
+            && !fileChooserTransitions.active && !isFinishing && !isDestroyed
+            && isDshDocumentUrl(origin, browser.url.orEmpty())
+        try {
+            restoreTrustedDevice(
+                preferredOrigin = origin,
+                credential = device.credential(),
+                mode = device.mode,
+                generation = generation,
+                deviceKey = key,
+                preserveWebView = browser,
+                requestIsCurrent = ::ownsDocument,
+                allowOriginRediscovery = false,
+                onSessionInstalled = {
+                    finishConnectionAttempt(attempt)
+                    bridgeSessionRenewal.finish(request)
+                },
+                onUnavailable = {
+                    finishConnectionAttempt(attempt)
+                    bridgeSessionRenewal.finish(request, "unavailable")
+                },
+            ) { disposition ->
+                finishConnectionAttempt(attempt)
+                bridgeSessionRenewal.finish(request, if (disposition == RestoreFailureDisposition.RETRY_TRANSIENT) "transient" else "authentication_failed")
+            }
+        } catch (_: Exception) {
+            finishConnectionAttempt(attempt)
+            bridgeSessionRenewal.finish(request, "unavailable")
+        }
+    }
+
+    /** A new document withdraws the old page's native waiter and physical transport. */
+    private fun cancelPageSessionRenewal(requestId: String? = null) {
+        if (!bridgeSessionRenewal.cancel(requestId)) return
+        withdrawConnectionAttempt()
+        cancelAutomaticRecovery()
+        invalidateRestoreAttempts()
+    }
+
     private fun restoreTrustedDevice(
         preferredOrigin: GatewayOrigin,
         credential: DeviceCredential,
@@ -2377,9 +2494,20 @@ class MainActivity : Activity() {
         deviceKey: String? = null,
         preserveWebView: WebView? = null,
         claimSuccess: () -> Boolean = { true },
+        requestIsCurrent: () -> Boolean = { true },
+        allowOriginRediscovery: Boolean = true,
+        onSessionInstalled: (() -> Unit)? = null,
+        onUnavailable: (() -> Unit)? = null,
         onFailure: (RestoreFailureDisposition) -> Unit,
     ) {
-        val requestedDevice = deviceKey?.let { key -> pairedDeviceStore.load().firstOrNull { it.key == key } }
+        fun unavailable() {
+            restoreAttemptGate.completeRestore(generation)
+            if (onUnavailable != null) onUnavailable() else onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
+        }
+        val requestedDevice = if (deviceKey == null) null else {
+            val records = readPairedRestoreRecords() ?: run { unavailable(); return }
+            records.firstOrNull { it.key == deviceKey }
+        }
         if (deviceKey != null && (requestedDevice == null || requestedDevice.status == PairedDeviceStatus.REVOKED)) {
             finishConnectionAttempt()
             onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
@@ -2447,7 +2575,7 @@ class MainActivity : Activity() {
             var session = renew(selectedOrigin)
             var disposition = ConnectionRestorePolicy.failureDisposition(lastFailure, instanceMismatch)
             if (generation != restoreGeneration) return@restore
-            if (session == null && mode == AccessMode.LAN && disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
+            if (session == null && allowOriginRediscovery && mode == AccessMode.LAN && disposition == RestoreFailureDisposition.RETRY_TRANSIENT) {
                 val found = runCatching { LanDiscovery.scan(this, cancellation = attempt.cancellation) }.getOrDefault(emptyList())
                     .singleOrNull { it.instanceId == credential.instanceId }
                 if (generation != restoreGeneration) return@restore
@@ -2462,16 +2590,18 @@ class MainActivity : Activity() {
             val finalDisposition = disposition
             val failureKind = (lastFailure as? NativeAuthFailure)?.kind
             runOnUiThread(restoreAttemptGate.callback(generation) {
-                if (isFinishing || isDestroyed || !connectionAttempts.isCurrent(attempt)) {
+                if (isFinishing || isDestroyed || !connectionAttempts.isCurrent(attempt) || !requestIsCurrent()) {
                     restoreAttemptGate.completeRestore(generation)
                     return@callback
                 }
                 if (deviceKey != null) {
-                    val current = pairedDeviceStore.load().firstOrNull { it.key == deviceKey }
+                    val records = readPairedRestoreRecords() ?: run { unavailable(); return@callback }
+                    val current = records.firstOrNull { it.key == deviceKey }
                     if (current == null || requestedDevice == null ||
                         !PairedDeviceStatusPolicy.mayApplyResult(current, requestedDevice)
                     ) {
                         restoreAttemptGate.completeRestore(generation)
+                        onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
                         return@callback
                     }
                 }
@@ -2497,8 +2627,7 @@ class MainActivity : Activity() {
                     }
                     accessMode = mode
                     if (savePairedDevice(mode, selectedOrigin, renewed, credential) == null) {
-                        restoreAttemptGate.completeRestore(generation)
-                        onFailure(RestoreFailureDisposition.REQUIRE_USER_ACTION)
+                        unavailable()
                         return@callback
                     }
                     warnIfTailscale(selectedOrigin)
@@ -2506,10 +2635,12 @@ class MainActivity : Activity() {
                     installNativeSession(
                         origin = selectedOrigin,
                         session = renewed,
-                        isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) },
+                        isCurrent = { restoreAttemptGate.isCurrent(generation) && connectionAttempts.isCurrent(attempt) && requestIsCurrent() },
+                        onFailure = ::unavailable,
                     ) {
                         restoreAttemptGate.completeRestore(generation)
-                        if (preserveWebView == null) {
+                        if (onSessionInstalled != null) onSessionInstalled()
+                        else if (preserveWebView == null) {
                             failureDialog?.dismiss()
                             showBrowser(selectedOrigin, credential.caCertificate)
                         }
@@ -2764,6 +2895,7 @@ class MainActivity : Activity() {
             val listener = object : androidx.webkit.NavigationListener {
                 override fun onNavigationStarted(navigation: androidx.webkit.Navigation) {
                     if (ownsBrowser() && !navigation.isSameDocument && fileChooserTransitions.begin(navigation)) {
+                        cancelPageSessionRenewal()
                         withdrawPageReadiness()
                         invalidateWebFileChooser()
                     }
@@ -2781,6 +2913,7 @@ class MainActivity : Activity() {
             origin = origin,
             onBeforeTopLevelNavigation = {
                 if (ownsBrowser() && fileChooserNavigationListener == null) {
+                    cancelPageSessionRenewal()
                     withdrawPageReadiness()
                     cancelWebFileChooser()
                 }
@@ -2800,6 +2933,7 @@ class MainActivity : Activity() {
             },
             onTopLevelUrlChanged = {
                 if (ownsBrowser()) {
+                    cancelPageSessionRenewal()
                     withdrawPageReadiness()
                     if (fileChooserNavigationListener == null) invalidateWebFileChooser()
                     displayScale.onDocumentStarted()
@@ -2873,6 +3007,10 @@ class MainActivity : Activity() {
                 preferences.edit().putInt(PREFERENCE_WEB_CHROME_COLOR, color).apply()
             }
             bridge.onDeviceRevoked = ::handleDeviceRevoked
+            bridge.onRenewSession = { requestId, isCurrent, done ->
+                renewSessionFromPage(requestId, browser, origin, isCurrent, done)
+            }
+            bridge.onCancelRenewSession = ::cancelPageSessionRenewal
             bridge.onSwitchComputer = ::showDeviceList
             bridge.onOpenTaskNotificationSettings = ::openTaskNotificationSettings
             bridge.onGetDisplayScale = { displayScale.percent }
@@ -3231,6 +3369,7 @@ class MainActivity : Activity() {
     }
 
     private fun destroyWebView(changingConfigurations: Boolean = false, rendererGone: Boolean = false) {
+        cancelPageSessionRenewal()
         invalidateWebFileChooser()
         cancelPendingWebBack()
         secureWebViewClient?.dispose()

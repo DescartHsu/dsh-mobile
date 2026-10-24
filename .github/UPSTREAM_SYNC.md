@@ -17,6 +17,18 @@ The workflow never force-pushes, automatically merges, creates tags or publishes
 无更新时不创建 PR。分叉会停止同步，合并冲突会使检查失败，需要人工处理。
 不会强制推送、自动合并或发布版本。
 
+Before pushing upstream commits to `main`, a checksum-pinned Gitleaks scanner
+checks the incoming history (including merge diffs) with its built-in rules.
+Findings and scanner failures stop the push. Logs redact detected values; no
+scan reports are uploaded. Test fixtures can produce false positives: inspect
+each finding rather than excluding all test/config files. This is a detection
+layer, not proof that every possible secret format will be recognized.
+
+更新 `main` 前使用校验过下载哈希的 Gitleaks 扫描新增提交（含合并差异）。
+命中疑似密钥或扫描失败就停止推送；日志隐藏具体值，不上传扫描报告。
+测试样例误报需逐项核查，不整体排除测试和配置目录。扫描不能保证识别所有秘密格式。
+定制提交和推送也必须遵守 `AGENTS.md` 中的敏感信息检查规则。
+
 Integration validation tests the exact upstream SHA merged into the captured
 custom SHA in an ephemeral runner. It runs `npm run verify`, Go tests/vet and
 Android lint/unit tests/debug assembly. Project code runs with read-only

@@ -16,6 +16,19 @@ if ! git merge-base --is-ancestor "$old_main" "$head"; then
   exit 1
 fi
 if [[ "$old_main" != "$head" ]]; then
+  # Scan every incoming commit before any remote mutation, including merge diffs.
+  # Explicit built-in rules prevent incoming files from weakening the scanner.
+  scanner_config="$RUNNER_TEMP/upstream-gitleaks.toml"
+  printf '[extend]\nuseDefault = true\n' > "$scanner_config"
+  scanner_ignore="$RUNNER_TEMP/upstream-gitleaks.ignore"
+  : > "$scanner_ignore"
+  if ! gitleaks git . --config "$scanner_config" \
+    --gitleaks-ignore-path "$scanner_ignore" --ignore-gitleaks-allow \
+    --log-opts="--full-history --diff-merges=first-parent $old_main..$head" \
+    --redact=100 --no-banner; then
+    echo '::error::Secret scan failed. Review redacted findings before syncing; main was not updated.'
+    exit 1
+  fi
   git push origin "$head:refs/heads/main"
 fi
 

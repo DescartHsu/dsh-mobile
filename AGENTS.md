@@ -20,3 +20,13 @@ conflicts. Never force-push, hard-reset or discard custom changes without explic
 user confirmation. Report changed files, reasons and actual checks performed.
 The daily sync creates review PRs, not automatic custom-branch merges; see
 [Fork maintenance](.github/UPSTREAM_SYNC.md).
+
+Before every commit or push, inspect the staged diff and outgoing commit range
+for passwords, API keys, access/refresh tokens, private keys, signing keystores,
+real pairing data, `.env` files and credential-bearing URLs. Run a secret scanner
+with fully redacted output when available. Never print suspected secret values
+or upload raw scan reports. Environment-variable names and secret references are
+not credential values. Investigate findings individually; never blanket-exclude
+tests or config directories. Stop publication on an unresolved finding. If a
+real credential is already public, report its location without its value and
+request revocation/rotation; deletion alone does not remove it from Git history.

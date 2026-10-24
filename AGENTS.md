@@ -9,3 +9,14 @@ Preserve original contributor commits, unrelated local changes, stored pairings 
 Maintain the skill when demonstrated behavior invalidates its guidance or reveals a reusable maintenance lesson. Link the owning source, test or guide; replace superseded advice rather than accumulating contradictory rules. Keep current versions, pending tasks and one-off test results in their existing owners, not in the skill. Do not add a new rule for a purely local or mechanical edit.
 
 Agents that do not read `AGENTS.md` automatically should load the skill explicitly. This repository entrypoint does not install global agent settings or authorize background actions.
+
+## Fork-specific branch policy
+
+For `DescartHsu/dsh-mobile`, develop custom changes on `my-custom` or branches
+based on it. Keep `main` an upstream-only mirror of `saya-ch/dsh-mobile:main`.
+Check Git status before edits, preserve custom behavior and unrelated local work,
+and review upstream diffs before integration. Ask about ambiguous business-logic
+conflicts. Never force-push, hard-reset or discard custom changes without explicit
+user confirmation. Report changed files, reasons and actual checks performed.
+The daily sync creates review PRs, not automatic custom-branch merges; see
+[Fork maintenance](.github/UPSTREAM_SYNC.md).

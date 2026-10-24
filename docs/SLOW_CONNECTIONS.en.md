@@ -2,6 +2,8 @@
 
 [中文](SLOW_CONNECTIONS.md)
 
+For Cloudflare-only stalls accompanied by repeated QUIC timeouts, see the [HTTP/2 diagnosis, configuration and rollback guide](CLOUDFLARE_TUNNEL.en.md#repeated-quic-timeouts-and-stalled-plugin-loading).
+
 The remote page may open and `/mobile-access/health` may respond normally while DSH stays on “Reconnecting” or delays model and Workspace lists. HTTP reachability only shows that requests pass through; DSH's live data also needs a WebSocket connection to finish initialization and remain connected.
 
 Start with the actual channel rather than treating every delay as a DSH heartbeat problem. [Cloudflare Quick Tunnels](CLOUDFLARE_TUNNEL.en.md#quick-tunnel-feature-limits) do not support SSE, so completion or online-revocation notices may be missing; an external proxy's [Backend listening](SELF_HOSTED_ORIGIN.en.md#state-and-phone-verification) only confirms its private HTTP listener; [Managed Caddy](CADDY_MANAGED.en.md#requirements) needs Tencent Cloud DNSPod validation and real public HTTPS ingress, which DNS-01 cannot create through CGNAT. Check ingress, certificates, authentication, WebSockets, and notification streams separately before lengthening timeouts.

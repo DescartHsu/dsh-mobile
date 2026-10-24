@@ -40,6 +40,9 @@ const RESERVED_CLOUDFLARED_LABELS: readonly string[] = Object.freeze(['api', 'ww
 /** Product-facing states for the optional cloudflared remote transport. */
 export type CloudflaredState = 'off' | 'unavailable' | 'starting' | 'connecting' | 'ready' | 'error'
 
+/** Connector-to-edge transport; omission preserves cloudflared's own configuration. */
+export type CloudflaredTransportProtocol = 'auto' | 'quic' | 'http2'
+
 /** Safe cloudflared state returned only through the loopback DSH control route. */
 export interface CloudflaredStatus {
   readonly enabled: boolean
@@ -52,6 +55,7 @@ export interface CloudflaredStatus {
 export interface CloudflaredControllerOptions {
   readonly store: MobileAccessControlStore
   readonly executable: string
+  readonly protocol?: CloudflaredTransportProtocol
   /** Named-tunnel configuration; quick tunnels are used when it reports quick mode. */
   readonly tunnel: { settings(): CloudflaredTunnelSettings }
   readonly createGateway: (origin: string, listenPort: number) => Promise<MobileAccessGateway>
@@ -201,6 +205,9 @@ export class CloudflaredController implements RemoteProviderController {
   private startupRounds = 0
 
   constructor(private readonly options: CloudflaredControllerOptions) {
+    if (options.protocol !== undefined && !['auto', 'quic', 'http2'].includes(options.protocol)) {
+      throw new Error('cloudflared_protocol_invalid')
+    }
     if (!isAbsolute(options.executable)) {
       throw new Error('cloudflared executable path must be absolute')
     }
@@ -353,9 +360,10 @@ export class CloudflaredController implements RemoteProviderController {
     // The local DSH remote gateway speaks plain HTTP, so neither flavour needs an
     // origin TLS override. A named tunnel takes its token from the environment so
     // the credential never appears in the process command line.
+    const protocolArgs = this.options.protocol === undefined ? [] : ['--protocol', this.options.protocol]
     const args = named === undefined
-      ? ['tunnel', '--url', `http://127.0.0.1:${String(reservation.port)}`, '--no-autoupdate']
-      : ['tunnel', '--no-autoupdate', 'run']
+      ? ['tunnel', '--url', `http://127.0.0.1:${String(reservation.port)}`, '--no-autoupdate', ...protocolArgs]
+      : ['tunnel', '--no-autoupdate', ...protocolArgs, 'run']
     const environment = withoutProxyEnvironment(process.env)
     if (named !== undefined) environment.TUNNEL_TOKEN = named.token
     const child = (this.options.spawnProcess ?? spawnCloudflaredProcess)(

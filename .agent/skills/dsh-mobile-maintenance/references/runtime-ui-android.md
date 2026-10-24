@@ -42,6 +42,8 @@ Managed Caddy build/review/distribution and runtime installation are separate st
 
 ## Connectivity and remote performance
 
+When LAN boot succeeds but remote boot resources stall alongside repeated cloudflared QUIC inactivity timeouts, compare HTTP/2 and verify the complete boot plus authenticated WebSocket. Do not infer the cause from fake-IP DNS alone. Keep plugin-scoped protocol selection distinct from account-wide cloudflared config; see `docs/CLOUDFLARE_TUNNEL.md` and its English counterpart for version limits and rollback.
+
 Check the chain that matters: actual computer process → local gateway → public Origin → static boot resources → authenticated API → WebSocket Workspace reads. A health response, TLS handshake or screenshot of a login page is not full remote acceptance. If the same public URL is slow on the computer, separate provider/network limits from App rendering.
 
 Independent pnpm profile paths can still share hardlinked package files. Installing another profile can change an existing file's `ctime` without changing its bytes; DSH's metadata-based HMR revision can then change during mobile boot. The owned profiles in `scripts/mobile-boot-fixture.mjs` use `packageImportMethod: copy` to isolate file metadata. `scripts/probe-pnpm-client-metadata.mjs` retains an explicit `auto` control and records actual dev/inode/link counts, file hashes and live registry revisions; separate path strings alone are not isolation evidence.

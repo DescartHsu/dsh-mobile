@@ -11,6 +11,7 @@ import {
   CloudflaredController,
   isCloudflaredRegistration,
   type CloudflaredStatus,
+  type CloudflaredTransportProtocol,
   parseCloudflaredOrigin,
 } from '../src/cloudflared.js'
 import type { CloudflaredTunnelSettings } from '../src/cloudflared-tunnel.js'
@@ -106,6 +107,7 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 async function fixture(
   createGateway: (origin: string, port: number) => Promise<MobileAccessGateway>,
   settings: CloudflaredTunnelSettings = { version: 1, mode: 'quick' },
+  protocol?: CloudflaredTransportProtocol,
 ): Promise<{
   readonly child: FakeChild
   readonly controller: CloudflaredController
@@ -127,6 +129,7 @@ async function fixture(
     executable,
     createGateway,
     tunnel: { settings: () => settings },
+    ...(protocol === undefined ? {} : { protocol }),
     onStatus: journal.publish,
     spawnProcess: (_executable, args, environment) => {
       startedArgs = [...args]
@@ -376,6 +379,44 @@ function namedSettings(port: number): CloudflaredTunnelSettings {
 const NAMED_ORIGIN = `https://${NAMED_HOSTNAME}`
 
 describe('cloudflared named tunnel', () => {
+  it.each(['auto', 'quic', 'http2'] as const)('passes %s before run without exposing the named token', async protocol => {
+    const port = await freeLoopbackPort()
+    const { child, controller, journal, args, environment } = await fixture(
+      async (origin, listenPort) => gateway(origin, listenPort), namedSettings(port), protocol,
+    )
+    expect(args()).toEqual(['tunnel', '--no-autoupdate', '--protocol', protocol, 'run'])
+    expect(args().join(' ')).not.toContain(NAMED_TOKEN)
+    expect(environment().TUNNEL_TOKEN).toBe(NAMED_TOKEN)
+    child.stderr.write(`INF Registered tunnel connection connIndex=0 protocol=${protocol}\n`)
+    await journal.waitFor(status => status.state === 'ready')
+    expect(controller.gateway()?.address()).toMatchObject({ origin: NAMED_ORIGIN, port })
+  })
+
+  it('supports HTTP/2 for quick tunnels while preserving their loopback gateway', async () => {
+    const { child, journal, args } = await fixture(
+      async (origin, port) => gateway(origin, port), { version: 1, mode: 'quick' }, 'http2',
+    )
+    expect(args()).toEqual(['tunnel', '--url', expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u), '--no-autoupdate', '--protocol', 'http2'])
+    child.writeBanner('https://test-http2.trycloudflare.com')
+    await journal.waitFor(status => status.state === 'ready')
+  })
+
+  it('leaves transport selection to cloudflared when no override is configured', async () => {
+    const { args } = await fixture(async (origin, port) => gateway(origin, port))
+    expect(args()).not.toContain('--protocol')
+  })
+
+  it.each(['http', '', '--token', null, 123])('rejects invalid transport %j before spawning', protocol => {
+    const spawnProcess = vi.fn()
+    expect(() => new CloudflaredController({
+      store: new MemoryControlStore(), executable: join(tmpdir(), 'cloudflared.exe'),
+      tunnel: { settings: () => ({ version: 1, mode: 'quick' }) },
+      createGateway: async (origin, port) => gateway(origin, port), spawnProcess,
+      protocol: protocol as CloudflaredTransportProtocol,
+    })).toThrow('cloudflared_protocol_invalid')
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
   it('recognizes the registration line real cloudflared prints', () => {
     expect(isCloudflaredRegistration('2026-09-16T11:18:10Z INF Registered tunnel connection connIndex=0 connection=645e1fe2-9ac7-4a17-bc65-4cc7be9d7d67 event=0 ip=198.18.0.181 location=sin08 protocol=quic')).toBe(true)
     expect(isCloudflaredRegistration('INF Connection 1f2035b6-c61f-401b-86fc-260e9955f6ae registered connIndex=1')).toBe(true)

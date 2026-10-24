@@ -2,6 +2,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
+import type { CloudflaredTransportProtocol } from './cloudflared.js'
 import { isIP } from './ip.js'
 import { isLoopbackAddress, parseAuthority, parseCidr, type AuthoritySpec, type ParsedCidr } from './network.js'
 import { normalizeWebSocketPaths } from './websocket-paths.js'
@@ -93,6 +94,8 @@ export interface PluginConfig {
   cpolarSubdomain?: string
   /** cpolar region for `-region`; use the region chosen when reserving the subdomain. */
   cpolarRegion?: string
+  /** Optional connector-to-edge transport override for quick and named Cloudflare tunnels. */
+  cloudflaredProtocol?: CloudflaredTransportProtocol
   pairingTtlMs?: number
   deviceTtlMs?: number
   sessionTtlMs?: number
@@ -199,6 +202,7 @@ export const Config: z<PluginConfig> = z.object({
   }),
   cpolarSubdomain: z.string(),
   cpolarRegion: z.string(),
+  cloudflaredProtocol: z.union([z.const('auto'), z.const('quic'), z.const('http2')]),
   pairingTtlMs: z.natural(),
   deviceTtlMs: z.natural(),
   sessionTtlMs: z.natural(),

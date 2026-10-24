@@ -15,6 +15,18 @@ const stateFile = join(tmpdir(), 'dsh-mobile-access-config-test.json')
 const controlFile = join(tmpdir(), 'dsh-mobile-access-control-test.json')
 
 describe('gateway configuration', () => {
+  it('validates the optional Cloudflare transport without choosing a default', () => {
+    const base = { stateFile, controlFile, initiallyEnabled: false, tls: { mode: 'disabled' as const } }
+    expect(Config(base).cloudflaredProtocol).toBeUndefined()
+    for (const cloudflaredProtocol of ['auto', 'quic', 'http2'] as const) {
+      expect(Config({ ...base, cloudflaredProtocol }).cloudflaredProtocol).toBe(cloudflaredProtocol)
+    }
+    // Schemastery passes nullable inputs through; the controller rejects explicit null.
+    for (const cloudflaredProtocol of ['http', '', 'HTTP2', 123, false]) {
+      expect(() => Config({ ...base, cloudflaredProtocol: cloudflaredProtocol as never })).toThrow()
+    }
+  })
+
   it.each(['typo', 'http', '', null, 0, 1, true, false, [], {}])('rejects unknown TLS mode %j instead of selecting a plaintext public listener', mode => {
     expect(() => parseGatewayConfig({
       stateFile, listenHost: '0.0.0.0', publicAuthorities: ['gateway.example.com'], allowedCidrs: ['127.0.0.0/8'],

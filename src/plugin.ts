@@ -769,6 +769,7 @@ export async function apply(ctx: Context, config: PluginConfig): Promise<void> {
       store: cloudflaredStore,
       executable: cloudflaredComponent.executable,
       tunnel: cloudflaredTunnel,
+      ...(config.cloudflaredProtocol === undefined ? {} : { protocol: config.cloudflaredProtocol }),
       createGateway: createRemoteGateway,
     }),
     frp: new FrpController({

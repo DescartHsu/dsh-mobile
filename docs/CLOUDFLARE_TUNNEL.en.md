@@ -100,6 +100,26 @@ The old address may show **Address may have changed** or temporarily unreachable
 
 ## Troubleshooting
 
+### Repeated QUIC timeouts and stalled plugin loading
+
+If LAN access works but the same remote boot resource stalls on both the computer and phone, correlate that request with cloudflared logs. Repeated `timeout: no recent network activity` or `accept stream listener error` on QUIC connections justify comparing HTTP/2. A registered tunnel or health response alone does not prove boot resources and WebSockets work; a proxy or fake-IP DNS answer alone does not establish the cause.
+
+**Source builds containing this change** support optional `cloudflaredProtocol`; published plugin 0.6.16 does not read it. Back up the active profile's `cordis.patch.yml`, then add this field inside the existing complete `mobile-access` entry's `config`:
+
+```yaml
+cloudflaredProtocol: http2
+```
+
+This is a fragment, not a complete patch. The loader replaces the entry's entire `config`: preserve all current paths, TLS and other settings. Standard installations without an override can follow the [complete configuration pattern](CPOLAR_SUBDOMAIN.en.md#configuration), retaining the bundle's fields and adding this field instead of the cpolar fields. Do not create another plugin instance or put tunnel tokens in the profile.
+
+Accepted values are `auto`, `quic` and `http2`. An explicit value becomes `cloudflared tunnel --protocol …` for both quick and named tunnels, overriding cloudflared's environment/config-file selection. Omission emits no protocol flag, preserving existing behavior including external configuration. This changes only the connector-to-Cloudflare transport, not phone HTTPS, gateway authorization or TLS checks. See [Cloudflare's protocol documentation](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/#protocol).
+
+Restart DSH after changing the profile. Verify a fresh remote page enters the application, compare a complete boot-resource download, and check that the authenticated WebSocket stays connected. To undo the override, remove only `cloudflaredProtocol` and restart. Explicit `auto` differs from omission when external configuration already selects HTTP/2.
+
+**Existing 0.6.16 installations:** cloudflared can read `protocol: http2` from the running account's `~/.cloudflared/config.yml` (Windows: `%USERPROFILE%\.cloudflared\config.yml`). Back up an existing file and change only its `protocol` key, preserving credentials and ingress rules. Reconnect and verify the actual connector uses HTTP/2; explicit CLI flags or `TUNNEL_TRANSPORT_PROTOCOL` may take precedence. This account-wide workaround can affect other cloudflared instances and can interfere with quick tunnels; prefer the plugin-scoped setting once a build containing it is installed. To undo it, restore the prior protocol value or remove the added key; remove a newly created file only if it still contains solely this workaround. This comparison does not require re-pairing or deleting phone data.
+
+### Other connection problems
+
 - **Stuck on "connecting"**: the named tunnel becomes ready only after the connector registers with Cloudflare. Check cloudflared output in the DSH log and test DNS, UDP/QUIC and TCP reachability from the computer to a Cloudflare edge.
 - **Public access returns 1033**: Cloudflare sees no healthy connector for the hostname. Confirm the dashboard reports Healthy and the route's Service port matches the panel.
 - **`cloudflared` reports `Unauthorized`, or the tunnel id does not exist**: the token belongs to a different tunnel, for example one that was deleted and recreated. Copy the token again.

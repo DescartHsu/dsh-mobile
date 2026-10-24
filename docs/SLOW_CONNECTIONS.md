@@ -2,6 +2,8 @@
 
 [English](SLOW_CONNECTIONS.en.md)
 
+仅 Cloudflare 远程访问卡住、同时出现 QUIC 反复超时时，参见 [HTTP/2 排查、配置和回退说明](CLOUDFLARE_TUNNEL.md#quic-反复超时插件加载卡住)。
+
 远程页面能打开、`/mobile-access/health` 返回正常，仍可能出现“重连中”、模型或工作区迟迟不显示。HTTP 可达只说明请求能通过；DSH 的实时数据还需要 WebSocket 连接完成初始化并保持在线。
 
 先按实际通道排查，不要把所有等待都归因于 DSH 心跳。[Cloudflare 快速隧道](CLOUDFLARE_TUNNEL.md#快速隧道的功能限制)不支持 SSE，可能缺少完成提醒或在线撤销提示；[自备反向代理](SELF_HOSTED_ORIGIN.md#状态与手机验证)的「后端已监听」只说明私有 HTTP 端口启动；[托管 Caddy](CADDY_MANAGED.md#适用条件)需要腾讯云 DNSPod 验证和真正的公网 HTTPS 入站，DNS-01 不能打通 CGNAT。分别检查入口、证书、认证、WebSocket 与通知流，避免只增大超时掩盖前一层故障。

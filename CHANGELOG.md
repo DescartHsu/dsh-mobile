@@ -2,6 +2,10 @@
 
 Notable changes are recorded here. GitHub Releases provide the downloadable packages and generated commit notes.
 
+## Unreleased
+
+- Add an optional `cloudflaredProtocol` profile setting for quick and named tunnels. Networks with repeated QUIC timeouts can select HTTP/2 without changing other cloudflared instances; omission preserves existing transport selection. Include bilingual diagnosis and rollback instructions.
+
 ## 0.6.16 - 2026-10-22
 
 - Support App 0.6.7's optional same-computer LAN/remote switching with authenticated installation grouping and limited same-Session plain-text draft transfer through public DSH APIs. Independently paired endpoints keep separate credentials and CA pins; conflicts and unsupported editor state are not silently migrated. Stop disposed draft observers from subscribing again. Thanks @abworks-dev for [#252](https://github.com/saya-ch/dsh-mobile/pull/252).

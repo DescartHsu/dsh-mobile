@@ -100,6 +100,26 @@ Cloudflare 提供公网域名与 TLS，插件在本机运行 `cloudflared`，把
 
 ## 排错
 
+### QUIC 反复超时、插件加载卡住
+
+如果局域网正常，但电脑和手机访问同一个远程启动资源都卡住，应把请求与 cloudflared 日志对应起来。QUIC 连接反复出现 `timeout: no recent network activity` 或 `accept stream listener error` 时，可以对照测试 HTTP/2。隧道注册或健康检查成功，不代表启动资源和 WebSocket 正常；仅凭代理或 fake-IP DNS 响应也不能确定原因。
+
+**包含本次修改的源码构建**支持可选的 `cloudflaredProtocol`；已发布插件 0.6.16 不读取此字段。先备份当前 profile 的 `cordis.patch.yml`，再将下面字段添加到现有 `mobile-access` 条目的完整 `config` 内：
+
+```yaml
+cloudflaredProtocol: http2
+```
+
+这只是配置片段，不是完整补丁。Loader 会替换条目的整个 `config`，必须保留现有路径、TLS 和其他设置。标准安装尚无覆盖条目时，参考[完整配置示例](CPOLAR_SUBDOMAIN.md)，保留 bundle 原有字段，以本字段代替示例中的 cpolar 字段。不要创建第二个插件实例，也不要将隧道 token 放入 profile。
+
+允许值为 `auto`、`quic` 和 `http2`。显式设置后，插件为临时和命名隧道传入 `cloudflared tunnel --protocol …`，优先于 cloudflared 的环境变量和配置文件。省略字段时不传协议参数，保持现有行为，包括外部配置。本项只改变电脑连接 Cloudflare 的传输协议，不改变手机 HTTPS、网关鉴权或 TLS 校验。参见 [Cloudflare 协议文档](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/#protocol)。
+
+保存后重启 DSH。使用新的远程页面确认能进入应用，对比完整启动资源下载，并确认已鉴权的 WebSocket 持续连接。回退时只移除 `cloudflaredProtocol` 并重启。外部配置已选择 HTTP/2 时，显式设置 `auto` 与省略字段不同。
+
+**现有 0.6.16 安装：**可让 cloudflared 读取运行账户的 `~/.cloudflared/config.yml`（Windows 为 `%USERPROFILE%\.cloudflared\config.yml`），设置 `protocol: http2`。已有文件必须先备份，只修改 `protocol`，保留凭证和 ingress 规则。重新连接后确认实际进程使用 HTTP/2；显式命令行参数或 `TUNNEL_TRANSPORT_PROTOCOL` 可能优先。此账户级变通方法可能影响其他 cloudflared 实例，并可能干扰临时隧道，安装包含新功能的构建后优先使用插件级设置。回退时恢复原协议值或移除新增字段；仅当新建文件仍只包含此次配置时才删除该文件。协议对照测试无需重新配对或删除手机数据。
+
+### 其他连接问题
+
 - **连接一直停在「正在连接」**：命名隧道只有在 connector 向 Cloudflare 注册后才显示就绪。检查 DSH 日志中的 cloudflared 输出，以及本机到 Cloudflare 边缘的 DNS、UDP/QUIC 和 TCP 连通性。
 - **公网访问返回 1033**：Cloudflare 认为该主机名没有健康的 connector。确认隧道在控制台显示 Healthy，且路由的 Service 端口与面板一致。
 - **`cloudflared` 报 `Unauthorized` 或隧道 ID 不存在**：令牌与控制台里的隧道不匹配（例如隧道被删除后重建）。重新复制令牌。
